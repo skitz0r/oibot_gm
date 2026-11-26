@@ -6,7 +6,7 @@ import { EventHead } from "./shared";
 import { EventMore } from "./EventMore";
 import css from "../../pages/listpage.module.css";
 
-/** A finished or cancelled event: its start and state, Details (Lineup, Comes from, Rostered, Ended) and Activity —
+/** A finished or cancelled event: its start and state, Details (Lineup, Schedule, Rostered, Ended) and Activity —
  *  read only, but for Reopen (in More) on an event ended by mistake within the hour, as the old history drawer
  *  had it. The board as it was locked sits between Details and Activity. */
 export function HistoryView({ ev, meta, onChanged }: { ev: EventView; meta: Meta; onChanged: () => void }) {

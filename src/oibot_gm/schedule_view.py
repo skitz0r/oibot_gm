@@ -11,7 +11,7 @@ from datetime import datetime
 
 from . import consequences as cq
 from . import raidcycle as rc
-from .constants import PAGE_WORDS, hours_words
+from .constants import PAGE_WORDS, field_help, hours_words
 from .presets import CADENCE_FIELDS, PRESETS
 from .registry import (
     ADHOC_DEFAULTS,
@@ -43,8 +43,10 @@ ASK_CHOICES = (1, 2, 3, 4, 6, 8, 12, 24)
 MAX_WEIGHT = 6  # a priority weight's highest choice (the Raids page's Priority selects too)
 
 
-def _fact(label: str, value: str, href: str | None = None) -> dict:
-    return {"label": label, "value": value, **({"href": href} if href else {})}
+def _fact(label: str, value: str, href: str | None = None, *, hint: str | None = None) -> dict:
+    """A Details row; `hint` = the setting the editor puts a (?) beside (constants.field_help: the same sentence here)."""
+    h = field_help(hint, label) if hint else None
+    return {"label": label, "value": value, **({"href": href} if href else {}), **({"help": h} if h else {})}
 
 
 def _cap(text: str) -> str:
@@ -266,14 +268,15 @@ def schedule_json(reg: Registry, rs: "rc.RaidStore", sid: str, now: datetime | N
     starts = [] if gone or pickup else rc.next_runs_of(reg, s["raid"], s, NEXT_EVENTS, now)
     lineup = _lineup(reg, s, starts[0] if starts else None)
 
+    F = PAGE_WORDS["schedule_fields"]  # a row naming an editor's setting reads the editor's label (the owner, 2026-11-25)
     details = [_fact("Repeats", repeats_words(reg, s, full=True))]
     if not pickup and not gone:
         first = reg.local12(starts[0]) if starts else PAGE_WORDS["no_times"]
         details.append(_fact("First event" if active else "Next event if resumed", first))
     details += [_fact("Priority", rc.priority_words(reg, {"kind": s.get("kind"), "weights": sd.get("weights")})),
-                _fact("Confirmation", rc.confirmation_words(bool(sd.get("confirm"))))]
+                _fact(F["confirm"], rc.confirmation_words(bool(sd.get("confirm"))), hint="confirm")]
     if not pickup:
-        details.append(_fact("Open seats after the lock", PAGE_WORDS["bot_asks"] if sd.get("autofill") else PAGE_WORDS["officer_asks"]))
+        details.append(_fact(F["autofill"], PAGE_WORDS["bot_asks" if sd.get("autofill") else "officer_asks"], hint="autofill"))
     if len(lineup) > 1:
         details.append(_fact("Answers", PAGE_WORDS["answers_one"]))
 
@@ -282,7 +285,7 @@ def schedule_json(reg: Registry, rs: "rc.RaidStore", sid: str, now: datetime | N
 
     open_n = len(reg.schedule_runs_open(sid, rs))
     timing = [_fact("Sheet opens", before(sd["signup_lead_hours"])),
-              _fact("Reminder", before(sd["nudge_hours_before"]) if sd.get("nudge") else PAGE_WORDS["no_reminder"]),
+              _fact("Reminder", before(sd["nudge_hours_before"]) if sd.get("nudge") else PAGE_WORDS["no_reminder"], hint="nudge"),
               _fact("Locks", before(sd["lock_hours_before"])),
               _fact("Confirm by", before(sd["confirm_hours_before"]) if sd.get("confirm") else PAGE_WORDS["not_asked"])]
     if active or open_n:

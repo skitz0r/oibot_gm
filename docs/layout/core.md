@@ -27,7 +27,9 @@ src/oibot_gm/
                        the "changed" line — /api/meta.confirm_words); PAGE_WORDS (§5.67 phase 4) = every value word of the Events, New event, Schedules
                        and Raids pages ONCE (the read models print them, /api/meta.page_words carries them, no page file holds one; `schedule_fields` /
                        `raid_fields` / `split` / `priority` = the settings' names the editors AND the Save box's diff lines share; `kinds` = a schedule's
-                       Repeats choice and `what_this_makes` = the lineup pages' section title — the site and Discord's wizards read both)
+                       Repeats choice and `what_this_makes` = the lineup pages' section title — the site and Discord's wizards read both;
+                       field_help(setting, label) = a view's Details row's (?) {key, text, about} from `schedule_field_help` / `help_about`, the
+                       editors' own sentence — event_view / schedule_view `_fact(…, hint=)`)
   conversation.py      plain-text memory (design §5.51): a ring per (guild, channel|DM, uid) of the last 4 exchanges, IN MEMORY only (a restart
                        forgets); recall = a Discord reply to the bot's message (any age) else the same person + place within 20 min; context_block =
                        ONE fenced <conversation> data block (unfence) → configops.parse / help.answer(conversation=); handle_change, plain_text,

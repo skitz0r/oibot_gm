@@ -13,7 +13,9 @@ frontend/              React + Mantine app (Vite). components/board/* (SheetCard
                        (box 20: guardNav / guardClick — the rail, every list pick and in-page Back ask "Leave without saving?" with /api/meta.leave's
                        sentence; beforeunload for the tab; browser Back is not guarded), components/ListPage.tsx (the list pages: a grouped list beside
                        the detail, list-then-detail by URL below sm; `intro`, `more`, `empty`, `notice` = one sentence above the list; an item without `to` is a plain row, never a link), components/Facts.tsx (Facts = the server's Details as a
-                       label / value grid with links, ViewSection), components/WhenPicker.tsx (clock12, QUARTER_HOURS, wallTime: a day from a calendar,
+                       label / value grid with links — a Fact's `help` draws FieldHelp after its label, the last word and the (?) kept on one line —,
+                       ViewSection), components/FieldHelp.tsx (THE (?): the server's sentence on a setting — hover, focus, tap, 44 px; the editors'
+                       switches (schedules/SettingsFields) and the view pages' Details rows (Facts, `inline`) share it — issue #13), components/WhenPicker.tsx (clock12, QUARTER_HOURS, wallTime: a day from a calendar,
                        a time in 15-minute steps; also the Raids page's First opens and the Test bench's Reschedule), components/lineup/LineupBuilder.tsx (THE lineup builder: up to lineup_max raids, rosters 1–4, starts
                        in 15-minute steps; StepNodes and the connectors) + LineupPicture.tsx (read-only), components/events/* (EventBoard = the raid
                        switch, Rosters / Placed / Short and BoardView variant="event" over the server's picture — working dimmed, failed with its

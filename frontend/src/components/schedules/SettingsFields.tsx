@@ -1,7 +1,6 @@
-import { useState } from "react";
-import { ActionIcon, Group, Input, Popover, SegmentedControl, Select, Stack, Switch, Text } from "@mantine/core";
-import { IconHelpCircle } from "@tabler/icons-react";
+import { Group, Input, SegmentedControl, Select, Stack, Switch } from "@mantine/core";
 import type { PageWords } from "../../api";
+import { FieldHelp } from "../FieldHelp";
 
 /** One setting's choices from the server ({value, words}: "5 days before", an ask's wait "2 hours"). */
 export type HourChoice = { value: number; words: string };
@@ -9,29 +8,6 @@ export type HourChoice = { value: number; words: string };
 export type TimingDraft = Record<string, number | boolean>;
 
 const SAME = "same";  // a select's "the raid's" choice: the draft holds "" (nothing of its own)
-
-/** The (?) beside a switch: the server's sentence on what the switch does (PAGE_WORDS schedule_field_help) — opens on
- *  hover, on keyboard focus and on a tap (a phone has no hover), closes on leaving, Escape or a tap elsewhere. A 44 px
- *  target; the bubble keeps inside a 400 px screen. */
-function FieldHelp({ label, text }: { label: string; text: string }) {
-  const [hover, setHover] = useState(false);
-  const [pinned, setPinned] = useState(false);
-  const opened = hover || pinned;
-  return (
-    <Popover opened={opened} onChange={(o) => { if (!o) { setHover(false); setPinned(false); } }} width={300} position="top" withArrow
-      shadow="md" withinPortal closeOnEscape closeOnClickOutside>
-      <Popover.Target>
-        <ActionIcon variant="subtle" color="gray" size={44} radius="xl" aria-label={label} aria-expanded={opened}
-          onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} onFocus={() => setHover(true)}
-          onBlur={() => { setHover(false); setPinned(false); }} onClick={() => setPinned((p) => !p)}
-          onKeyDown={(e) => { if (e.key === "Escape") { setHover(false); setPinned(false); } }}>
-          <IconHelpCircle size={18} />
-        </ActionIcon>
-      </Popover.Target>
-      <Popover.Dropdown role="tooltip" maw="calc(100vw - 32px)"><Text size="sm">{text}</Text></Popover.Dropdown>
-    </Popover>
-  );
-}
 
 /** The Sheet timing pieces the schedule editor and Edit event share (one component, two editors): an optional preset,
  *  then — as `shown(setting)` allows — when the sheet opens and locks, the reminder switch and its time, the lock's

@@ -92,7 +92,7 @@ def test_the_word_helpers(reg, rs):
     assert rc.priority_words(reg, ev) == "First to join"
     sid = tuesday(reg)
     assert rc.priority_words(reg, reg.schedule_def(HYJAL, sid)) == "Regulars first, then rank"
-    assert (rc.confirmation_words(True), rc.confirmation_words(False)) == ("Asked at the lock", "Not asked")
+    assert (rc.confirmation_words(True), rc.confirmation_words(False)) == ("Yes", "No")
     assert cq.count_words(3) == "three" and cq.count_words(11) == "11"
 
 

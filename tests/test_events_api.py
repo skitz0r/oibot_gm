@@ -175,11 +175,13 @@ def test_an_open_event_reads_by_its_sections(officer_client, reg, rs):
     ev = rc.open_run(reg, rs, HYJAL, start_in(reg, 3), by="t", lineup=EVENING)
     join(reg, rs, ev, people(reg)[:18])
     j = officer_client.get(f"/api/event/{rc.event_parts(rs, ev)[1].key}").json()
-    assert j["key"] == ev.key and [f["label"] for f in j["details"]] == ["Lineup", "Comes from", "Priority", "Confirmation", "Sheet opened", "Locks",
-                                                                        "Open seats after the lock", "Signup sheet"]
+    assert j["key"] == ev.key and [f["label"] for f in j["details"]] == ["Lineup", "Schedule", "Priority", "Lock Confirmation", "Sheet opened", "Locks",
+                                                                        "Automated Fill Requests", "Signup sheet"]
     facts = {f["label"]: f["value"] for f in j["details"]}
-    assert facts["Comes from"] == "One-off, no schedule" and facts["Lineup"] == "Hyjal Summit, then Barrow Deeps × 2"
-    assert (facts["Priority"], facts["Confirmation"]) == ("First to join", "Not asked")
+    assert facts["Schedule"] == "N/A" and facts["Lineup"] == "Hyjal Summit, then Barrow Deeps × 2"
+    assert (facts["Priority"], facts["Lock Confirmation"], facts["Automated Fill Requests"]) == ("First to join", "No", "On")
+    assert {f["label"]: f["help"]["key"] for f in j["details"] if "help" in f} == {"Lock Confirmation": "confirm", "Automated Fill Requests": "autofill"}, \
+        "the editor's (?) key on the rows the editor has one for, and on no other row"
     assert facts["Signup sheet"] == PAGE_WORDS["sheet_waits"], "no signup channel here: the fact says what it waits for"
     assert j["signups"]["joined"] == 18 and [p["label"] for p in j["parts"]][0].endswith("· Hyjal Summit")
     assert j["boxes"]["lock"]["verb"] == "Lock" and j["actions"]["edit_lineup"] is True
@@ -208,10 +210,10 @@ def test_a_scheduled_event_comes_from_its_schedule(officer_client, reg, rs):
     night = [t for s, t in rc.occurrences(reg, reg.now_local(), 24 * 7 * 8) if s["id"] == sid][0]
     ev = rc.open_run(reg, rs, HYJAL, night, by="t", schedule=sid)
     j = officer_client.get(f"/api/event/{ev.key}").json()
-    came = next(f for f in j["details"] if f["label"] == "Comes from")
-    assert came == {"label": "Comes from", "value": "Tuesday raid night", "href": f"/schedules/{sid}"}
+    came = next(f for f in j["details"] if f["label"] == "Schedule")
+    assert came == {"label": "Schedule", "value": "Tuesday raid night", "href": f"/schedules/{sid}"}
     assert j["kind"] == "scheduled" and j["schedule"] == {"id": sid, "name": "Tuesday raid night"}
-    assert {f["label"]: f["value"] for f in j["details"]}["Confirmation"] == "Asked at the lock"
+    assert {f["label"]: f["value"] for f in j["details"]}["Lock Confirmation"] == "Yes"
 
 
 def test_a_locked_event_adds_its_confirmations_and_open_seats(officer_client, reg, rs):
@@ -254,6 +256,9 @@ def test_an_events_raid_night_facts_come_from_its_runs(officer_client, reg, rs, 
     facts = {f["label"]: f["value"] for f in j["details"]}
     soft, _hard, confirm = run_times(reg, ev, rc.run_team(reg, ev))
     assert facts["Reminder"] == reg.local12(soft) and facts["Confirm by"] == reg.local12(confirm)
+    helps = {f["label"]: f["help"]["key"] for f in j["details"] if "help" in f}
+    assert helps == {"Lock Confirmation": "confirm", "Reminder": "nudge", "Automated Fill Requests": "autofill"}, \
+        "the editor's (?) on Reminder too; Confirm by and the raid-night rows have no editor hint"
     assert facts["Away that day"] == f"{ms[11].display_name} (work trip)"
     other = rc.open_run(reg, rs, RID, night, by="t")  # another event that same night, one of ours joined there too
     join(reg, rs, other, [ms[0]])
@@ -298,7 +303,7 @@ def test_a_finished_event_reads_as_history(officer_client, reg, rs):
     lock_with_board(reg, rs, ev, [m.display_name for m in ms])
     rc.end_run(reg, rs, ev, "t")
     j = officer_client.get(f"/api/event/{ev.key}").json()
-    assert [f["label"] for f in j["details"]] == ["Lineup", "Comes from", "Rostered", "Ended"]
+    assert [f["label"] for f in j["details"]] == ["Lineup", "Schedule", "Rostered", "Ended"]
     facts = {f["label"]: f["value"] for f in j["details"]}
     assert (facts["Lineup"], facts["Rostered"], facts["Ended"]) == ("Barrow Deeps", "10", reg.local12(ev.closed_at))
     assert j["chip"] == "finished" and j["boxes"] == {"lock": None, "cancel": None, "reschedule": None}
@@ -390,7 +395,9 @@ def test_a_coming_up_event_opens_by_hand_however_far_ahead(officer_client, reg, 
     r = officer_client.get(f"/api/event/coming/{sid}/{rc.occurrence_stamp(reg, far)}")
     assert r.status_code == 200, r.text
     j = r.json()
-    assert [f["label"] for f in j["details"]] == ["Lineup", "Comes from", "Priority", "Confirmation", "Sheet opens", "Locks"]
+    assert [f["label"] for f in j["details"]] == ["Lineup", "Schedule", "Priority", "Lock Confirmation", "Sheet opens", "Locks"]
+    assert {f["label"]: f.get("help") for f in j["details"]}["Lock Confirmation"] == {
+        "key": "confirm", "text": PAGE_WORDS["schedule_field_help"]["confirm"], "about": "What Lock Confirmation does"}
     facts = {f["label"]: f["value"] for f in j["details"]}
     assert facts["Lineup"] == "Hyjal Summit, then Barrow Deeps × 2" and facts["Priority"] == "Regulars first, then rank"
     sd = reg.schedule_def(HYJAL, sid)
@@ -537,11 +544,11 @@ def test_a_lock_box_left_open_on_an_ended_event_gets_its_refusal(web_bot, reg, r
 
 def test_meta_carries_the_page_words(officer_client):
     m = officer_client.get("/api/meta").json()
-    assert m["page_words"]["one_off"] == "One-off, no schedule" and m["confirm_words"]["discard"] == "Discard edits"
+    assert m["page_words"]["one_off"] == "N/A" and m["confirm_words"]["discard"] == "Discard edits"
     assert m["page_words"] == PAGE_WORDS and m["leave"] == cq.LEAVE_TEMPLATE
     # + the title of a refusal the server sent no box for (the Save box's fallback never prints the question title)
     assert m["confirm_words"] == {**CONFIRM_WORDS, "refused": cq.REFUSAL_TITLES["other"]}
-    assert rc.confirmation_words(False) == PAGE_WORDS["not_asked"] and rc.confirmation_words(True) == PAGE_WORDS["asked_at_lock"]
+    assert rc.confirmation_words(False) == PAGE_WORDS["not_asked_at_lock"] and rc.confirmation_words(True) == PAGE_WORDS["asked_at_lock"]
 
 
 def test_meta_carries_the_signup_tab_words(officer_client):
@@ -568,10 +575,10 @@ def test_open_with_a_lineup_and_a_lock_choice(web_bot, reg, rs):
     r = c.post(f"/api/raid/{HYJAL}/open/preview", json=body, headers=h)
     assert r.status_code == 200, r.text
     p = r.json()
-    assert [f["label"] for f in p["facts"]] == ["One signup sheet", "Seats", "Priority", "Confirmation"]
+    assert [f["label"] for f in p["facts"]] == ["One signup sheet", "Seats", "Priority", "Lock Confirmation"]
     facts = {f["label"]: f["value"] for f in p["facts"]}
     assert facts["Seats"] == "20, then 10 + 10" and facts["One signup sheet"] == "Hyjal Summit, then Barrow Deeps × 2"
-    assert facts["Priority"] == PAGE_WORDS["first_to_join"] and facts["Confirmation"] == PAGE_WORDS["not_asked"]
+    assert facts["Priority"] == PAGE_WORDS["first_to_join"] and facts["Lock Confirmation"] == "No"
     assert [(s["name"], s["rosters"], s["time_words"], s["seats"]) for s in p["lineup"]] == [("Hyjal Summit", 1, "6:30 PM", 20), ("Barrow Deeps", 2, "9:30 PM", 10)]
     assert p["refusal_box"] is None and p["kind"] == "adhoc"
     r = c.post(f"/api/raid/{HYJAL}/open", json={**body, "start": p["start"], "occurrence": p["occurrence"]}, headers=h)
@@ -620,7 +627,7 @@ def test_a_refused_lineup_is_a_refusal_box(web_bot, reg, rs, bad):
 
 def test_a_scheduled_night_opens_as_its_schedule_whatever_the_builder_held(web_bot, reg, rs):
     """A picked time that is a schedule's night of the same first raid: the preview shows that schedule's lineup and
-    Comes from, and Open opens the schedule's event — the builder's lineup, rosters and lock choice are not used."""
+    Schedule, and Open opens the schedule's event — the builder's lineup, rosters and lock choice are not used."""
     c, h = web_bot.c, H()
     sid = tuesday(reg)
     night = [t for s, t in rc.occurrences(reg, reg.now_local(), 24 * 7 * 8) if s["id"] == sid][0]
@@ -628,8 +635,8 @@ def test_a_scheduled_night_opens_as_its_schedule_whatever_the_builder_held(web_b
     p = c.post(f"/api/raid/{HYJAL}/open/preview", json=body, headers=h).json()
     assert p["kind"] == "scheduled" and p["schedule"] == sid and p["box"]["verb"] == "Open the sheet"
     facts = {f["label"]: f for f in p["facts"]}
-    assert list(facts) == ["One signup sheet", "Comes from", "Seats", "Priority", "Confirmation"]
-    assert facts["One signup sheet"]["value"] == "Hyjal Summit, then Barrow Deeps × 2" and facts["Comes from"]["href"] == f"/schedules/{sid}"
+    assert list(facts) == ["One signup sheet", "Schedule", "Seats", "Priority", "Lock Confirmation"]
+    assert facts["One signup sheet"]["value"] == "Hyjal Summit, then Barrow Deeps × 2" and facts["Schedule"]["href"] == f"/schedules/{sid}"
     assert facts["Seats"]["value"] == "20, then 10 + 10" and any("Tuesday raid night" in n for n in p["notes"])
     # what the page sends for a schedule's night: no lineup (the schedule's own); the rosters and the lock choice are never applied to it
     sent = {"start": p["start"], "schedule": p["schedule"], "occurrence": p["occurrence"], "seen": p["box"]["fp"], "rosters": 3, "timing": {"lock_hours_before": 2}}

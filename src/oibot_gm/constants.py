@@ -63,13 +63,16 @@ PRIORITY_SHORT = {"regular": "Regulars", "rank": "rank", "main": "main character
 # models (event_view.py …) print them and /api/meta.page_words carries them, so a page file never holds a value word.
 # `{…}` are filled by whoever prints them (the server, or the page with a count it already has).
 PAGE_WORDS = {
-    "one_off": "One-off, no schedule", "first_to_join": "First to join", "not_asked": "Not asked",
+    # an event's Details (the owner, 2026-11-25): its Schedule row's label, and the value when it has none (a one-off)
+    "schedule_label": "Schedule", "one_off": "N/A", "first_to_join": "First to join", "not_asked": "Not asked",
     # an event's raid-night facts (event_view._night_facts) and the page's time zone line (event_list `tz_words`)
     "paused": "Paused", "paused_by": "Paused by {who}", "reminded_by": "{when}, by {who}", "away_reason": "{name} ({reason})",
     "confirm_pending": "Not sent yet. The bot sends them within a minute.", "times_in": "Times in {zone}.", "test_run": "test event",
-    "asked_at_lock": "Asked at the lock", "no_sheet_yet": "no sheet yet", "from": "From {when}",
+    # the Lock Confirmation row's values (rc.confirmation_words; the owner's Y/N, 2026-11-25)
+    "asked_at_lock": "Yes", "not_asked_at_lock": "No", "no_sheet_yet": "no sheet yet", "from": "From {when}",
     "open_in_discord": "Open in Discord", "no_answer_yet": "no answer yet", "answers_one": "One for the whole evening",
-    "bot_asks": "The bot asks people", "officer_asks": "An officer asks", "every_main": "Every main",
+    # the Automated Fill Requests row's values: the bot asks people for an open seat after the lock, or an officer does
+    "bot_asks": "On", "officer_asks": "Off", "every_main": "Every main",
     "used_when": "More people join than there are seats", "one_off_rule": "First to join, whatever the priority",
     # the Priority bars, one per seat weight (the weights' keys)
     "priority": {"regular": "Regular", "rank": "Rank", "main": "Main character", "sat_out": "Sat out last time",
@@ -206,6 +209,14 @@ PAGE_WORDS = {
                     "none": {"label": "No answer yet", "empty": "Everyone has answered."},
                     "away": {"label": "Away", "empty": "Nobody is away that day."}},
 }
+
+
+def field_help(setting: str, label: str) -> dict | None:
+    """The editor's (?) for a view's Details row that names the same setting (the owner, 2026-11-25): {key, text, about}
+    — the sentence is PAGE_WORDS["schedule_field_help"][setting], the one the schedule editor and Edit event show, and
+    `about` the screen reader's name for it (help_about). None for a setting the editors have no (?) for."""
+    text = PAGE_WORDS["schedule_field_help"].get(setting)
+    return {"key": setting, "text": text, "about": PAGE_WORDS["help_about"].format(name=label)} if text else None
 
 
 def schedule_line_label(setting: str) -> str | None:

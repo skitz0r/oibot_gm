@@ -1125,6 +1125,22 @@ def test_the_schedules_page_keeps_every_old_lever():
     assert "css.night" in regs and "f.away_words" in regs and "f.away.length > 0" in regs and regs.count("className={css.touch}") == 2
 
 
+def test_the_view_pages_show_the_editors_own_help():
+    """Issue #13 (the owner, 2026-11-25): a Details row naming a setting the editors explain shows the editors' (?) with
+    the SAME sentence — one component (components/FieldHelp.tsx) used by SettingsFields and by Facts, the sentence the
+    server's (a Fact's `help`, constants.field_help over PAGE_WORDS schedule_field_help), never typed in a page file."""
+    fh = _code_only((SRC / "components" / "FieldHelp.tsx").read_text())
+    assert "export function FieldHelp(" in fh and "size={44}" in fh and "onClick=" in fh and "onFocus=" in fh and 'role="tooltip"' in fh
+    facts = _code_only((SRC / "components" / "Facts.tsx").read_text())
+    assert 'from "./FieldHelp"' in facts and "<FieldHelp label={help.about} text={help.text} inline />" in facts
+    assert "f.help ?" in facts and 'whiteSpace: "nowrap"' in facts, "the (?) never wraps onto a line of its own"
+    shared = _code_only((SRC / "components" / "schedules" / "SettingsFields.tsx").read_text())
+    assert 'from "../FieldHelp"' in shared and "function FieldHelp(" not in shared, "one component, not a copy"
+    for f in [*(SRC / "components").rglob("*.tsx"), *(SRC / "pages").glob("*.tsx")]:
+        code = _code_only(f.read_text())
+        assert "after the lock, the bot DMs" not in code.lower() and "At the lock, everyone rostered" not in code, f.name
+
+
 def test_the_schedule_editor_keeps_every_setting():
     """Task 11's inventory, the editor: name (and a new schedule's id, the reserved ids from the API), what kind (weekly
     run times · days of each lockout · opened by an officer), the lineup (the ONE builder; the first raid fixed on an
@@ -1210,7 +1226,7 @@ def test_events_page_reads_by_its_sections():
     for f in (SRC / "components" / "events").glob("*.tsx"):
         code = _code_only(f.read_text())
         assert "useConfirm(" not in code and not re.search(r"message:\s*[`\"']", code), f.name
-        assert not re.search(r"[\"'`](First to join|Not asked|Asked at the lock|One-off, no schedule)[\"'`]", code), f.name
+        assert not re.search(r"[\"'`](First to join|Not asked|Asked at the lock|One-off, no schedule|N/A|Lock Confirmation|Automated Fill Requests)[\"'`]", code), f.name
 
 
 def test_reschedule_picks_never_types():
@@ -1669,9 +1685,12 @@ def test_each_sheet_timing_switch_carries_the_servers_help():
         assert all(len(x.split()) <= 20 for x in sentences), (k, text)
         assert not re.search(r"\b(nudge|autofill|solver|cadence|pool|seated|series)\b|:\d\d|\d{2}:\d{2}", text, re.I), (k, text)
     shared = _code_only((SRC / "components" / "schedules" / "SettingsFields.tsx").read_text())
-    for needle in ("words.schedule_field_help", "<FieldHelp", "words.help_about", "size={44}", "onFocus=", "onMouseEnter=", "onClick=",
-                   "closeOnEscape", 'role="tooltip"', "aria-label={label}", 'maw="calc(100vw - 32px)"'):
+    for needle in ("words.schedule_field_help", "<FieldHelp", "words.help_about"):
         assert needle in shared, needle
+    fh = _code_only((SRC / "components" / "FieldHelp.tsx").read_text())  # the one (?) — the editors' and the views' (issue #13)
+    for needle in ("size={44}", "onFocus=", "onMouseEnter=", "onClick=", "closeOnEscape", 'role="tooltip"', "aria-label={label}",
+                   'maw="calc(100vw - 32px)"'):
+        assert needle in fh, needle
     for page in ("pages/LineupPage.tsx", "components/events/EditEvent.tsx"):
         assert "<TimingFields" in _code_only((SRC / page).read_text()), page
 

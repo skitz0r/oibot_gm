@@ -3,6 +3,7 @@ import { Fragment } from "react";
 import { Link } from "react-router-dom";
 import type { Fact } from "../api";
 import { Eyebrow } from "./Page";
+import { FieldHelp } from "./FieldHelp";
 import { guardClick } from "./LeaveGuard";
 import css from "../pages/listpage.module.css";
 
@@ -14,8 +15,17 @@ function Place({ href, children }: { href: string; children: React.ReactNode }) 
     : <Anchor href={href} target="_blank" rel="noopener noreferrer">{children}</Anchor>;
 }
 
+/** A Details label with the editors' (?) after it: the last word and the (?) never part across a line break. */
+function Helped({ label, help }: { label: string; help: NonNullable<Fact["help"]> }) {
+  const cut = label.lastIndexOf(" ") + 1;
+  return (
+    <>{label.slice(0, cut)}<span style={{ whiteSpace: "nowrap" }}>{label.slice(cut)}{"\u00a0"}<FieldHelp label={help.about} text={help.text} inline /></span></>
+  );
+}
+
 /** The server's Details lines (event_view / schedule_view / raid_page `Fact`s) as a label / value grid: the value in the
- *  server's words, linked where it says (`href`, or `links` for several places). `show` lets a view draw one value
+ *  server's words, linked where it says (`href`, or `links` for several places); a row naming a setting the editors
+ *  explain carries `help` and gets the editors' own (?) beside its label (FieldHelp, the server's sentence). `show` lets a view draw one value
  *  itself — a chip for a level, a select in an edit mode — and returns undefined for the rest. */
 export function Facts({ items, show }: { items: Fact[]; show?: (f: Fact) => React.ReactNode | undefined }) {
   return (
@@ -25,7 +35,12 @@ export function Facts({ items, show }: { items: Fact[]; show?: (f: Fact) => Reac
         const value = own !== undefined ? own
           : f.links && f.links.length > 1 ? f.links.map((l, i) => <Fragment key={l.href}>{i > 0 && ", "}<Place href={l.href}>{l.name}</Place></Fragment>)
           : f.href ? <Place href={f.href}>{f.value}</Place> : f.value;
-        return <div key={f.label}><dt>{f.label}</dt><dd>{value}</dd></div>;
+        return (
+          <div key={f.label}>
+            <dt>{f.help ? <Helped label={f.label} help={f.help} /> : f.label}</dt>
+            <dd>{value}</dd>
+          </div>
+        );
       })}
     </dl>
   );

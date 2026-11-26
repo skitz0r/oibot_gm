@@ -143,7 +143,7 @@ export interface Meta {
 }
 /** constants.PAGE_WORDS: `{…}` are filled by whoever prints them. */
 export interface PageWords {
-  one_off: string; first_to_join: string; not_asked: string; asked_at_lock: string; no_sheet_yet: string; from: string;
+  schedule_label: string; one_off: string; first_to_join: string; not_asked: string; asked_at_lock: string; not_asked_at_lock: string; no_sheet_yet: string; from: string;
   open_in_discord: string; no_answer_yet: string; answers_one: string; bot_asks: string; officer_asks: string; every_main: string;
   used_when: string; one_off_rule: string; priority: Record<"regular" | "rank" | "main" | "sat_out" | "signup_order", string>;
   rosters_of: string; placed_of: string; placed_of_bench: string; board_footer: string; show_switches: string; hide_switches: string; raid_short: string; switch_item: string;
@@ -200,7 +200,9 @@ export interface MemberEventView {
 export interface Box { title: string; sentences: string[]; verb: string | null; danger: boolean; diff: string[]; fp: string }
 /** A Details line (event_view): the label, its value in words, and where it links (a site path or a Discord jump link).
  *  `links` = several places at once (the Raids page's Played in: each schedule with its href); `level` = a chip's level. */
-export interface Fact { label: string; value: string; href?: string; links?: { name: string; href: string }[]; level?: string }
+/** a Details row; `help` = the editors' (?) for the setting it names (constants.field_help: key, the sentence, its screen-reader name) */
+export interface Fact { label: string; value: string; href?: string; links?: { name: string; href: string }[]; level?: string;
+  help?: { key: string; text: string; about: string } }
 /** A row of the Schedules list (GET /api/schedules): `repeats` = when its events start, in words. */
 export interface ScheduleRow { id: string; name: string; repeats: string }
 /** A removed schedule's leftover regular (schedule_view.orphans): `key` = the series key the Remove sends back, `label`

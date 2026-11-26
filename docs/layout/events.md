@@ -218,7 +218,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        soonest first), coming (coming_nights: each active schedule's next COMING_PER_SCHEDULE 3 nights with no event, through
                        rc.next_runs_of), history (HISTORY_PAGE 20, newest first), history_more, tz_words}, a row {key, title, subtitle, state, chip}; test
                        runs (rc.rehearsal_run) and dropped parts never listed; one rc.occurrence_index per request. event_json(reg, rs, ev, viewer,
-                       sheet=, autofill=) — any part's key answers as its event: details (Lineup, Comes from, Priority, Confirmation, Sheet opened, Locks,
+                       sheet=, autofill=) — any part's key answers as its event: details (Lineup, Schedule — N/A for a one-off —, Priority, Lock Confirmation, Sheet opened, Locks,
                        Signup sheet; locked: Confirmed, Open seats; _night_facts / _discord_links = the raid-night facts read from each raid's ev_json:
                        Reminder, Confirm by, Confirmations pending, Open seats per raid, Reminded, Automatic asks paused by, Also on another event, Away
                        that day, the officer card / updates thread / loot thread links), signups (counts + rows; none = rc.pool_unanswered), parts
@@ -227,7 +227,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        solves), activity, boxes {lock, cancel, reschedule}, actions (+ clear: More › Clear the board), switches (rc.event_switches), lineup,
                        timing (rc.run_timing), people, characters, strategies, test_chip, today, start_day / start_time, locks, edit (edit_options: Edit
                        event's fields NOW — every one before the lock, EDIT_AFTER_LOCK after —, values, splits per raid, hours, max_weight; Details
-                       read the event's own: Priority, Confirmation, Open seats after the lock, Reminder, Confirm by); coming_json (Details: Sheet
+                       read the event's own: Priority, Lock Confirmation Yes/No, Automated Fill Requests On/Off, Reminder, Confirm by — the rows naming an
+                       editor's switch carry its (?) `help`, constants.field_help); coming_json (Details: Sheet
                        opens, Locks — no horizon, so can_open unless the night closed —, why, open, box 11 (says the sheet stays up and the schedule won't open it again); ComingGone COMING_OPENED (with the key) |
                        COMING_GONE); new_event_options (raids, lineups to copy — no pickup templates —, NEW_EVENT_LOCKS (2, 24), lock_choices, the
                        guild's date), new_event_view (What this makes; SCHEDULED_NIGHT), lineup_edit_json (refused through rc.lineup_fixed) /
@@ -258,7 +259,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        editor (editor_options: the palette with lockout_days / weights / timing_suggestion, pickup defaults, lineups, hour choices in
                        words, presets, split_policies, MAX_WEIGHT 6)}; schedule_json(reg, rs, sid, now) → {id, name, active, chip, kind, gone
                        (rc.gone_sentence + GONE_TAIL when a lineup raid left the game), details (Repeats — repeats_words —, First event / Next event if
-                       resumed, Priority, Confirmation, Open seats after the lock, Answers), lineup (seats None for a gone raid), timing, next
+                       resumed, Priority, Lock Confirmation, Automated Fill Requests, Answers; those two and timing's Reminder carry `help`), lineup (seats None for a gone raid), timing, next
                        (NEXT_EVENTS 3: starts, opens, locks, occurrence, the event's key) + next_empty, regulars (_regulars: count vs seats, short,
                        rc.series_forecast — if_resumed on a paused one — as forecast rows with can_open / why for Open early, rows with box 18 + the
                        record's rev; None for a pickup), people, boxes {pause | resume, remove}, stored (stored_entry, the editor's machine form), rev

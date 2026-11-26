@@ -61,7 +61,9 @@ def test_schedules_are_grouped_and_read_in_words(officer_client, reg):
 def test_a_schedule_reads_by_its_sections(officer_client, reg, rs):
     tuesday(reg)
     j = officer_client.get("/api/schedules/tue").json()
-    assert [f["label"] for f in j["details"]] == ["Repeats", "First event", "Priority", "Confirmation", "Open seats after the lock", "Answers"]
+    assert [f["label"] for f in j["details"]] == ["Repeats", "First event", "Priority", "Lock Confirmation", "Automated Fill Requests", "Answers"]
+    assert {f["label"]: f["help"]["key"] for f in j["details"] + j["timing"] if "help" in f} == \
+        {"Lock Confirmation": "confirm", "Automated Fill Requests": "autofill", "Reminder": "nudge"}, "the editor's (?) keys, on those rows only"
     assert j["details"][0]["value"] == "Every Tuesday at 6:30 PM" and j["details"][-1]["value"] == PAGE_WORDS["answers_one"]
     assert j["chip"] == "active" and j["gone"] is None
     assert [(s["name"], s["seats"], s["rosters"], s["time_words"]) for s in j["lineup"]] == [("Hyjal Summit", 20, 1, "6:30 PM"), ("Barrow Deeps", 10, 2, "9:30 PM")]

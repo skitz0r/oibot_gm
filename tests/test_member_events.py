@@ -261,6 +261,7 @@ def test_member_details_are_the_public_facts_only(lf):
     j = get(lf, f"/api/me/event/{lf.locked.key}").json()
     assert [f["label"] for f in j["details"]] == ["Lineup", "Priority", "Locks", "Confirm by", "Signup sheet"]
     assert j["details"][-1]["value"] == PAGE_WORDS["sheet_not_posted"]
+    assert not any("help" in f for f in j["details"]), "no officer setting on the members' page, so no editor (?) either"
     o = get(lf, f"/api/me/event/{lf.opened.key}").json()
     assert o["details"][0]["value"] == "Hyjal Summit, then Barrow Deeps"
 

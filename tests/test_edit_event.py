@@ -182,9 +182,9 @@ def test_the_event_view_carries_its_own_values_and_the_editor(reg, rs, web_bot):
     rc.reschedule(reg, rs, ev, timing={"confirm": False, "weights": {"rank": 6, "regular": 0}, "autofill": False}, by="o")
     j = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()
     facts = {f["label"]: f["value"] for f in j["details"]}
-    assert facts["Confirmation"] == PAGE_WORDS["not_asked"] and "Confirm by" not in facts
+    assert facts["Lock Confirmation"] == "No" and "Confirm by" not in facts
     assert facts["Priority"].startswith("Rank first")
-    assert facts["Open seats after the lock"] == PAGE_WORDS["officer_asks"]
+    assert facts["Automated Fill Requests"] == "Off"
     e = j["edit"]
     assert e["values"]["confirm"] is False and e["values"]["weights"]["rank"] == 6 and e["values"]["autofill"] is False
     assert set(e["fields"]) >= {"lock_hours_before", "confirm", "weights", "first_come", "split_policy", "autofill", "fill_ask_hours"}

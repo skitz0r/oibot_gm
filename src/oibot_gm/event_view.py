@@ -11,7 +11,7 @@ from typing import Callable
 
 from . import consequences as cq
 from . import raidcycle as rc
-from .constants import MARK_WORDS, PAGE_WORDS
+from .constants import MARK_WORDS, PAGE_WORDS, field_help
 from .registry import LINEUP_MAX, LINEUP_MAX_WORDS, Registry, RegistryError
 
 CLOSED = ("done", "cancelled")
@@ -87,8 +87,22 @@ def _raids_words(reg: Registry, lineup: list[dict]) -> str:
     return rc.lineup_words(reg, [{"raid": e["raid"]} for e in lineup])
 
 
-def _fact(label: str, value: str, href: str | None = None) -> dict:
-    return {"label": label, "value": value, **({"href": href} if href else {})}
+def _fact(label: str, value: str, href: str | None = None, *, hint: str | None = None) -> dict:
+    """A Details row; `hint` = the setting the editors put a (?) beside (constants.field_help: the same sentence here)."""
+    h = field_help(hint, label) if hint else None
+    return {"label": label, "value": value, **({"href": href} if href else {}), **({"help": h} if h else {})}
+
+
+F = PAGE_WORDS["schedule_fields"]  # a Details row naming an editor's setting reads the editor's label (the owner, 2026-11-25)
+SCHEDULE = PAGE_WORDS["schedule_label"]
+
+
+def _confirm_fact(confirm: bool) -> dict:
+    return _fact(F["confirm"], rc.confirmation_words(confirm), hint="confirm")
+
+
+def _autofill_fact(on: bool) -> dict:
+    return _fact(F["autofill"], PAGE_WORDS["bot_asks" if on else "officer_asks"], hint="autofill")
 
 
 def _sheet_url(reg: Registry, ev: "rc.RaidEvent") -> str | None:
@@ -281,7 +295,7 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
     team = rc.run_team(reg, first)
     sid, sname, exists = _schedule_of(reg, first)
     lineup = _lineup(reg, rs, first, parts)
-    came = _fact("Comes from", sname, f"/schedules/{sid}" if exists else None) if sid else _fact("Comes from", PAGE_WORDS["one_off"])
+    came = _fact(SCHEDULE, sname, f"/schedules/{sid}" if exists else None) if sid else _fact(SCHEDULE, PAGE_WORDS["one_off"])
     url = _sheet_url(reg, first)
     part_views = [_part_view(reg, rs, p, sheet, viewer, autofill) for p in parts]
     sheets = [pv["sheet"] for pv in part_views if pv.get("sheet")]  # each raid's ev_json: the raid-night facts below read it
@@ -292,13 +306,13 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
         opened = (datetime.fromisoformat(first.created_at) if first.created_at
                   else first.start - timedelta(hours=float(reg.raid_def(first.instance)["signup_lead_hours"])))
         details = [_fact("Lineup", rc.lineup_words(reg, lineup)), came, _fact("Priority", rc.priority_words(reg, first)),
-                   _fact("Confirmation", rc.confirmation_words(rc.run_confirms(reg, first))),
+                   _confirm_fact(rc.run_confirms(reg, first)),
                    _fact("Sheet opened", reg.local12(opened))]
         if rc.team_setting(team, "reminders") != "none" and first.state == "open":  # the run's own timing (ev_json's timeline)
-            details.append(_fact("Reminder", reg.local12(soft)))
+            details.append(_fact("Reminder", reg.local12(soft), hint="nudge"))
         details.append(_fact("Locks", reg.local12(first.locked_at or hard)))
         if state == "open":  # the event's own (Edit event): who asks for an open seat once it locks
-            details.append(_fact("Open seats after the lock", PAGE_WORDS["bot_asks" if rc.team_setting(team, "autofill") else "officer_asks"]))
+            details.append(_autofill_fact(bool(rc.team_setting(team, "autofill"))))
         if rc.run_confirms(reg, first):
             details.append(_fact("Confirm by", reg.local12(confirm)))
             if state == "locked":
@@ -397,7 +411,7 @@ class ComingGone(RegistryError):
 
 
 def coming_json(reg: Registry, rs: "rc.RaidStore", sid: str, occurrence: str, now: datetime) -> dict:
-    """ComingView: {title, chip, schedule {id, name}, details [Lineup, Comes from, Priority, Confirmation, Sheet opens,
+    """ComingView: {title, chip, schedule {id, name}, details [Lineup, Schedule, Priority, Lock Confirmation, Sheet opens,
     Locks], can_open (no horizon: every listed night opens unless closed), why (rc.open_row_refusal's sentence | None), open {start_iso, schedule,
     occurrence, raid (the first raid: the route's {rid})} (what POST /api/raid/{rid}/open carries back), box (consequences.open_now_box | None, its rev the occurrence as open_box_for's)}. ComingGone when
     the night has an event now (its key) or is not one of coming_nights any more."""
@@ -415,8 +429,8 @@ def coming_json(reg: Registry, rs: "rc.RaidStore", sid: str, occurrence: str, no
     opens, lock_at = rc.sheet_times(t, sd)
     name = entry.get("name") or reg.series_label(sid)
     why = rc.open_row_refusal(reg, rs, raid, t, sid, opens, now)
-    details = [_fact("Lineup", rc.lineup_words(reg, lineup)), _fact("Comes from", name, f"/schedules/{sid}"),
-               _fact("Priority", rc.priority_words(reg, sd)), _fact("Confirmation", rc.confirmation_words(bool(sd.get("confirm", True)))),
+    details = [_fact("Lineup", rc.lineup_words(reg, lineup)), _fact(SCHEDULE, name, f"/schedules/{sid}"),
+               _fact("Priority", rc.priority_words(reg, sd)), _confirm_fact(bool(sd.get("confirm", True))),
                _fact("Sheet opens", reg.local12(opens)), _fact("Locks", reg.local12(lock_at))]
     box = None if why else cq.open_now_box(reg, t, opens, lock_at, lineup=lineup, channel=bool(reg.config.signup_channel_id),
                                            rev=occurrence)  # consequences.open_box_for's rev: the open route's box is this one
@@ -516,7 +530,7 @@ def seats_words(reg: Registry, lineup: list[dict]) -> str:
 
 def new_event_view(reg: Registry, rs: "rc.RaidStore", rid: str, p: dict, first_rosters: int) -> dict:
     """The New event page's "What this makes" from rc.open_preview's answer `p` (nothing written): {facts [One signup
-    sheet, Comes from (a schedule's night), Seats, Priority, Confirmation], lineup [{raid, name, rosters, starts,
+    sheet, Schedule (a schedule's night), Seats, Priority, Lock Confirmation], lineup [{raid, name, rosters, starts,
     time_words, seats}] (each step as the open would make it — a schedule's night: ITS lineup), notes (the DST line, the
     schedule's night, a raid that first opens later, no signup channel — sentences), refusal_box (a closed run at that
     time, an event already open then, a past time — else None)}."""
@@ -536,10 +550,10 @@ def new_event_view(reg: Registry, rs: "rc.RaidStore", rid: str, p: dict, first_r
     facts = [_fact("One signup sheet", rc.lineup_words(reg, steps))]
     if scheduled:
         name = p.get("schedule_name") or p.get("schedule")
-        facts.append(_fact("Comes from", name, f"/schedules/{p['schedule']}"))
+        facts.append(_fact(SCHEDULE, name, f"/schedules/{p['schedule']}"))
     priority = rc.priority_words(reg, {"kind": (sd.get("schedule") or {}).get("kind"), "weights": sd.get("weights")})  # a one-off: first to join
     facts += [_fact("Seats", seats_words(reg, steps)), _fact("Priority", priority),
-              _fact("Confirmation", rc.confirmation_words(bool(sd.get("confirm", True))))]  # what ensure_run freezes on the run
+              _confirm_fact(bool(sd.get("confirm", True)))]  # what ensure_run freezes on the run
     notes = [p.get("when_note") or "", SCHEDULED_NIGHT.format(name=p.get("schedule_name") or "its schedule") if scheduled else "",
              p.get("before_open") or "", "" if p.get("channel") else (p.get("posts") or "")]
     refusal = None
