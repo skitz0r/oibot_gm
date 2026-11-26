@@ -245,8 +245,11 @@ def test_a_second_message_is_not_a_follow_up(live):
 
 
 def test_a_follow_up_that_is_not_an_answer_still_takes_the_question(live):
-    """Ordinary chat after the PARSER's question reaches the parser, which says ignore: silence — the help answer, which
-    would have answered it, is never asked. The question is taken: the next message is judged by the gate again."""
+    """Ordinary chat after the PARSER's question reaches the parser, which — as its prompt says for a message that
+    neither answers its question nor asks for anything — returns kind=ignore: silence. The help answer, which would have
+    answered it, is never asked. The question is taken: the next message is judged by the gate again. (This pins the
+    route for the ignore verdict; the prompt sentence that asks for it is pinned below.)"""
+    live.answers["brb dinner"] = "Enjoy your dinner."
     live.verdicts[1] = ConfigRequest(kind="ignore", reply="")
     first_question(live)
     said, _ = say(live, OWNER, "brb dinner")
@@ -422,9 +425,15 @@ def test_the_loops_choices_are_kept_as_the_open_question(reg, rs, monkeypatch):
 
 # ---------------------------------------------------------------- B: the one character a spec change can mean
 
-def narrow(reg, op, author=OWNER):
+def may_for(reg, author, channel=LISTEN_CH):
+    """handle_change's `may`: authorize on a copy, for this asker (the guild's owner is the officer here)."""
+    return lambda op: not configops.authorize(reg, [op.model_copy()], author, officer=author == OWNER, channel=channel)[1]
+
+
+def narrow(reg, op, author=OWNER, *, may=True):
+    """narrow_characters as handle_change calls it: with `may` (authorize first), unless a test asks for none."""
     req = ConfigRequest(kind="change", reply="Changing the spec.", ops=[op])
-    configops.narrow_characters(reg, req, author)
+    configops.narrow_characters(reg, req, author, **({"may": may_for(reg, author)} if may else {}))
     return req
 
 
@@ -497,10 +506,15 @@ def test_your_own_record_binds_your_priest(reg):
 
 
 def test_another_members_change_is_authorised_as_before(reg):
-    """Binding the character widens nothing: a member asking about someone else is refused exactly as before."""
+    """Binding the character widens nothing: a member asking about someone else is refused exactly as before (without
+    `may` the narrowing binds and authorize refuses; with it, authorize decides first and the op is left as it was)."""
     ashgrove(reg)
     reg.add_character(BYSTANDER, "Fernhollow", "Fernhollow", "Mage", "Frost", None, True)
     req = narrow(reg, ConfigOp(op="character", member="Ashgrove", field="spec", value="Holy", text="Shadow"), author=BYSTANDER)
+    assert req.questions == [] and req.ops[0]._no_fit is None, "no question and no sentence about Ashgrove's characters"
+    allowed, refused = configops.authorize(reg, req.ops, BYSTANDER, officer=False, channel=LISTEN_CH)
+    assert allowed == [] and refused
+    req = narrow(reg, ConfigOp(op="character", member="Ashgrove", field="spec", value="Holy", text="Shadow"), author=BYSTANDER, may=False)
     assert req.ops[0].character == "Duskmere"
     allowed, refused = configops.authorize(reg, req.ops, BYSTANDER, officer=False, channel=LISTEN_CH)
     assert allowed == [] and refused
@@ -676,3 +690,114 @@ def test_take_answered_finds_the_replied_exchange_at_any_age(reg):
     assert ex is not None and ex.request == "a" and ex.asked_by == conversation.PARSER
     assert conversation.take_answered(reg, LISTEN_CH, OWNER, window_s=300, reply_to_message_id=12, now=99_999.0) is None
     assert conversation.take_answered(reg, LISTEN_CH, OWNER, window_s=300, now=99_999.0) is None
+
+
+
+# ---------------------------------------------------------------- round 3: chat is left alone, a name means that character
+
+IGNORE_LINE = ("A message that neither answers a question you asked there nor asks for a change or for information is "
+               "kind=ignore with an empty reply")
+
+
+def test_the_parsers_prompt_defines_ignore_in_both_variants():
+    assert IGNORE_LINE in configops.SYSTEM.format(schema=configops.SCHEMA_TEXT)
+    assert IGNORE_LINE in configops.SYSTEM_ANSWER_TOOLS.format(schema=configops.SCHEMA_TEXT)
+
+
+@pytest.mark.parametrize("on", [False, True])
+def test_a_genuine_question_after_the_parsers_question_gets_the_help_answer(live, monkeypatch, on):
+    """"when is the raid?" after the parser's question: the parser says kind=question, and the person reads the full help
+    answer (switch off: the help answer; on: the loop) — never the parser's one line."""
+    if on:
+        monkeypatch.setenv(answer_switch.SWITCH_ENV, "on")
+        live.verdicts[0] = ConfigRequest(kind="change", reply="Ashgrove has two characters.", questions=[QUESTION])
+        say(live, OWNER, f"<@{BOT_ID}> bot can you update ashgrove from shadow to holy", mentions=[live.user])
+    else:
+        first_question(live)
+    live.verdicts[1] = ConfigRequest(kind="question", reply="PARSER ONE-LINER")
+    live.answers["when is the raid?"] = "The next raid is Tue 1 Dec 7:30 PM."
+    said, _ = say(live, OWNER, "when is the raid?")
+    assert len(live.parsed) == 2 and live.helped[-1] == "when is the raid?"
+    assert [c for c, _ in said] == ["The next raid is Tue 1 Dec 7:30 PM."]
+
+
+def test_a_clarification_chain_is_bounded(live):
+    """The parser may ask again of the answer to its question, once: that second question still takes an untagged answer,
+    a third in a row does not (the person tags the bot or replies to it)."""
+    again = ConfigRequest(kind="question", reply="", questions=["Which spec, Holy or Discipline?"])
+    live.verdicts[1:] = [again, again.model_copy(deep=True), ANSWERED]
+    first_question(live)
+    said, _ = say(live, OWNER, "the priest")
+    assert "Which spec" in said[0][0] and len(live.parsed) == 2
+    said, dec = say(live, OWNER, "the healing one")
+    assert dec.calls == 0 and len(live.parsed) == 3 and "Which spec" in said[0][0], "one further follow-up"
+    dec = live.gate(0.1)
+    said, _ = say(live, OWNER, "lol")
+    assert dec.calls == 1 and said == [] and len(live.parsed) == 3, "no third untagged follow-up: the gate judges it"
+
+
+def test_a_dm_answer_to_the_parsers_question_reaches_the_parser(live):
+    """In DMs (the ring's None key): the parser's question, then the bare answer → the parser, and the card."""
+    reg = live.greg
+
+    async def dm_guild(message):
+        return reg
+
+    live.dm_guild = dm_guild
+    live.registries.ordered = lambda: [reg]  # the DM guide-import check reads the guild list (no import string here)
+    sent = []
+
+    def dm(text):
+        async def reply(content=None, **kw):
+            sent.append((content, kw))
+            return types.SimpleNamespace(id=next(_ids))
+        msg = Msg(id=next(_ids), content=text, author=types.SimpleNamespace(id=OWNER, display_name="o", bot=False), channel=Chan(0),
+                  guild=None, mentions=[], role_mentions=[], reference=None, mention_everyone=False, reply=reply)
+        asyncio.run(live.on_message(msg))
+
+    dm("bot can you update ashgrove from shadow to holy")
+    assert QUESTION in sent[-1][0] and conversation.recall(reg, None, OWNER)[-1].asked_by == conversation.PARSER
+    dm("Duskmere")
+    assert live.helped == ["bot can you update ashgrove from shadow to holy"] and live.parsed[1][0] == "Duskmere"
+    assert card_shown(sent)
+
+
+def test_someone_else_replying_to_the_bots_question_is_not_its_answer(live):
+    """B replies to the bot's question to A: not an answer — B gets today's path (the help answer) with B's own context."""
+    first_question(live)
+    ref = bot_reply_ref(live)  # the bot's question to OWNER
+    said, _ = say(live, BYSTANDER, "Duskmere", reference=ref)
+    assert live.helped[-1] == "Duskmere" and len(live.parsed) == 1
+    assert conversation.recall(live.greg, LISTEN_CH, OWNER)[-1].followed is False, "A's question is still A's"
+
+
+DUSKVEIL_M = 700_000_000_000_000_104  # member X: displays as "Duskveil", plays the Paladin Brightfen
+HOLDER_Y = 700_000_000_000_000_105  # member Y: holds the Priest "Duskveil"
+TAMSIN = 700_000_000_000_000_106  # a member who names themself where a character goes
+
+
+def test_a_characters_name_means_that_character_not_a_member_of_that_name(reg):
+    reg.add_character(DUSKVEIL_M, "Duskveil", "Brightfen", "Paladin", "Retribution", None, True)
+    reg.add_character(HOLDER_Y, "Corrowyn", "Duskveil", "Priest", "Shadow", None, True)
+    req = narrow(reg, ConfigOp(op="character", character="Duskveil", field="spec", value="Holy", text="Shadow"))
+    (op,) = req.ops
+    assert op.character == "Duskveil" and req.questions == []
+    assert configops.describe(reg, op, strict=True, by_id=OWNER) == "Duskveil: spec Shadow → Holy"
+    assert configops._member(reg, op.member).discord_id == HOLDER_Y, "Y's priest, never X's Brightfen"
+
+
+def test_both_readings_that_fit_are_asked_about(reg):
+    reg.add_character(DUSKVEIL_M, "Duskveil", "Brightfen", "Paladin", "Retribution", None, True)
+    reg.add_character(HOLDER_Y, "Corrowyn", "Duskveil", "Priest", "Shadow", None, True)
+    req = narrow(reg, ConfigOp(op="character", character="Duskveil", field="spec", value="Holy"))
+    assert req.ops == [] and req.questions == ["Which character should play Holy: Duskveil (Corrowyn) or Brightfen (Duskveil)?"]
+
+
+def test_naming_yourself_where_a_character_goes_binds_your_priest(reg):
+    """`may` is asked of the op as it will be applied: a member naming themself is allowed their own priest."""
+    reg.add_character(TAMSIN, "Tamsin", "Rookwell", "Priest", "Shadow", None, True)
+    req = narrow(reg, ConfigOp(op="character", character="Tamsin", field="spec", value="Holy"), author=TAMSIN)
+    (op,) = req.ops
+    assert op.character == "Rookwell" and op._no_fit is None and req.questions == []
+    allowed, refused = configops.authorize(reg, req.ops, TAMSIN, officer=False, channel=LISTEN_CH)
+    assert allowed == [op] and refused == []

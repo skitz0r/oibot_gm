@@ -498,7 +498,8 @@ class ListenMixin:
         if mode == "watch" or getattr(message.author, "bot", False) or reg.plain_mode(cid) == "ignore":
             return False
         # only a question the bot posted under a message here: a /gm change's private question never makes a public reply
-        ex = conversation.take_open_question(reg, cid, message.author.id, window_s=LISTEN_FOLLOWUP_S, posted=True)
+        ex = conversation.take_open_question(reg, cid, message.author.id, window_s=LISTEN_FOLLOWUP_S, posted=True,
+                                             max_depth=conversation.FOLLOW_DEPTH)  # never an endless back-and-forth
         if ex is None:
             return False
         me = getattr(self, "user", None)
@@ -1422,7 +1423,8 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
                     await message.reply(guide_intro(reg), view=apply_button(guide_view(reg)), allowed_mentions=quiet)
                 return
             if to_parser and may_act:  # the answer to the parser's question goes back to the parser, never via a help verdict
-                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, conversation=convo,
+                # to_help: a plain question gets the full help answer, never the parser's one line (switch on: the loop)
+                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, conversation=convo, to_help=True,
                                     **answer_loop.entry_kw(reg.key, entry or ("mention" if message.guild else "dm")))
                 return
             if memory is None and provider is not None and reg.may_ask(uid, officer):  # an @mention or a DM: recall and judge here
@@ -1457,7 +1459,7 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
             reg = await self.dm_guild(message)
             if reg is not None:
                 text = mention_names(message, reg, getattr(self, "user", None))
-                if text:  # the answer to the parser's own question goes back to the parser (answered_by_parser)
+                if text:  # the answer to the parser's own question goes back to the parser (answers_parser)
                     await self.plain_text(message, reg, text, None, **({"to_parser": True} if answers_parser(reg, message, None) else {}))
             return
         reg = self.registries.for_guild(message.guild.id)

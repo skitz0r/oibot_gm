@@ -28,6 +28,7 @@ QUESTION_CAP = 300
 FENCE_TAGS = ("conversation", "request", "question", "data", "member-text")
 
 DM = "dm"
+FOLLOW_DEPTH = 1  # an untagged follow-up answers a question of at most this depth: one more after the first, never a chain
 PARSER, LOOP = "parser", "loop"  # Exchange.asked_by: the answer to the parser's question goes back to the parser, the loop's to the loop
 
 
@@ -43,6 +44,7 @@ class Exchange:
     reply_message_id: int | None = None  # the bot's reply (what a Discord reply references)
     followed: bool = False  # the person's next message was taken as the answer to `questions` (take_open_question): once only
     asked_by: str = ""  # who asked `questions`: PARSER (the change parser) or LOOP (the answer loop's choices); "" = neither said
+    depth: int = 0  # questions asked in a row: 0 = asked of a fresh message, 1 = asked again of the answer to that, …
 
 
 _rings: OrderedDict[tuple, deque] = OrderedDict()
@@ -66,6 +68,8 @@ def remember(reg, channel_id, uid: int, request: str, reply: str = "", questions
         ring = _rings.get(k)
         if ring is None:
             ring = _rings[k] = deque(maxlen=N)
+        if ex.questions and ring and ring[-1].followed and ring[-1].questions:  # asked again of the answer to a question
+            ex.depth = ring[-1].depth + 1
         ring.append(ex)
         _rings.move_to_end(k)
         while len(_rings) > MAX_RINGS:
@@ -90,12 +94,14 @@ def recall(reg, channel_id, uid: int, *, reply_to_message_id: int | None = None,
     return [e for e in ring if now - e.at <= window]
 
 
-def take_open_question(reg, channel_id, uid: int, *, window_s: float, posted: bool = False, now: float | None = None) -> Exchange | None:
+def take_open_question(reg, channel_id, uid: int, *, window_s: float, posted: bool = False, max_depth: int | None = None,
+                       now: float | None = None) -> Exchange | None:
     """The bot's open question to `uid` in `channel_id`, taken: the ring's NEWEST exchange when it ended with questions
     the bot asked (the parser's, or the loop's choices), is at most `window_s` old and was not taken before — marked
     taken under the lock, so only one message ever answers it. None otherwise (a newer reply that asked nothing closed
     it). Every message from that person in that place calls this once, so only their next message counts. `posted`:
-    only a question asked in answer to a Discord message (not a slash command's private reply) counts."""
+    only a question asked in answer to a Discord message (not a slash command's private reply) counts. `max_depth`: a
+    question asked again more often than this in a row is closed, never taken (the untagged follow-up: FOLLOW_DEPTH)."""
     now = time.time() if now is None else now
     with _lock:
         ring = _rings.get(_key(reg, channel_id, uid))
@@ -105,6 +111,8 @@ def take_open_question(reg, channel_id, uid: int, *, window_s: float, posted: bo
         if ex.followed or not ex.questions or now - ex.at > window_s or (posted and ex.message_id is None):
             return None
         ex.followed = True
+        if max_depth is not None and ex.depth > max_depth:
+            return None  # closed: a third question in a row is answered only by tagging the bot or replying to it
         return ex
 
 
@@ -119,11 +127,11 @@ def take_answered(reg, channel_id, uid: int, *, window_s: float, reply_to_messag
         return opened
     with _lock:
         ring = list(_rings.get(_key(reg, channel_id, uid)) or ())
-    hit = next((ex for ex in ring if ex.reply_message_id is not None and ex.reply_message_id == reply_to_message_id), None)
-    if hit is None or not hit.questions:
-        return None
-    hit.followed = True
-    return hit
+        hit = next((ex for ex in ring if ex.reply_message_id is not None and ex.reply_message_id == reply_to_message_id), None)
+        if hit is None or not hit.questions:
+            return None
+        hit.followed = True
+        return hit
 
 
 def forget(reg=None) -> None:

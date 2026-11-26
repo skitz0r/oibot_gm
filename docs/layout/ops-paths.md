@@ -10,8 +10,10 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        OP_GROUP (every op in one capability group), bind_self (own-record scope decided in code, never by the model),
                        narrow_characters (Task 11: a `character` spec op naming a member but not which character binds the one whose class has
                        the new spec in the profile and holds the from-spec in `text`; none → ConfigOp._no_fit = the one-sentence refusal
-                       _character_rows raises; several → a question listing only those; a named character — even one that is also the member's
-                       display name — is the only one checked ("<X> is a Warrior, which has no Holy spec." / "<X> is already Shadow."); a
+                       _character_rows raises; several → a question listing only those; a name in `character` with no member means the
+                       character somebody holds by it (_named_character over Registry.find, a shared first name left alone), a member's
+                       display name only when no character has it, both for different members → "<character> (<member>)" asked unless
+                       the specs decide; a named character is the only one checked ("<X> is a Warrior, which has no Holy spec." / "<X> is already Shadow."); a
                        from-spec no class has is ignored; may(op) = authorize first: a record the asker can't change is left for authorize to
                        refuse, no question; run by handle_change and the site's text box before authorize),
                        authorize → Registry.may_plain; confirm_for (an officer records a member's Confirm/Can't through answer_placement_for);

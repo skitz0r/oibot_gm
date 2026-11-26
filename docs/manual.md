@@ -2427,13 +2427,16 @@ Only Discord saying they are gone counts: a Discord outage never locks a member 
 the event open?" and the diff carries both your first request and the answer. When the bot has just asked you
 something, your next message in that channel within five minutes is the answer even without tagging the bot. A reply
 to the bot's question is its answer however long ago it was asked. The answer goes back to whatever asked, tagged or
-not: an answer to a question about a change becomes that change, and anything else you say after
-such a question is read by the bot and, if it isn't for the bot, left alone. After a question the bot asked while
-answering you, it replies once to whatever you say next. A message that mentions someone else or replies to someone
-else's message is never taken as the answer; it only ends the wait, and so does a sticker or a picture on its own.
+not. After a question about a change, your answer becomes that change, a question of your own gets a full answer, and
+anything else gets no reply. If the bot has to ask again, your next message answers that too; after a third question
+in a row, tag the bot or reply to its message to answer. After a question the bot asked while answering you, it
+replies once to whatever you say next. Someone else's reply to a question the bot asked you is never taken as your
+answer. A message that mentions someone else or replies to someone else's message is never taken as the answer; it
+only ends the wait, and so does a sticker or a picture on its own.
 A spec change that names a member but not which character goes to the one character whose class has that spec (and
-that plays the spec named as the old one); only when several fit does the bot ask, and it lists just those. A character
-you name is the one changed, never another of theirs; if it can't take that spec, or already has it, the bot says so. The bot keeps this only in memory (a
+that plays the spec named as the old one); only when several fit does the bot ask, and it lists just those. A
+character's name means that character, even when a member is called the same; if both could be meant, the bot asks
+which. If the named character can't take that spec, or already has it, the bot says so. The bot keeps this only in memory (a
 restart forgets it) and only for the last few exchanges, per person and per place: someone else writing in the same
 channel is never read as continuing your conversation. On the site, the Tell the bot box remembers its own last few
 exchanges while the page is open.

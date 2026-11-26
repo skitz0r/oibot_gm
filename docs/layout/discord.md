@@ -33,7 +33,10 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        (then the gate judges it as any other); an ADDRESSED message (an @mention, a DM, a Discord reply to the bot's
                        message) routes the same way: answers_parser(reg, message, channel) → conversation.take_answered (a reply → the
                        exchange of the message it replies to, at any age; else the open question within LISTEN_FOLLOWUP_S) — a parser
-                       question → plain_text(to_parser=True), a loop question or none → today's path; never in a watch or ignore channel; a listened channel logs did "followup" (p null); LISTEN_PER_HOUR cap; listen_recent(reg) = the ring of
+                       question → plain_text(to_parser=True) → handle_change(to_help=True: the parser's kind=question gets the full help
+                       answer; its prompt defines kind=ignore for chat → silence), a loop question or none → today's path; the untagged
+                       follow-up is bounded (Exchange.depth, conversation.FOLLOW_DEPTH 1: a question asked again of an answer is
+                       followable once, a third in a row is closed); never in a watch or ignore channel; a listened channel logs did "followup" (p null); LISTEN_PER_HOUR cap; listen_recent(reg) = the ring of
                        50 verdicts (memory, text ≤120) and out/listen.jsonl rows WITHOUT text; no key → one ops warn per guild per hour. Never a DM;
                        LISTEN_LISTENERS fn(guild key) on every verdict → the web's officers-only `listen` topic (the Ops page's Recent decisions)
   policy.py            policy docs (<guild>/policy/*.md) + Claude compile → *.compiled.json (compiled_at, text_sha, confirmed_by), confirmed by an officer;
