@@ -50,6 +50,7 @@ def rows(path=None) -> list[dict]:
 
 
 def test_enabled_reads_off_on_and_a_list(monkeypatch, caplog):
+    monkeypatch.setattr(answer_switch, "_warned", set())  # the once-only memory is process-wide: this test's own
     assert not answer_loop.enabled("demo"), "unset: off"
     for off in ("", "off", "OFF", "  "):
         monkeypatch.setenv("OIBOT_ANSWER_TOOLS", off)
@@ -104,6 +105,31 @@ def test_switch_on_runs_the_loop_for_this_guild(reg, rs, monkeypatch):
     bot = make_bot(reg, rs, ScriptedProvider([]))
     assert ask(bot, reg, OWNER, True, "status?", conversation="<conversation>\nq\n</conversation>", memory="<memory>\nm\n</memory>") == "loop path"
     assert seen == [(reg.key, "<conversation>\nq\n</conversation>", "<memory>\nm\n</memory>")], "conversation and memory pass through"
+
+
+def test_two_guilds_in_one_process_one_on_one_off(duo, monkeypatch):
+    """The switch names guild A only: A's question goes through the loop (and logs a row), B's through help.answer
+    (and logs none), in the same process, one after the other and back again."""
+    paths = []
+
+    def old(provider, tree, reg_, rs_, uid, officer, question, extras=None, public=False, **kw):
+        paths.append((reg_.key, "old"))
+        return HelpAnswer(answer="old path")
+
+    def loop(provider, tree, viewer, *, conversation=None, memory=None):
+        paths.append((viewer.reg.key, "loop"))
+        return AnswerResult(HelpAnswer(answer="loop path"), "answered", 0, 1, [], {})
+
+    monkeypatch.setattr(help_mod, "answer", old)
+    monkeypatch.setattr(answer_loop, "answer", loop)
+    monkeypatch.setenv("OIBOT_ANSWER_TOOLS", duo.a.key)
+    bot_a, bot_b = make_bot(duo.a, duo.rs_a, ScriptedProvider([])), make_bot(duo.b, duo.rs_b, ScriptedProvider([]))
+    assert ask(bot_a, duo.a, OWNER, True, "status?", entry="mention") == "loop path"
+    assert ask(bot_b, duo.b, OWNER, True, "status?", entry="mention") == "old path"
+    assert ask(bot_a, duo.a, OWNER, True, "status?", entry="dm") == "loop path"
+    assert paths == [(duo.a.key, "loop"), (duo.b.key, "old"), (duo.a.key, "loop")]
+    assert [r["guild"] for r in rows()] == [duo.a.key, duo.a.key], "rows for the guild that is on only"
+    assert answer_loop.entry_kw(duo.a.key, "site") == {"entry": "site"} and answer_loop.entry_kw(duo.b.key, "site") == {}
 
 
 def test_switch_on_runs_the_loop_and_keeps_the_post_processing(reg, rs, monkeypatch):

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from answer_bench import BENCH, asker_of, final_reply, scripted
+from answer_bench import BENCH, asker_of, final_reply, readings, scripted
 from answer_fakes import ScriptedProvider
 
 from oibot_gm import answer_loop as al
@@ -156,9 +156,10 @@ def test_every_case_says_what_a_good_answer_holds():
 @pytest.mark.parametrize("case", BENCH, ids=lambda c: c.id)
 def test_answer_placeholders_are_filled_by_the_setup(reg, rs, case):
     values = case.setup(reg, rs)
-    for a in case.answer:
+    for a in [r for e in case.answer for r in readings(e)] + list(case.answered_instead):
         assert {f for _, f, _, _ in string.Formatter().parse(a) if f} <= set(values), (case.id, a)
         assert "{" not in a.format(**values) and a.format(**values).strip(), (case.id, a)
+    assert not case.answered_instead or case.asks_back, "answered_instead is for a case that asks back"
 
 
 @pytest.mark.parametrize("case", SCRIPTED, ids=lambda c: c.id)
@@ -169,6 +170,20 @@ def test_the_scripted_reply_holds_its_answer_facts(reg, rs, case):
     text = final_reply(case, fmt)
     assert text.strip(), case.id
     for a in case.answer:
-        assert not _probe().missing_facts(a.format(**fmt), text), (case.id, a.format(**fmt), text)
+        assert not _probe().unmet(a, fmt, text), (case.id, readings(a), text)
+        for r in readings(a):  # every reading is a fact a person could judge: none is empty after the joining words
+            assert _probe().fact_words(r.format(**fmt)), (case.id, r)
     for n in case.never:
         assert not _probe().never_hits([n.format(**fmt)], text), (case.id, n)
+
+
+def test_the_wording_dependent_facts_take_either_reading():
+    """Task 10 (the probe's wording misses): the facts a good reply words two ways name both readings."""
+    by = {c.id: c for c in BENCH}
+    assert by["attendance"].answer == (("yet", "first raid"),)
+    assert by["manual"].answer == (("I'll be away", "/me absent add"),)
+    assert by["away_officer_public"].answer == (("private", "officer"),)
+    assert by["section"].answer == (("{applicant}", "{applicant_character}"),)
+    assert by["loot_reason_member"].answer == (("officer", "council"),)
+    assert by["ironfeather_choose"].asks_back and by["ironfeather_choose"].answered_instead == ("{crafter}", "{crafter2}")
+    assert readings("x") == ("x",) and readings(("x", "y")) == ("x", "y")

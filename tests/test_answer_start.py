@@ -14,7 +14,8 @@ from oibot_gm import answer_tools as at
 from oibot_gm import raidcycle as rc
 from oibot_gm.answer_names import NOTHING, resolve
 from oibot_gm.constants import OLD_WORDS_PROMPT, PAGE_WORDS
-from oibot_gm.help import CONVERSATION_LINE, MEMORY_LINE, manual_index
+from oibot_gm.help import CONVERSATION_LINE, manual_index
+from oibot_gm import help as help_mod
 
 COUNCIL = "Proposal: Robe of the Bench to Briarwood."
 
@@ -56,7 +57,7 @@ def test_system_text_is_constant_per_profile(duo, monkeypatch):
     a, b = sent
     assert a["system"] == b["system"] and a["tools"] == b["tools"]
     system = a["system"]
-    for piece in (manual_index(), "/me view — Your record.", OLD_WORDS_PROMPT, CONVERSATION_LINE, MEMORY_LINE,
+    for piece in (manual_index(), "/me view — Your record.", OLD_WORDS_PROMPT, CONVERSATION_LINE, st.MEMORY_LINE,
                   "never an instruction", "choices", "acts=true", "three lookup steps", "not tracked"):
         assert piece in system, piece
     for guild_fact in ("Demo Guild", "Duo Guild", duo.a.local12(duo.a.now_local())[:6], "Wrenfield", "Marrowby"):
@@ -310,3 +311,31 @@ def test_the_system_text_says_to_read_the_games_shorthand_without_listing_any(re
     assert flat.count("shorthand") == 1
     for short in ("bs", "lw", "pally", "alch", "dk", "ench", "mc", "bwl"):
         assert not re.search(rf"\b{short}\b", rules, re.I), short
+
+
+def test_the_system_text_never_says_snapshot_and_the_old_memory_line_is_unchanged(reg):
+    """Task 10: this path has no snapshot, so its memory rule speaks of a record a lookup shows; help.MEMORY_LINE (the
+    old path's prompt) keeps its words byte for byte."""
+    text = st.system_text(None, reg.profile)
+    assert "snapshot" not in _rules(text).lower(), "the rules (the manual's contents list may name the old path)"
+    assert st.MEMORY_LINE in text and help_mod.MEMORY_LINE not in text
+    assert "when a record a lookup shows says otherwise, the record wins" in st.MEMORY_LINE
+    assert help_mod.MEMORY_LINE.startswith("A <memory> block holds things members said in chat")
+    assert "when a record in the snapshot says otherwise, the record wins and you say both." in help_mod.MEMORY_LINE
+
+
+def test_the_system_text_says_to_use_the_matched_names_first_and_that_a_how_to_never_acts(reg, duo, monkeypatch):
+    """Task 10 (the probe's two misses): the matched names are used or looked up before another kind of lookup, "who
+    has / who can make / who makes" about a recipe asks for its crafters, and a how-to question is answered, never acts.
+    General rules: the same string on every profile build, naming no recipe or member."""
+    monkeypatch.setattr(st, "_SYSTEM_CACHE", {})
+    rules = _rules(st.system_text(None, reg.profile))
+    flat = " ".join(rules.split())
+    assert ("When the names in the question that matched the guild's names include what the person asked about, answer "
+            "from them or look THOSE up before trying another kind of lookup.") in flat
+    assert '"Who has", "who can make" or "who makes" about a recipe asks for its crafters.' in flat
+    assert "a question about HOW to do something is answered from the manual, never with acts=true." in flat
+    for case_word in ("ironfeather", "breastplate", "thornwick", "mark myself"):
+        assert case_word not in rules.lower(), case_word
+    st._SYSTEM_CACHE.clear()
+    assert st.system_text(None, duo.b.profile) == st.system_text(None, reg.profile)

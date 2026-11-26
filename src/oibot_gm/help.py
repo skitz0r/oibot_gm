@@ -978,6 +978,14 @@ def _loot(ask: Ask) -> list[str]:
     return out
 
 
+# the public names of the helpers the answer modules read (answer_names, answer_tools, answer_start): the same
+# functions, so the old path and the lookups never drift apart
+safe_text = _safe        # member text inside a block can't close or open one
+whole_words = _words     # any term in the (folded) question as a whole word
+clip_lines = _clip       # whole lines while they fit, then a marker
+council_loot = _loot     # the loot section as the council (or a member, D2) reads it
+
+
 def _bank(ask: Ask) -> list[str]:
     reg, x = ask.reg, ask.extras
     priv = x.privilege if x else {}

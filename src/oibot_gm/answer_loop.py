@@ -32,7 +32,7 @@ from .llm.provider import BudgetExceeded, CutShort, Refused
 log = logging.getLogger(__name__)
 
 __all__ = ["MAX_ROUNDS", "MAX_CALLS_PER_ROUND", "RESULT_CAP", "BIG_RESULT_CAP", "TOTAL_RESULT_CHARS", "MAX_REQUESTS",
-           "ANSWER_CHARS", "MAX_CHOICES", "REPLY", "reply_spec", "ANSWER_NOT_FOUND", "ANSWER_FAILED", "TOO_MANY_LOOKUPS", "RESULTS_FULL",
+           "ANSWER_CHARS", "MAX_CHOICES", "REPLY", "ACTS_DOC", "reply_spec", "ANSWER_NOT_FOUND", "ANSWER_FAILED", "TOO_MANY_LOOKUPS", "RESULTS_FULL",
            "FINAL_NUDGE", "KIND_PAGE", "AnswerResult", "run", "answer"]
 
 MAX_ROUNDS = 3              # lookup rounds per answer (design §6)
@@ -65,6 +65,12 @@ Ending = Literal["answered", "asked", "acts", "acts_off", "cap", "budget", "erro
 USAGE_KEYS = ("input", "output", "cache_read", "cache_write", "cost")
 
 
+# `reply`'s acts, sharper than HelpAnswer's (the old path's schema keeps its own words): a how-to question is answered
+ACTS_DOC = ("True only when the message asks the bot to DO something now (record an absence, change a character or main, "
+            "answer or confirm an event, change a setting). A question about HOW to do something is answered, never acts: "
+            "acts is only for a message that asks the bot to do it now.")
+
+
 def _field_doc(name: str) -> str:
     return HelpAnswer.model_fields[name].description or ""
 
@@ -80,7 +86,7 @@ def reply_spec() -> dict:
         "page": {"type": "string", "enum": list(help_mod.PAGES) + [""], "description": _field_doc("page")},
         "officer_view": {"type": "boolean", "description": _field_doc("officer_view")},
         "for_officer": {"type": "boolean", "description": _field_doc("for_officer")},
-        "acts": {"type": "boolean", "description": _field_doc("acts")},
+        "acts": {"type": "boolean", "description": ACTS_DOC},
         "choices": {"type": "array", "items": {"type": "string"},
                     "description": f"Only for a clarifying question, else empty: at most {MAX_CHOICES} names exactly as "
                                    "a lookup or the candidates showed them; `answer` is then the question. A name no "

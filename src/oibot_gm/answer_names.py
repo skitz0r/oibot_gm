@@ -350,9 +350,9 @@ def _person_tier(q: str, full: str, first: str | None, table: WordTable) -> tupl
     only a stop word or too short never counts; a common word does (a person is named on purpose — design §5's
     Review Focus: a character called like a recipe word gives both kinds)."""
     if _telling(norm_recipe(full)) or len(norm_recipe(full).split()) > 1:
-        if help_mod._words(q, full):
+        if help_mod.whole_words(q, full):
             return 1, 0, WHY[1]
-    if first and _telling(norm_recipe(first)) and help_mod._words(q, first):
+    if first and _telling(norm_recipe(first)) and help_mod.whole_words(q, first):
         w = norm_recipe(first)
         return 2, table.counts.get(w, 0), f'the name "{first}"'
     return None
@@ -387,7 +387,7 @@ def _member_detail(reg: Registry, m, chars) -> str:
         line = who_line(reg, m)
         if line is None:
             return "no character yet"
-        head = f"- {help_mod._safe(m.display_name)}: "
+        head = f"- {help_mod.safe_text(m.display_name)}: "
         return _safe(line[len(head):] if line.startswith(head) else line)
     if not chars:
         return "no character yet"

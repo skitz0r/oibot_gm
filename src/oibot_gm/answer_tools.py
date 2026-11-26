@@ -4,7 +4,7 @@ officer-aware ones — loot, attendance, manual, section.
 
 Every tool is a READ and a thin wrapper over a reader the site or the help snapshot already uses (answer_names.resolve,
 professions.who_can_make / crafters_of / answer_lines, prices.price_answer / cost_line, help.member_lines / run_lines /
-who_line, schedule_view.schedule_sections, loot_ops.log_rows / member_awards, help._loot, Registry.attendance_text,
+who_line, schedule_view.schedule_sections, loot_ops.log_rows / member_awards, help.council_loot, Registry.attendance_text,
 help.manual_read, help.SECTIONS' builders): nothing here writes, sends or searches on its own. Who asks is fixed in
 code — the Viewer, built once with help.guild_state's rule — and is never read from a tool's arguments. Every result is
 cut to its cap on whole lines (`cut`), neutralised (`llm.provider.unfence`) and wrapped in one data block (`run_tool`).
@@ -443,7 +443,7 @@ def _players(v: Viewer, cls_text: str, role_text: str) -> str:
         for c in help_mod.who_chars(m):
             if cls and c.cls != cls:
                 continue
-            row = help_mod._safe(f"- {m.display_name}: {help_mod.who_char_words(reg, c)}")
+            row = help_mod.safe_text(f"- {m.display_name}: {help_mod.who_char_words(reg, c)}")
             if not role or help_mod.role_of(reg, c) == role:
                 main.append(row)
             elif c.offspec and help_mod.role_of(reg, c, c.offspec) == role:
@@ -506,9 +506,6 @@ def visible_event(reg, ev, viewer_id: int, audience_public: bool = False) -> boo
     if not rc.rehearsal_run(reg, ev):
         return True
     return _tester(reg, ev) == viewer_id and not audience_public
-
-
-_listed = visible_event  # the older name, a pure alias
 
 
 def _events(reg, rs, which: str, viewer_id: int, audience_public: bool = False) -> list:
@@ -639,7 +636,7 @@ def _loot(v: Viewer, args: dict) -> str:
     reg = v.reg
     ctx = RegistryLootContext(reg, reg.store, None)  # a fresh read in this worker thread, as help._loot does
     who, item = _arg(args, "member"), _arg(args, "item")
-    council = help_mod._loot(v.ask()) if _council_view(v) else []  # precedents with their reasons, the ledger's last rows
+    council = help_mod.council_loot(v.ask()) if _council_view(v) else []  # precedents with their reasons, the ledger's last rows
     if who.lower() in SELF_WORDS or (not who and not item and not _council_view(v)):
         # the asker's own awards, as My loot finds them: no filter and 'me' read the same way
         me = reg.members.get(v.user_id)
@@ -738,5 +735,5 @@ def _section(v: Viewer, args: dict) -> str:
     _pattern, build, cap, officers = help_mod.SECTIONS[key]
     if officers and not v.officer:  # each section keeps its own flag; an officer where members read is a member here
         return OFFICERS_ONLY
-    lines = help_mod._clip(build(v.ask()), min(cap, BIG_RESULT_CAP))
+    lines = help_mod.clip_lines(build(v.ask()), min(cap, BIG_RESULT_CAP))
     return One("\n".join(lines)) if lines else "This summary has nothing to show yet."

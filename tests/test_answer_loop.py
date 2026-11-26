@@ -254,7 +254,20 @@ def test_reply_spec_is_strict_and_carries_help_answers_words():
     assert set(schema["required"]) == set(schema["properties"]) == {"answer", "commands", "page", "officer_view", "for_officer",
                                                                     "acts", "choices"}
     assert schema["properties"]["page"]["enum"][-1] == "" and "professions" in schema["properties"]["page"]["enum"]
-    assert al.HelpAnswer.model_fields["acts"].description in schema["properties"]["acts"]["description"]
+    assert schema["properties"]["acts"]["description"] == al.ACTS_DOC
+    assert al.HelpAnswer.model_fields["commands"].description in schema["properties"]["commands"]["description"]
+
+
+def test_reply_acts_says_a_how_to_question_is_answered_and_the_old_schema_keeps_its_words():
+    """Task 10 (the probe: a how-to question was flagged acts): reply's acts says a question about HOW to do something is
+    answered, never acts — one general rule; HelpAnswer's own description (the old path's schema) is unchanged."""
+    acts = al.reply_spec()["input_schema"]["properties"]["acts"]["description"]
+    assert "A question about HOW to do something is answered, never acts" in acts
+    assert "only for a message that asks the bot to do it now" in acts
+    assert al.HelpAnswer.model_fields["acts"].description == (
+        "True when the message asks the bot to DO something now (record an absence, change a character or main, answer or "
+        "confirm an event, change a setting) rather than asking how or what")
+    assert al.reply_spec() == al.reply_spec(), "the same tool for every asker and question"
 
 
 # ---------------------------------------------------------------- the three questions of §1

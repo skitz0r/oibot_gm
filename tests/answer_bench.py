@@ -11,6 +11,9 @@ a GOOD ANSWER to the question must say, as a person would judge it under the ans
 about what is not there, names never pinged): the smallest set of facts without which the reply is wrong or useless —
 never a fact a good reply may leave out (a second crafter, a skill, a member, a reagent, a role word). For an
 `asks_back` case it is the choices that must be offered. The live probe (scripts/answer_probe.py) judges on `answer`.
+An `answer` entry is one fact, or a tuple of readings of it (`readings`): any ONE reading holding satisfies the entry —
+for a fact a good reply may word two ways (the button or the command, "officer" or "council"). `answered_instead`
+(an `asks_back` case only): the facts an answer that names every match instead of asking back must hold to pass.
 Every setup makes sure its asker's record exists. Members, characters and items here are invented; no real guild data."""
 from __future__ import annotations
 
@@ -75,7 +78,13 @@ class BenchCase:
     asks_back: bool = False
     script: tuple = ()
     tags: tuple[str, ...] = ()  # a group the probe reports together: `shorthand` = the person wrote the game's short names
-    answer: tuple[str, ...] = ()  # the facts a good answer must hold (the probe's pass rule); see the module's docstring
+    answer: tuple = ()  # the facts a good answer must hold (the probe's pass rule): each a str or a tuple of readings
+    answered_instead: tuple[str, ...] = ()  # asks_back only: an answer naming every match passes with all of these
+
+
+def readings(entry) -> tuple[str, ...]:
+    """An `answer` entry's readings: a str is its only one; a tuple holds the readings any one of which satisfies it."""
+    return (entry,) if isinstance(entry, str) else tuple(entry)
 
 
 def scripted(case: BenchCase, fmt: dict[str, str]) -> list:
@@ -143,7 +152,7 @@ def two_crafters(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
     """Crafters, and Pellow's Briarwood with Leatherworking and Ironfeather Leggings."""
     out = crafters(reg, rs)
     reg.set_professions(PELLOW, "Briarwood", [{"id": "leatherworking", "skill": 300, "recipes": [{"id": 55073}]}])
-    return out
+    return {**out, "crafter2": "Briarwood"}
 
 
 def alchemist(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
@@ -223,7 +232,7 @@ def an_applicant(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
     if NEWCOMER not in reg.applicants:
         reg.apply(NEWCOMER, "Newbie", "Newname", "Mage", "Frost", None, None, None, None, schedules=[sid],
                   answers=[{"label": "Why us?", "answer": "Friends here"}])
-    return {"applicant": "Newbie"}
+    return {"applicant": "Newbie", "applicant_character": "Newname"}
 
 
 def blacksmith(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
@@ -291,8 +300,9 @@ BENCH: list[BenchCase] = [
                       [reply(answer="Briarwood can make the Flask of the Titans and the Flask of Supreme Power.")])),
     BenchCase("ironfeather_choose", "member", "private", "who can make ironfeather?", two_crafters,
               candidates=IRONFEATHER, asks_back=True,
-              # two pieces have a maker, so the good answer asks which one: those two must be among the choices
-              answer=("Ironfeather Breastplate", "Ironfeather Leggings"),
+              # two pieces have a maker, so the good answer asks which one: those two must be among the choices;
+              # an answer naming both makers instead (each piece with its maker) is as good
+              answer=("Ironfeather Breastplate", "Ironfeather Leggings"), answered_instead=("{crafter}", "{crafter2}"),
               script=([reply(answer="Which one?", choices=["Ironfeather Breastplate", "Ironfeather Leggings"])],)),
 
     # one per tool
@@ -320,17 +330,18 @@ BENCH: list[BenchCase] = [
               script=([call("loot", item=LOOT_ITEM)], [reply(answer=f"{LOOT_TO} got the {LOOT_ITEM} from the {LOOT_BOSS}.")])),
     BenchCase("attendance", "member", "private", "what's my attendance?", askers,
               must=("not tracked yet",), expect_tools=("attendance",),
-              # the fact is "nothing is counted yet": "yet" is the one word every phrasing of it shares
-              answer=("yet",),
+              # the fact is "nothing is counted yet": said with "yet", or as when it starts counting
+              answer=(("yet", "first raid"),),
               script=([call("attendance")], [reply(answer="Your attendance is not tracked yet.")])),
     BenchCase("manual", "member", "private", "how do I mark myself away?", askers,
               must=("I'll be away",), expect_tools=("manual",),  # the button's name, from the manual part's text
-              # the manual gives three ways (the card's button, /me absent add, telling the bot); judged on the button,
-              # the first it names: an answer giving only /me absent add is right yet fails here
-              answer=("I'll be away",),
+              # the manual gives three ways (the card's button, /me absent add, telling the bot): the button or the
+              # command satisfies it
+              answer=(("I'll be away", "/me absent add"),),
               script=([call("manual", query="mark myself away")], [reply(answer="Press I'll be away on the absences card.")])),
     BenchCase("section", "officer", "private", "any applications waiting?", an_applicant,
-              must=("Newbie",), expect_tools=("section",), answer=("{applicant}",),
+              must=("Newbie",), expect_tools=("section",),
+              answer=(("{applicant}", "{applicant_character}"),),  # the applicant by their name or their character's
               script=([call("section", key="applications")], [reply(answer="Newbie has applied and waits for a decision.")])),
 
     # the game's shorthand (the owner, 2026-11-25: no alias table): the resolver finds nothing in "bs", "pally" or "lw";
@@ -351,12 +362,12 @@ BENCH: list[BenchCase] = [
               never=("dentist",), answer=("officer",),  # the absences are officers': the reply says it needs one
               script=([call("section", key="absences")], [reply(answer="Only officers can see who is away.")])),
     BenchCase("away_officer_public", "officer", "public", "who is away next week?", away_next_week,
-              # an officer where members read is a member here: the reply sends them to a private message. Two readings
-              # ("ask in private" or "DM me"); judged on "private": an answer saying only "DM me" is right yet fails here
-              never=("dentist",), answer=("private",),
+              # an officer where members read is a member here: the reply sends them to a private message, or says
+              # it is officers' data ("DM me" alone still fails: neither word)
+              never=("dentist",), answer=(("private", "officer"),),
               script=([call("section", key="absences")], [reply(answer="Ask me in a private message for that.")])),
     BenchCase("loot_reason_member", "member", "public", "why did {character} get {item}?", an_award_with_reason,
-              never=(LOOT_REASON,), answer=("officer",),  # the council's reasons are for officers: the reply says so
+              never=(LOOT_REASON,), answer=(("officer", "council"),),  # the reasons are the council's: the reply says so
               script=([call("loot", item=LOOT_ITEM)], [reply(answer=f"{LOOT_TO} got the {LOOT_ITEM}; the council's reasons are for officers.")])),
     BenchCase("record_other_member", "member2", "public", "what's Thornwick's record?", away_next_week,
               never=("dentist",), answer=("Survival Hunter",),  # what he plays; his professions may be left out

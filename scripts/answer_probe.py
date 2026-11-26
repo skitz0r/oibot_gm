@@ -25,11 +25,15 @@ WHAT "PASS" MEANS, for one run of one case — all three must hold:
      every word left must appear in the answer, case-insensitive, markdown emphasis ignored, at the start of a word
      ("Wed" is found in "Wednesday", "officer" in "officers", "3:00" also as "3" before a non-digit). The JSON also
      records whether each fact appeared word for word (`answer_literal_missing`), for reading — it does not decide.
+     An entry given as several readings (the button OR the command, "officer" OR "council") is met when any ONE of
+     its readings is; a miss is reported as "A or B" with the words each reading lacks.
   2. NEVER: no `never` value of the case appears in the final answer (case-insensitive, emphasis ignored, word for
      word). A never hit is a visibility failure and fails the whole probe whatever the pass rate.
   3. ENDING: a case marked `asks_back` passes when the reply asked back — choices kept (ending "asked"), or an answer
-     that is a question (holds "?"); any other case must end "answered" (asked, acts, acts_off, cap, budget and error
-     fail).
+     that is a question (holds "?") — or, where the case names `answered_instead`, when it answered with every one of
+     those facts instead (each match with its maker: as good as asking; then those facts are the ANSWER facts, and
+     `answered_instead` is true in the JSON); any other case must end "answered" (asked, acts, acts_off, cap, budget
+     and error fail).
 A case with no `answer` facts is NOT JUDGED: shown as "n/j", left out of the pass rate, never counted as a pass.
 LOOKUPS are reported, not judged: the "lookups" column says "ok" when every `expect_tools` lookup was called, else
 "-<names>" for the ones skipped, and each tag counts its runs that skipped one — a right answer reached another way
@@ -78,7 +82,7 @@ for _p in (ROOT / "src", ROOT / "tests"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from answer_bench import ASKERS, BENCH, BenchCase, asker_of, bench_registry  # noqa: E402
+from answer_bench import ASKERS, BENCH, BenchCase, asker_of, bench_registry, readings  # noqa: E402
 
 from oibot_gm import answer_loop, armory, discord_armory, discord_auctions, prices  # noqa: E402
 from oibot_gm import help as help_mod  # noqa: E402
@@ -128,26 +132,46 @@ def never_hits(nevers: list[str], answer: str) -> list[str]:
     return [n for n in nevers if _plain(n) and _plain(n) in text]
 
 
+def unmet(entry, fmt: dict, answer: str) -> list[tuple[str, list[str]]]:
+    """[] when one of the entry's readings (answer_bench.readings) has every fact word in `answer`; else each reading
+    with the words it lacks."""
+    misses = [(want, missing_facts(want, answer)) for want in (r.format(**fmt) for r in readings(entry))]
+    return [] if any(not m for _, m in misses) else misses
+
+
+def _miss_row(misses: list[tuple[str, list[str]]]) -> dict:
+    """The JSON's answer_missing row: one reading = {fact, words} as before; several = the readings joined with "or",
+    the words any of them lacks, and each reading's own."""
+    if len(misses) == 1:
+        return {"fact": misses[0][0], "words": misses[0][1]}
+    words = list(dict.fromkeys(w for _, m in misses for w in m))
+    return {"fact": " or ".join(w for w, _ in misses), "words": words,
+            "readings": [{"fact": w, "words": m} for w, m in misses]}
+
+
 def score(case: BenchCase, fmt: dict, run: "Run", path: str) -> None:
     """Fills run.passed, run.judged and run.reasons by the three rules of the module's docstring; the lookups skipped
     go to run.tools_missing (reported, never a reason)."""
     reasons: list[str] = []
     seen = run.answer + ("\n" + " ".join(run.commands) if run.commands else "")
     run.judged = bool(case.answer)
-    for a in case.answer:
-        want = a.format(**fmt)
-        miss = missing_facts(want, seen)
-        if miss:
-            run.answer_missing.append({"fact": want, "words": miss})
-            reasons.append(f"answer {want!r} lacks {', '.join(miss)}")
-        if _plain(want) not in _plain(seen):
-            run.answer_literal_missing.append(want)
+    asked = run.ending == "asked" or (run.ending == "answered" and "?" in run.answer)
+    run.answered_instead = bool(case.asks_back and not asked and run.ending == "answered" and case.answered_instead
+                                and not any(unmet(a, fmt, seen) for a in case.answered_instead))
+    for a in (case.answered_instead if run.answered_instead else case.answer):
+        misses = unmet(a, fmt, seen)
+        if misses:
+            run.answer_missing.append(_miss_row(misses))
+            reasons.append("answer " + " or ".join(repr(w) for w, _ in misses) + " lacks "
+                           + "; ".join(", ".join(m) for _, m in misses))
+        wants = [r.format(**fmt) for r in readings(a)]
+        if not any(_plain(w) in _plain(seen) for w in wants):
+            run.answer_literal_missing.append(" or ".join(wants))
     run.never_hit = never_hits([n.format(**fmt) for n in case.never], seen)
     reasons += [f"NEVER {n!r} appeared" for n in run.never_hit]
     if path == "loop":
         run.tools_missing = [t for t in case.expect_tools if t not in run.tools]
-    asked = run.ending == "asked" or (run.ending == "answered" and "?" in run.answer)
-    if case.asks_back and not asked:
+    if case.asks_back and not asked and not run.answered_instead:
         reasons.append(f"should ask back, ended {run.ending_words()}")
     elif not case.asks_back and run.ending != "answered":
         reasons.append(f"ended {run.ending_words()}")
@@ -188,6 +212,7 @@ class Run:
     reasons: list[str] = field(default_factory=list)
     answer_missing: list[dict] = field(default_factory=list)
     answer_literal_missing: list[str] = field(default_factory=list)
+    answered_instead: bool = False  # an asks_back case answered with every match instead (rule 3)
     never_hit: list[str] = field(default_factory=list)
     tools_missing: list[str] = field(default_factory=list)
 
@@ -570,8 +595,9 @@ def main(argv: list[str] | None = None, provider=None) -> int:
             print(f"  model {m}: forced reply {'taken' if llm.forced_tool_ok(m) else 'not taken (auto on the last request)'}"
                   + ("" if known else " · NO PRICE ROW: cost counted at its family's or the dearest known price"))
         print(f"  work folder {work} · usage {work / 'llm_usage.jsonl'} · results {out}")
-        print("  pass = every answer fact's words in the final answer, no never in it, and it answered (or asked back "
-              "where the case asks back); lookups are reported, not judged; a case with no answer facts is not judged.")
+        print("  pass = every answer fact's words in the final answer (one reading of it is enough), no never in it, and "
+              "it answered (or asked back where the case asks back, or named every match where the case allows it); "
+              "lookups are reported, not judged; a case with no answer facts is not judged.")
 
         runs: list[Run] = []
         stopped = False

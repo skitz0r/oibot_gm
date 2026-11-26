@@ -207,7 +207,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        (NEXT_EVENTS 3: starts, opens, locks, occurrence, the event's key) + next_empty, regulars (_regulars: count vs seats, short,
                        rc.series_forecast — if_resumed on a paused one — as forecast rows with can_open / why for Open early, rows with box 18 + the
                        record's rev; None for a pickup), people, boxes {pause | resume, remove}, stored (stored_entry, the editor's machine form), rev
-                       (config_rev schedule:<id>)}; RegistryError NO_SCHEDULE for an unknown id
+                       (config_rev schedule:<id>)}; RegistryError NO_SCHEDULE for an unknown id; schedule_sections(reg) (+ SCHEDULE_RUNS) = the
+                       public /schedule page's rows, moved here from web/app.py (re-exported there) so the answer lookups' `schedule` reads it
   raid_page.py         the Raids page's read model (§5.67 phase 4), PURE: raid_row(reg, rs, rid) (/api/raids `page`) → details (Size — shown, never
                        edited —, Groups, Lockout, Length, First opens, Played in with each schedule's link), make_up (minimum_rows: Registry.minimums
                        ALONE, `own` = the guild set it), make_up_empty, priority bars, used_when / one_off_rule, open_events, boxes.reset;

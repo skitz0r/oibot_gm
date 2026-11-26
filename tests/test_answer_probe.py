@@ -267,3 +267,33 @@ def test_fact_words_and_matching():
     assert probe.missing_facts("lock Wed 9 Dec 3:00 PM", "It locks on **Wednesday**, December 9 at 3 PM.") == []
     assert probe.missing_facts("I'll be away", "Press *I’ll be away*.") == []
     assert probe.missing_facts("made by Thornwick (300)", "Thornwick at 3000") == ["300"]
+
+
+def test_either_reading_of_a_fact_passes_and_a_miss_names_both(work, capsys):
+    """Task 10: an entry with two readings is met by either; missing both reports "A or B" and each reading's words."""
+    for i, said in enumerate(("Use /me absent add with the dates.", "Press I'll be away on the absences card.")):
+        code, text, res = run(["--case", "manual"], ScriptedProvider([[{"name": "manual", "input": {"query": "away"}}],
+                                                                       [reply(answer=said)]]), work / str(i), capsys)
+        assert res["runs"][0]["passed"], (said, res["runs"][0]["reasons"])
+    code, text, res = run(["--case", "manual"], ScriptedProvider([[reply(answer="Ask a friend.")]]), work / "miss", capsys)
+    r = res["runs"][0]
+    assert not r["passed"] and r["answer_missing"][0]["fact"] == "I'll be away or /me absent add"
+    assert [x["fact"] for x in r["answer_missing"][0]["readings"]] == ["I'll be away", "/me absent add"]
+    assert r["answer_literal_missing"] == ["I'll be away or /me absent add"]
+    assert "answer \"I'll be away\" or '/me absent add' lacks" in text
+
+
+def test_asking_back_or_naming_both_makers_passes_the_choose_case(work, capsys):
+    """Task 10: ironfeather_choose passes on asking back (the choices offered) or on an answer naming both makers;
+    an answer naming one maker fails as before."""
+    asked = reply(answer="Which one?", choices=["Ironfeather Breastplate", "Ironfeather Leggings"])
+    both = reply(answer="Thornwick makes the Ironfeather Breastplate and Briarwood the Ironfeather Leggings.")
+    one = reply(answer="Thornwick makes the Ironfeather Breastplate.")
+    got = {}
+    for name, step in (("asked", asked), ("both", both), ("one", one)):
+        code, text, res = run(["--case", "ironfeather_choose"], ScriptedProvider([[step]]), work / name, capsys)
+        got[name] = res["runs"][0]
+    assert got["asked"]["passed"] and not got["asked"]["answered_instead"]
+    assert got["both"]["passed"] and got["both"]["answered_instead"] and got["both"]["ending"] == "answered"
+    assert not got["one"]["passed"] and not got["one"]["answered_instead"]
+    assert any("should ask back" in x for x in got["one"]["reasons"])

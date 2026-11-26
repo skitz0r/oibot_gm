@@ -8,6 +8,13 @@ scripts/raidhelper_roster.py  a Raid-Helper event export (JSON) → `<guild>/tes
                        PRIVATE data repo: the test bench's seed then rehearses against the guild's real signup shape (§5.42); `--members` → the import rows
                        {discord_id, name, character, cls, spec} for Registry.import_members (POST /api/members/import, MCP import_members — §5.53: the
                        real roster from a signup list; skipped rows named, preview writes nothing, a rank needs the actor); specs → classes, never names here
+scripts/answer_probe.py  the live probe of the answer lookups (design §5.68): the REAL model answers tests/answer_bench.BENCH through
+                       answer_loop.answer on a scratch copy of fixtures/demo per case (bench_registry; never the data repo, nothing under out/:
+                       a work folder under the system temp directory); judges each final answer on BenchCase.answer (each entry a fact or a
+                       tuple of readings — unmet / readings; `answered_instead` lets an asks_back case pass by naming every match), `never` and
+                       the ending; lookups reported, not judged; --model / --effort / --compare / --baseline (help.answer beside it) / --only /
+                       --repeat / --budget (3 USD, its own usage file — never the bot's monthly cap) / --pass-mark 0.8; exit 0 pass, 1 under the
+                       mark or a never hit, 2 nothing run, 3 its budget reached; results.json per run
 scripts/serve_scratch.py  THIS worktree's site on a throw-away copy of fixtures/demo for screenshots (§5.67 phase 4; never the live bot):
                        a git-inited data repo under the temp directory (GitStore push=False), the demo characters imported, `--seed` = a two-raid open
                        one-off, a locked and a finished one, a schedule with regulars, a minimum; the bot = tests/test_raid_night.NightBot (Discord
@@ -21,7 +28,7 @@ scripts/serve_scratch.py  THIS worktree's site on a throw-away copy of fixtures/
                        guild the person may open (guild_routing.member_of); homepage/not-member page = one card per LISTED server (`listed(bot)`:
                        GuildConfig.public — an unlisted guild is never named on the homepage, the not-a-member page, /api/public or /schedule);
                        no invite → INVITES_CLOSED; GET /schedule[?g=<key>] = the PUBLIC raid schedule (no login: raid name + size, next three runs per
-                       schedule in Registry.local12 words, nothing about members; schedule_sections) — design §5.49
+                       schedule in Registry.local12 words, nothing about members; schedule_sections, now schedule_view's, re-exported here) — design §5.49
   web/api_ops.py       install_ops_api (called from api.py): POST /api/ops/change — `text` (officers, Claude) or typed `changes`/`ops` (tiered: a Save applies
                        unless Described.review, then needs_review + token; `confirmed`; `revs` config:<section> → 409; BOOT-prefixed tokens: expired → silent
                        re-preview when the fingerprint matches, restarted → shown again; §5.67 phase 4: review = Described.review OR asks_first — a
@@ -29,7 +36,10 @@ scripts/serve_scratch.py  THIS worktree's site on a throw-away copy of fixtures/
                        words → needs_review + the fresh box + a new token, nothing written); the admin setup routes (/api/admin/config|aura|family|aura/reset|raid|
                        raid/reset|raid/schedule|raid/schedule/remove|recruitment|plain-permissions, + api_setup's channels via app.state.ops_translate) are TRANSLATORS
                        into changes through apply_ops under the SAME tier (D51): a warn-class / consequence batch needs `confirmed` + the section revs it touches,
-                       else it answers `review_required` with the Described preview and writes nothing; no page posts to them (tests/test_frontend_source.py)
+                       else it answers `review_required` with the Described preview and writes nothing; no page posts to them (tests/test_frontend_source.py);
+                       the text branch with the answer tools on (design §5.68): a question verdict, or a bare change (no ops, no questions,
+                       nothing refused), → `reply` = help_answer(may_act=False, link=False, entry="site"), `questions` [] (ASK_GUIDE outside
+                       the ask audience; /api/ask shares the constant)
   web/api_setup.py     install_setup_api (called from api.py; design §5.46): GET/POST /api/admin/channels (rows with `missing`/`problem`, never while Discord is
                        unreachable; POST = a translator through app.state.ops_translate), POST /api/admin/news-webhook (owner; the URL never in an ops line),
                        GET /api/admin/setup (checklist, invite, error alerts + the owner's choices and the settings rev; Host card for a superuser / the

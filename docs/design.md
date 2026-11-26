@@ -6205,3 +6205,136 @@ older-words paragraph. The pending-files list is gone.
 **Later** (in no plan yet): the activity log's code nouns, the older pages' Apply N changes. Phases 1 and 2's tests:
 `tests/test_guild_schedules.py`, `tests/test_schedule_timing.py`, `tests/test_minimums.py`, `tests/test_minimums_solver.py`,
 `tests/test_officer_raids.py`.
+
+### 5.68 Answering questions with lookup tools (built 2026-11-25)
+
+**Why.** Three answers on 2026-11-25 were wrong although the bot held the facts ("bot who has ironfeather", "who can make
+ironfeather breastplate", "who can make ironfeather leather working pieces"): each topic of the help snapshot had its own
+keyword gate (`help.SECTIONS`, `professions.help_hit`, `prices.help_hit`), nothing asked "what does this message name?",
+and a question could leave the answering path for the change parser, whose own one-line reply went out. Spec:
+`docs/superpowers/specs/2026-11-25-answer-tools-design.md` (approved as written, including its §12 proposal on loot);
+plan: `docs/superpowers/plans/2026-11-25-answer-tools.md`; the build's ledger and the reviews are under
+`.superpowers/sdd/2026-11-25-answer-tools/`. This section is the record as built; where it differs from the spec it says so.
+
+**What was built.** One bounded tool-use loop answers a question: code resolves the names the message holds, the model
+reads guild facts through read-only lookups over the readers the site already uses, and it ends with a structured `reply`.
+- `answer_names.py` — `resolve(reg, text, kinds=, limit=)` → typed `NameMatch` candidates (recipe, item, member,
+  character, raid, schedule, profession, class, command, manual part; at most ten, with the total) from the existing
+  finders only (`professions.search` / `phrase_hits`, `prices.names`, `help.mentioned_members`, `help.manual_match`,
+  `professions.match_tiers`); `word_table(reg)` = the per-guild word counts that rank a rare word over a common one and
+  never match on their own; `match_lines` = the candidates as the first request prints them. It also backs `find`.
+- `answer_tools.py` — the `Viewer` (who asks and who reads the reply, fixed in code by help.guild_state's rule, never a
+  tool argument), the `Tool` registry `TOOLS` and `tools_for(profile)` (sorted, constant per game profile: the prompt
+  cache's prefix), `run_tool` (never raises; every result cut on whole lines, unfenced and wrapped in one data block).
+  Eleven lookups: find, recipe, crafters, price (only where the game has auction houses), member (one record, or who
+  plays a class or a role — main specs first, then off specs marked), event, schedule, loot, attendance, manual, section
+  (today's snapshot sections, each with its own officer flag). Profession and class arguments are enums of the profile's
+  own names; the model maps shorthand to them (no alias table).
+- `answer_start.py` — `system_text(tree, profile)` (who the bot is, today's answer rules, the loop's rules, the manual's
+  contents list, the command list; one string per profile and command tree, cached per process, so a manual edit shows
+  after a restart) and `user_text` (the small start that replaces the snapshot: guild, time, where the reply is read,
+  the asker and their characters, at most eight live events, the matched names, the officers' loot data in private,
+  the conversation and memory blocks, the question ≤ 1,500 characters). Measured: the start runs about 400–1,000
+  characters against the snapshot's 14,700–19,300; the cached prefix (system + tools) about 23,400.
+- `answer_loop.py` — `run` / `answer` → `AnswerResult` (the HelpAnswer help_answer posts, plus ending, rounds, requests,
+  lookups, usage); `reply_spec()` = HelpAnswer's fields plus `choices`, strict, with its own sharper `acts` (`ACTS_DOC`);
+  every limit below in code.
+- `answer_switch.py` — `enabled(guild_key)`, `entry_kw`, `log_answer` (re-exported by answer_loop).
+- `llm/provider.py` — `AnthropicProvider.converse` (the repo's only multi-turn tool-use code: two cache breakpoints, the
+  assistant content appended back unchanged, one usage row per request), `Turn`, `Refused` / `CutShort`, `model_id`,
+  `forced_tool_ok` / `NO_FORCED_TOOL`, the `claude-sonnet-5-5` price row.
+- Moved out so both paths read one copy: `help.who_line` / `role_of` / `who_chars` / `who_char_words`,
+  `schedule_view.schedule_sections` (re-exported by web/app.py), `loot_ops.log_rows` / `log_row` / `log_day` (the Loot
+  log's rows, out of web/api_loot.py). help.py's helpers the answer modules read have public names (`safe_text`,
+  `whole_words`, `clip_lines`, `council_loot`).
+- `scripts/answer_probe.py` and the bench (`tests/answer_bench.py`, 21 cases) — below.
+
+**The limits as shipped** (all in code, each with a test):
+
+| Limit | Value |
+|---|---|
+| Lookup rounds per answer | 3; then only `reply` is offered (forced where the model takes a forced tool) with a last-step line |
+| Lookups per round | 4, run together; the rest answered "Too many lookups in one step" |
+| One lookup result | 1,500 characters, cut on a whole line |
+| One `manual`, `section` or `event` result, and `loot` for an officer in private | 4,000 characters |
+| All lookup results of one answer | 12,000 characters; past it the next request is the last |
+| Model requests per answer | 4, a hard stop |
+| The answer | 1,200 characters, as today; at most five choices, each a name a lookup or the candidates showed |
+
+The monthly cap is checked before every request (workload `help`, the questions' half); `BudgetExceeded` keeps its own
+sentence. An answer that runs out of room ends with *"I couldn't find the answer in the guild's records, so I haven't
+guessed."* (with the page of the kind of thing the resolver knew); a failed request with today's *"Something went
+wrong…"* and today's ops warning.
+
+**The switch, the log, the routing.** `OIBOT_ANSWER_TOOLS` = `off` (default) | `on` | guild keys; read from the
+environment at call time, which `.env` sets at start, so a change needs a restart; a malformed value reads as off and is
+logged once without the value. Off, every entry point, prompt and call is byte-for-byte the old path (pinned: the parser
+prompt's checksum, the help snapshot tests, `who_line`). On, `HelpMixin.help_answer` runs the loop instead of
+`help.answer` (`entry` names where the question came in) and everything after the answer is the same code. A question is
+never answered in the change parser's words: its verdict *question* (with or without questions of its own), or a
+*change* with nothing in it, goes back to the loop once with acting off, in `handle_change` (plain text, act channels,
+`/gm change`), the site's box (`web/api_ops.py`'s text branch) and the loot thread (`loot_chat`); a change missing a
+detail keeps asking for it; an overheard change stays held behind 👀; `/ask` gains the recent exchange and remembers its
+own answer only where replies are private. One row per answer in `out/answers.jsonl` (`OIBOT_ANSWERS_LOG` overrides it;
+rotated to `.1` past 5 MB): when, guild, entry, rounds, requests, the lookups by name (a made-up name logged as
+`unknown`), the ending (answered · asked · acts · acts_off · cap · budget · error), tokens and cost — never the question,
+the answer or a name.
+
+**Rulings during the build** (the ledger's, each with its owner):
+- No `claude-opus-5-5` price row (an existing test pins it to opus-5's family price): an opus-5-5 probe's cost reads
+  high, never low. Server-side fallbacks not added. *(controller)*
+- A reagent item stays a candidate beside the recipes that use it ("who has ironfeather" may mean the item, and `price`
+  needs it); only an item a recipe candidate makes, of the same name, is folded. Manual parts are searched only with
+  words no data candidate holds, and only for a how-to shape or one bare word; people are exempt from the common-word
+  rule; data before command and manual within a tier; a word start counts only as the text's only telling word.
+  *(controller)*
+- `event` takes the 4,000 cap (the spec's §6 amended by one cell); `loot` takes it for an officer in private only.
+  *(controller; told to the owner)*
+- Own attendance only where nobody else reads the reply (the spec's §7 rule; attendance is on private surfaces only
+  today). *(controller; told to the owner)*
+- A failed request ends with today's "Something went wrong…" (the not-found sentence would be untrue when nothing was
+  looked up); the budget ending carries no page link. *(controller)*
+- With the switch on, the parser's prompt says a change missing a detail is kind=change with questions and kind=question
+  is for information only; the loop with acting off is the safety net and never claims a change (the per-request
+  `ACTING_OFF` line and the `CANNOT_ACT` rule). *(controller)*
+- No alias table for the game's shorthand: profession and class arguments are the profile's names as enums and one
+  general rule in the system text tells the model to map short names (the owner, 2026-11-25). The class list shows
+  main-spec matches first, then characters whose off spec plays the role, marked. *(owner; controller)*
+- The bench judges what a good ANSWER says (`BenchCase.answer`); lookups are reported, not judged. *(controller)*
+- Kept as before, for the owner to know: a member's own record where others read the reply still shows their DMs on or
+  off, confirmations waiting and their own signup notes.
+- The spec's §12 question (may a member ask who received an item?): yes — the `loot` lookup shows any member the Loot
+  log's rows (item, character, date, boss), never scores, picks or reasons, also where others read the reply. *(owner)*
+- After the probe (task 10): the system text tells the model to answer from the matched names, or look those up, before
+  another kind of lookup ("who has / who can make / who makes" about a recipe asks for its crafters); `reply`'s `acts`
+  says a how-to question is answered, never acts (the old path's HelpAnswer keeps its words). The new path's memory rule
+  speaks of "a record a lookup shows", not the snapshot. The bench's wording-dependent facts take either reading, and
+  the choosing case passes on asking back or on naming both makers. *(controller)*
+
+**The first probe** (2026-11-25, demo data, 21 cases once each, effort low, $0.74 over 123 requests):
+
+| Setting | Passed | Median cost | Median requests | Median time |
+|---|---|---|---|---|
+| lookups · claude-sonnet-5 | 15 / 21 (71%) | $0.0092 | 2 | 4.3 s |
+| lookups · claude-sonnet-5-5 | 20 / 21 (95%) | $0.0061 | 2 | 3.5 s |
+| today · claude-sonnet-5 | 11 / 21 (52%) | $0.0064 | 1 | 2.1 s |
+| today · claude-sonnet-5-5 | 12 / 21 (57%) | $0.0059 | 1 | 2.1 s |
+
+Sonnet 5's real misses: "who has ironfeather" searched loot and ignored the matched recipes (the live miss repeated), and
+a how-to ended `acts`; marginal: the flasks question named the alchemist rather than the flasks, the loot-reason question
+didn't say reasons are officers'; two were the bench's wording only. Sonnet 5.5's one "fail" answered all three recipes
+with their makers instead of asking back — a good answer (the bench now accepts it). Shorthand: 3 / 3 on the lookups with
+the lookup called each time; 2 / 3 and 1 / 3 today. No 400s; no answer reached the fourth request, so the forced final
+`reply` was never sent (forced `tool_choice` with adaptive thinking on claude-sonnet-5 is still unverified live; Sonnet 5.5
+is in `NO_FORCED_TOOL` and gets the last-step line alone). The owner accepted the recommendation (2026-11-25): the lookup
+path runs on claude-sonnet-5-5 through `OIBOT_MODEL_HELP`, set when the switch is turned on — it sets the help route for
+both paths, so a guild still on today's path gets Sonnet 5.5 too. Not applied yet: the switch is on nowhere.
+
+**Tests.** `tests/test_answer_provider.py`, `test_answer_names.py`, `test_answer_tools.py`, `test_answer_tools_officer.py`,
+`test_answer_start.py`, `test_answer_loop.py`, `test_answer_switch.py`, `test_answer_routing.py`, `test_answer_bench.py`,
+`test_answer_probe.py`; the scripted stand-in `tests/answer_fakes.py`. No test reaches the network or a model.
+
+**Later** (in no plan yet): turn the switch on for the test guild, then one live guild, then all; delete the old path
+(`help.answer`, the section gates) once the bench and a week of live answers hold; the change parser's prompt still lists
+every member with no size cap; `help.mentioned_members` stops at five before puppets are dropped; the Ops page could read
+`out/answers.jsonl`.

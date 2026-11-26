@@ -7,6 +7,7 @@ owner token is local-only by default (OIBOT_MCP_LOCAL_ONLY), so the default clie
 pass their own client and headers."""
 from __future__ import annotations
 
+import itertools
 import os
 import shutil
 import subprocess
@@ -50,13 +51,23 @@ def _no_reference_price_reads(monkeypatch):
     monkeypatch.setattr(price_reference, "fetch_text", refuse)
 
 
+@pytest.fixture(scope="session")
+def _answers_logs(tmp_path_factory) -> Path:
+    """One folder for every test's answers log (a session's, per xdist worker): no temp folder made per test for it."""
+    return tmp_path_factory.mktemp("answers")
+
+
+_ANSWERS_LOG_SEQ = itertools.count(1)
+
+
 @pytest.fixture(autouse=True)
-def _no_host_env(monkeypatch, tmp_path):
+def _no_host_env(monkeypatch, _answers_logs):
     """A host's .env must not reach the suite: the site address and the per-workload budget caps are unset, the
-    answer tools' switch is off and their answers log is the test's own. A test that wants one sets it itself."""
+    answer tools' switch is off and their answers log is the test's own (a fresh file name in the session's folder).
+    A test that wants one sets it itself."""
     monkeypatch.delenv("OIBOT_WEB_URL", raising=False)
     monkeypatch.delenv("OIBOT_ANSWER_TOOLS", raising=False)
-    monkeypatch.setenv("OIBOT_ANSWERS_LOG", str(tmp_path / "out" / "answers.jsonl"))
+    monkeypatch.setenv("OIBOT_ANSWERS_LOG", str(_answers_logs / f"{next(_ANSWERS_LOG_SEQ)}" / "answers.jsonl"))
     for name in list(os.environ):
         if name.startswith("OIBOT_BUDGET_USD_"):
             monkeypatch.delenv(name, raising=False)

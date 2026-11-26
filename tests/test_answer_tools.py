@@ -373,7 +373,6 @@ def test_event_lookup_keeps_the_testers_rehearsal_out_where_members_read(reg, rs
     named = body(at.run_tool(viewer(reg, rs, MARROW, True, public=True), "event", {"which": at.run_title(reg, test)}))
     assert PAGE_WORDS["test_run"] not in named, "not by its title either"
     assert at.visible_event(reg, test, MARROW) and not at.visible_event(reg, test, MARROW, audience_public=True)
-    assert at._listed is at.visible_event
 
 
 def test_event_last_never_picks_a_closed_rehearsal_or_a_dropped_raid(reg, rs):
