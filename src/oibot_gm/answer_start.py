@@ -4,20 +4,20 @@ the small per-question start (`user_text`) that replaces help.guild_state's snap
 
 The start is built from the Viewer exactly as the lookups are (answer_tools): the role already downgraded where members
 read the reply, the asker's private details out where anyone else reads it, a rehearsal or a raid taken out of its
-lineup never a live event (but to its own tester), the loot council's data block only for an officer in private (as
-guild_state adds it). Every part is capped; member and guild text is unfenced. Nothing here writes anything."""
+lineup never a live event (but to its own tester in private, marked as a test event), the loot council's data block
+only for an officer in private (as guild_state adds it). The system text names only the lookups the profile offers. Every part is capped; member and guild text is unfenced. Nothing here writes anything."""
 from __future__ import annotations
 
 from . import help as help_mod
 from . import raidcycle as rc
 from .answer_names import NameMatch, match_lines
-from .answer_tools import FENCES, Viewer, _listed
-from .constants import OLD_WORDS_PROMPT
+from .answer_tools import FENCES, Viewer, _listed, tools_for
+from .constants import OLD_WORDS_PROMPT, PAGE_WORDS
 from .llm.provider import unfence
 from .raid_views import run_title
 
 __all__ = ["START_EVENTS", "QUESTION_CHARS", "ASKER_CHARS", "EVENT_LINE_CHARS", "START_TARGET", "SYSTEM_TEXT",
-           "system_text", "user_text"]
+           "LOOKUP_ORDER", "lookup_words", "system_text", "user_text"]
 
 START_EVENTS = 8          # live events in the start, one line each (design §4)
 QUESTION_CHARS = 1_500    # the question, as today
@@ -36,8 +36,7 @@ NO_EVENTS = "No event is open or locked right now."
 
 SYSTEM_TEXT = """You are oibot_GM, a WoW guild's raid-administration Discord bot, answering the person's question about the guild or about how you work.
 The first message gives the guild's name, the time, where the reply is read, the asker, the live events and the names
-in the question that matched the guild's names. Everything else you read through lookups: find (what a word or a name
-means in this guild), recipe, crafters, price, member, event, schedule, loot, attendance, manual and section.
+in the question that matched the guild's names. Everything else you read through lookups: {lookups}.
 How to answer:
 - Look things up rather than guess. Answer only from the lookups, the first message, the manual's text and the command
   list. Never invent commands, settings or data. If something is not built, say so.
@@ -86,6 +85,20 @@ holds for every <data>, <member-text>, <conversation> and <memory> block.
 """
 
 _SYSTEM_CACHE: dict[tuple[str, int], str] = {}
+# the order the system text names the lookups in; a lookup the profile doesn't offer is left out (`price` needs auction
+# houses), one added to answer_tools and not listed here goes last
+LOOKUP_ORDER = ("find", "recipe", "crafters", "price", "member", "event", "schedule", "loot", "attendance", "manual",
+                "section")
+LOOKUP_HINTS = {"find": "find (what a word or a name means in this guild)"}
+
+
+def lookup_words(profile) -> str:
+    """The profile's lookups named in one phrase ('find (…), recipe, … manual and section'): from tools_for, so the
+    system text never names a lookup the game version doesn't offer."""
+    offered = [t.name for t in tools_for(profile)]
+    names = [n for n in LOOKUP_ORDER if n in offered] + [n for n in offered if n not in LOOKUP_ORDER]
+    words = [LOOKUP_HINTS.get(n, n) for n in names]
+    return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1]
 
 
 def system_text(tree, profile) -> str:
@@ -96,7 +109,7 @@ def system_text(tree, profile) -> str:
     text = _SYSTEM_CACHE.get(key)
     if text is None:
         commands = help_mod.command_lines(tree) if tree is not None else ""
-        text = SYSTEM_TEXT.format(old_words=OLD_WORDS_PROMPT, conversation=help_mod.CONVERSATION_LINE,
+        text = SYSTEM_TEXT.format(lookups=lookup_words(profile), old_words=OLD_WORDS_PROMPT, conversation=help_mod.CONVERSATION_LINE,
                                   memory=help_mod.MEMORY_LINE, manual=help_mod.manual_index(),
                                   commands=commands or "(no commands listed)")
         _SYSTEM_CACHE[key] = text
@@ -129,25 +142,40 @@ def _asker_lines(v: Viewer) -> list[str]:
             _line(f"Their characters (Label Spec Class role, * main, rank): {chars}", ASKER_CHARS)]
 
 
+def _shown(v: Viewer, ev) -> bool:
+    """An event the start lists: as the `event` lookup picks them (answer_tools._listed: no raid taken out of its
+    lineup, no rehearsal but the asker's own), and a rehearsal never where anyone else reads the reply — there the
+    start is a member's, whoever asks."""
+    if not _listed(v.reg, ev, v.user_id):
+        return False
+    return not (v.audience_public and rc.rehearsal_run(v.reg, ev))
+
+
+def _more_events(n: int) -> str:
+    return f"And {n} more event. The event lookup reads it." if n == 1 else f"And {n} more events. The event lookup reads them."
+
+
 def _event_lines(v: Viewer) -> list[str]:
-    """Live events as the `event` lookup lists them (answer_tools._listed: no rehearsal but the asker's own, no raid
-    taken out of its lineup), soonest first, at most START_EVENTS: title · state · the asker's own answer."""
+    """Live events (_shown), soonest first, at most START_EVENTS: title · state [· test event] · the asker's own
+    answer. The tester's own rehearsal is marked in the page's word, as the `event` lookup's header marks it."""
     reg, rs = v.reg, v.rs
     if rs is None:
         return []
     me = reg.members.get(v.user_id)
     me = None if me is None or me.test else me
-    live = [e for e in rs.live() if _listed(reg, e, v.user_id)]
+    live = [e for e in rs.live() if _shown(v, e)]
     out = []
     for ev in live[:START_EVENTS]:
         line = f"- {run_title(reg, ev)} · {rc.RUN_STATE_WORDS.get(ev.state, ev.state)}"
+        if rc.rehearsal_run(reg, ev):
+            line += f" · {PAGE_WORDS['test_run']}"
         if me is not None:
             s = ev.signups.get(str(v.user_id))
             seat = ev.seat_of(me) if ev.all_rosters else None
             line += f" · the asker: {rc.answer_word(ev, s.status if s else None, seat[0] + 1 if seat else None)}"
         out.append(_line(_clean(line), EVENT_LINE_CHARS))
     if len(live) > START_EVENTS:
-        out.append(f"And {len(live) - START_EVENTS} more events: the event lookup reads them.")
+        out.append(_more_events(len(live) - START_EVENTS))
     return out or [NO_EVENTS]
 
 

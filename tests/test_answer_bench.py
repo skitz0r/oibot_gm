@@ -8,7 +8,11 @@ from answer_fakes import ScriptedProvider
 
 from oibot_gm import answer_loop as al
 from oibot_gm import answer_tools as at
+from oibot_gm import armory, discord_auctions, prices
 from oibot_gm.answer_names import resolve
+
+SCRIPTED = [c for c in BENCH if c.script]
+LOOKUP = [c for c in SCRIPTED if c.expect_tools]
 
 
 def names_of(matches):
@@ -29,22 +33,65 @@ def test_resolver_candidates(reg, rs, case):
     assert in_order(want, got), (case.id, got)
 
 
-@pytest.mark.parametrize("case", [c for c in BENCH if c.script], ids=lambda c: c.id)
-def test_bench_end_to_end(reg, rs, case):
+@pytest.fixture
+def auction_house(monkeypatch, tmp_path):
+    """The host's armory keys, stood in for (as tests/test_prices does): the bench's priced_bar picks a house and its
+    table lives in memory; the item names cache in the test's own folder."""
+    monkeypatch.setattr(armory, "available", lambda reg: bool(reg.profile.armory))
+    monkeypatch.setattr(discord_auctions, "OUT", tmp_path / "auctions-out")
+    monkeypatch.setattr(discord_auctions, "_STATE", {})
+    monkeypatch.setattr(discord_auctions, "_SHARED", {})
+    prices.reset_names()
+    yield
+    prices.reset_names()
+
+
+def run_case(request, reg, rs, case):
+    """One case through answer() → (fmt, the result, the first user message, the tool_result blocks' text)."""
+    if "price" in case.expect_tools:
+        request.getfixturevalue("auction_house")
     fmt = case.setup(reg, rs)
     question = case.question.format(**fmt)
     uid, officer = asker_of(case)
     viewer = at.Viewer.of(reg, rs, uid, officer, public=case.where == "public", question=question)
     pv = ScriptedProvider(list(case.script))
     res = al.answer(pv, None, viewer)
-    sent = "\n".join(
-        b.get("text") or b.get("content") or ""
-        for r in pv.requests for m in r["messages"] if m["role"] == "user" for b in m["content"])
-    for m in case.must:
-        assert m.format(**fmt) in sent, (case.id, m, sent)
+    first = pv.requests[0]["messages"][0]["content"][0]["text"]
+    results = "\n".join(b.get("content") or "" for m in pv.requests[-1]["messages"] if m["role"] == "user"
+                        for b in m["content"] if b.get("type") == "tool_result")
+    sent = "\n".join(b.get("text") or b.get("content") or ""
+                     for r in pv.requests for m in r["messages"] if m["role"] == "user" for b in m["content"])
+    return fmt, res, first, results, sent
+
+
+def missing_must(case, fmt, first, results) -> list[str]:
+    """The `must` values not found where they have to come from: a case that expects lookups proves them in the
+    lookups' results (never the start, never the scripted reply); a case that expects none, in the start."""
+    where = results if case.expect_tools else first
+    return [m.format(**fmt) for m in case.must if m.format(**fmt) not in where]
+
+
+@pytest.mark.parametrize("case", SCRIPTED, ids=lambda c: c.id)
+def test_bench_end_to_end(request, reg, rs, case):
+    fmt, res, first, results, sent = run_case(request, reg, rs, case)
+    assert not missing_must(case, fmt, first, results), (case.id, missing_must(case, fmt, first, results), results or first)
+    if case.expect_tools:  # the value proves the lookup: the start alone could not have given it
+        assert case.must, case.id
+        for m in case.must:
+            assert m.format(**fmt) not in first, (case.id, m, "can be read off the start")
     for n in case.never:
         assert n.format(**fmt) not in sent and n.format(**fmt) not in res.answer.answer, (case.id, n)
     for t in case.expect_tools:
         assert t in res.tools, (case.id, t, res.tools)
     assert res.ending == ("asked" if case.asks_back else "answered"), (case.id, res.ending, res.answer.answer)
     assert res.requests == len(case.script)
+
+
+@pytest.mark.parametrize("case", LOOKUP, ids=lambda c: c.id)
+def test_lookups_that_find_nothing_fail_the_must_check(request, reg, rs, case, monkeypatch):
+    """With every lookup answering "nothing here", a case that expects lookups can no longer pass: the bench cannot
+    go quiet when the lookups stop delivering."""
+    monkeypatch.setattr(al, "run_tool", lambda viewer, name, args: ("nothing here", False))
+    fmt, res, first, results, _sent = run_case(request, reg, rs, case)
+    assert "nothing here" in results
+    assert case.must and missing_must(case, fmt, first, results), (case.id, "passes without its lookups")

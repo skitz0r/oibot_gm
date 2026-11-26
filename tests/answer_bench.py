@@ -11,7 +11,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Literal
 
@@ -21,9 +21,14 @@ from conftest import GUILD, OFFICER_ROLE, OWNER, ROOT, TEST_MEMBERS, at_schedule
 
 from answer_fakes import call, reply
 
+from oibot_gm import auctions, discord_auctions
 from oibot_gm import raidcycle as rc
+from oibot_gm.armory import GuildFacts
+from oibot_gm.auctions import House, Price
+from oibot_gm.constants import CLOCK12
 from oibot_gm.lootctx import RegistryLootContext
 from oibot_gm.profiles import GameProfile
+from oibot_gm.raid_views import run_times
 from oibot_gm.registry import Registry
 from oibot_gm.store import GitStore
 
@@ -44,6 +49,9 @@ IRONFEATHER = ("Ironfeather Breastplate", "Ironfeather Leggings", "Ironfeather S
 LOOT_ITEM = "Robe of the Bench"
 LOOT_TO = "Thornwick"   # who an_award gives LOOT_ITEM to: the loot cases' scripts and their `must` both come from it
 LOOT_REASON = "kept for the tank"
+LOOT_BOSS = "Gatekeeper"   # the boss an_award's row names: only the loot lookup gives it (the question names item and no boss)
+ARCANITE_BAR = 12360
+BAR_PRICE = Price(low=489998, qty=12)  # what the bench's auction house lists Arcanite Bars at: 48g 99s 98c each
 
 
 @dataclass(frozen=True)
@@ -105,18 +113,21 @@ def real_event(reg: Registry, rs: rc.RaidStore, raid: str = "barrow_deeps", days
 
 
 def an_event(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
-    """A real Barrow Deeps event (idempotent: one already open stays the one)."""
+    """A real Barrow Deeps event (idempotent: one already open stays the one) → its raid's name and when it locks,
+    in the words the `event` lookup prints (raid_views.run_times, 12-hour): the start's event line has no lock time."""
     askers(reg)
-    if not any(e.instance == "barrow_deeps" and not rc.rehearsal_run(reg, e) for e in rs.live()):
-        real_event(reg, rs)
-    return {"raid": reg.raid_def("barrow_deeps").get("name") or "Barrow Deeps"}
+    ev = next((e for e in rs.live() if e.instance == "barrow_deeps" and not rc.rehearsal_run(reg, e)), None)
+    ev = ev or real_event(reg, rs)
+    _soft, lock, _confirm = run_times(reg, ev, rc.run_team(reg, ev))
+    return {"raid": reg.raid_def("barrow_deeps").get("name") or "Barrow Deeps", "lock": reg.local12(lock, CLOCK12)}
 
 
 def a_schedule(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
     askers(reg)
     if not reg.schedules("barrow_deeps"):
         weekly(reg, "barrow_deeps", "Tue 19:30")
-    return {"raid": reg.raid_def("barrow_deeps").get("name") or "Barrow Deeps"}
+    nxt = rc.next_runs_of(reg, "barrow_deeps", reg.schedules("barrow_deeps")[0])[0]
+    return {"raid": reg.raid_def("barrow_deeps").get("name") or "Barrow Deeps", "next": reg.local12(nxt)}
 
 
 def an_award(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
@@ -124,7 +135,7 @@ def an_award(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
     askers(reg)
     reg.store.append_jsonl(f"{reg.key}/ledger.jsonl", {
         "raider": LOOT_TO, "discord_id": WREN, "item_id": 0, "item_name": LOOT_ITEM, "tier": "S", "total_weight": 1.0,
-        "received": "2026-09-02", "instance": "bd", "boss": "Gatekeeper", "offspec": False, "import_id": "bench-d1",
+        "received": "2026-09-02", "instance": "bd", "boss": LOOT_BOSS, "offspec": False, "import_id": "bench-d1",
         "source": "override", "bot_pick": "Briarwood"})
     newest = max(RegistryLootContext(reg, reg.store, None).ledger, key=lambda a: a.received)
     return {"item": newest.item_name or "", "character": newest.raider}
@@ -135,6 +146,24 @@ def an_award_with_reason(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
     reg.store.append_jsonl(f"{reg.key}/precedents.jsonl", {"date": "2026-09-02", "item": out["item"], "bot": "Briarwood", "human": out["character"],
                                                           "reason": LOOT_REASON, "by": "Marrowby", "import_id": "bench-d1"})
     return out
+
+
+def priced_bar(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
+    """The guild's Horde auction house lists Arcanite Bars at BAR_PRICE, read just now. Only where the bot can read
+    auction houses (tests/test_answer_bench's `auction_house` fixture stands in for the host's armory keys); elsewhere
+    the asker's record alone, and the price lookup says why it shows none."""
+    askers(reg)
+    if not auctions.available(reg):
+        return {"price": auctions.money(BAR_PRICE.low)}
+    if reg.config.armory is None:
+        reg.set_armory_guild(GuildFacts(id=418362, slug="bench-wardens", name="Bench Wardens", faction="Horde", kind="Normal",
+                                        ruleset_id=2, members=8, created=datetime(2026, 1, 5, tzinfo=timezone.utc)),
+                             "Owner", by_id=OWNER)
+    if reg.config.market is None:
+        reg.set_market(House(id=6, name="Horde Auction House"), 2, "Owner", by_id=OWNER)
+    discord_auctions._st(reg)["table"] = discord_auctions.Table(at=datetime.now(timezone.utc), house_id=6, ruleset_id=2,
+                                                                prices={ARCANITE_BAR: BAR_PRICE}, modified=None)
+    return {"price": auctions.money(BAR_PRICE.low)}
 
 
 def an_applicant(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
@@ -162,13 +191,18 @@ BENCH: list[BenchCase] = [
     # the three questions that failed on the old path
     BenchCase("ironfeather_who_has", "member", "public", "bot who has ironfeather", crafters,
               # the reagent item stays a candidate beside its three recipes: after the one somebody makes, then by name
-              candidates=(IRONFEATHER[0], "Ironfeather", *IRONFEATHER[1:]), must=("Thornwick",), expect_tools=("recipe",),
+              candidates=(IRONFEATHER[0], "Ironfeather", *IRONFEATHER[1:]), expect_tools=("recipe",),
+              # the start names Thornwick already (the asker's character, the matched recipe's maker): the lookup alone
+              # gives the crafter's member and the reagents
+              must=("Thornwick (Wrenfield, 300)", "Rugged Leather"),
               script=([call("recipe", name="Ironfeather Breastplate")], [reply(answer="Thornwick can make the Ironfeather Breastplate.")])),
     BenchCase("ironfeather_breastplate", "member", "public", "bot who can make ironfeather breastplate", crafters,
-              candidates=("Ironfeather Breastplate",), must=("Thornwick",),
+              candidates=("Ironfeather Breastplate",), must=("made by Thornwick (300)",),  # from the start's matched names
               script=([reply(answer="Thornwick can make the Ironfeather Breastplate.")],)),
     BenchCase("ironfeather_pieces", "member", "public", "Bot who can make ironfeather leather working pieces", crafters,
-              candidates=IRONFEATHER, must=("Thornwick", "Ironfeather Breastplate"), expect_tools=("find",),
+              # the answer is in the start's matched names: `find` gives back the same three recipe lines, so the
+              # case expects no lookup and reads its facts off the start
+              candidates=IRONFEATHER, must=("Ironfeather Breastplate · Leatherworking", "made by Thornwick (300)"),
               script=([call("find", text="ironfeather", kinds=["recipe"])],
                       [reply(answer="Thornwick can make the Ironfeather Breastplate. Nobody has the leggings or shoulders yet.")])),
     BenchCase("ironfeather_choose", "member", "private", "who can make ironfeather?", two_crafters,
@@ -177,28 +211,29 @@ BENCH: list[BenchCase] = [
 
     # one per tool
     BenchCase("crafters", "member", "public", "who are our leatherworkers?", crafters,
-              must=("Thornwick", "300"), expect_tools=("crafters",),
+              must=("Thornwick (Wrenfield, 300)",), expect_tools=("crafters",),
               script=([call("crafters", profession="leatherworking")], [reply(answer="Thornwick is our leatherworker, at 300.")])),
-    BenchCase("price", "member", "public", "what does an arcanite bar go for?", askers,
-              expect_tools=("price",),
-              script=([call("price", name="Arcanite Bar")], [reply(answer="Here is what an Arcanite Bar goes for.")])),
-    BenchCase("member", "member", "public", "what does Thornwick play?", crafters,
-              must=("Hunter",), expect_tools=("member",),
+    BenchCase("price", "member", "public", "what does an arcanite bar go for?", priced_bar,
+              must=("{price}",), expect_tools=("price",),
+              script=([call("price", name="Arcanite Bar")], [reply(answer="An Arcanite Bar goes for 48g 99s 98c.")])),
+    # asked by another member: the start's matched names say "Hunter Survival", only the record adds the role
+    BenchCase("member", "member2", "public", "what does Thornwick play?", crafters,
+              must=("Thornwick Survival Hunter ranged",), expect_tools=("member",),
               script=([call("member", name="Thornwick")], [reply(answer="Thornwick plays a Survival Hunter.")])),
     BenchCase("event", "member", "public", "when is the next event?", an_event,
-              must=("{raid}",), expect_tools=("event",),
+              must=("lock {lock}",), expect_tools=("event",),  # the start's line has the raid and state, not the lock
               script=([call("event", which="next")], [reply(answer="The next event is Barrow Deeps.")])),
     BenchCase("schedule", "member", "public", "when do we raid?", a_schedule,
-              must=("Barrow Deeps",), expect_tools=("schedule",),
+              must=("next: {next}",), expect_tools=("schedule",),  # the start names the schedule, never its nights
               script=([call("schedule")], [reply(answer="We raid Barrow Deeps on Tuesdays at 7:30 PM.")])),
     BenchCase("loot", "member", "public", "who got {item}?", an_award,
-              must=("{character}",), expect_tools=("loot",),
-              script=([call("loot", item=LOOT_ITEM)], [reply(answer=f"{LOOT_TO} got the {LOOT_ITEM}.")])),
+              must=(LOOT_BOSS,), expect_tools=("loot",),  # the question names the item; the award's boss is the lookup's
+              script=([call("loot", item=LOOT_ITEM)], [reply(answer=f"{LOOT_TO} got the {LOOT_ITEM} from the {LOOT_BOSS}.")])),
     BenchCase("attendance", "member", "private", "what's my attendance?", askers,
               must=("not tracked yet",), expect_tools=("attendance",),
               script=([call("attendance")], [reply(answer="Your attendance is not tracked yet.")])),
     BenchCase("manual", "member", "private", "how do I mark myself away?", askers,
-              expect_tools=("manual",),
+              must=("I'll be away",), expect_tools=("manual",),  # the button's name, from the manual part's text
               script=([call("manual", query="mark myself away")], [reply(answer="Press I'll be away on the absences card.")])),
     BenchCase("section", "officer", "private", "any applications waiting?", an_applicant,
               must=("Newbie",), expect_tools=("section",),

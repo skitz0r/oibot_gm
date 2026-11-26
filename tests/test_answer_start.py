@@ -13,7 +13,7 @@ from oibot_gm import answer_start as st
 from oibot_gm import answer_tools as at
 from oibot_gm import raidcycle as rc
 from oibot_gm.answer_names import NOTHING, resolve
-from oibot_gm.constants import OLD_WORDS_PROMPT
+from oibot_gm.constants import OLD_WORDS_PROMPT, PAGE_WORDS
 from oibot_gm.help import CONVERSATION_LINE, MEMORY_LINE, manual_index
 
 COUNCIL = "Proposal: Robe of the Bench to Briarwood."
@@ -64,6 +64,29 @@ def test_system_text_is_constant_per_profile(duo, monkeypatch):
     assert st.system_text(t, duo.a.profile) is st.system_text(t, duo.b.profile)  # cached per (profile name, tree)
 
 
+def _rules(system: str) -> str:
+    """The system text above the manual's contents list and the command list (those name pages, not lookups)."""
+    return system.split("\n## Manual: contents list", 1)[0]
+
+
+def test_system_text_names_only_the_lookups_its_profile_offers(monkeypatch):
+    import re
+    from pathlib import Path
+
+    from oibot_gm.profiles import GameProfile
+
+    monkeypatch.setattr(st, "_SYSTEM_CACHE", {})
+    root = Path(__file__).resolve().parents[1] / "profiles"
+    tbc, forever = GameProfile.load(root / "tbc"), GameProfile.load(root / "forever")
+    assert "price" not in [x.name for x in at.tools_for(tbc)] and "price" in [x.name for x in at.tools_for(forever)]
+    for profile in (tbc, forever):
+        rules = _rules(st.system_text(None, profile))
+        for name in (x.name for x in at.tools_for(profile)):
+            assert re.search(rf"\b{name}\b", rules), (profile.name, name)
+    assert not re.search(r"\bprice\b", _rules(st.system_text(None, tbc)))
+    assert st.system_text(None, tbc) == st.system_text(None, tbc)
+
+
 # ---------------------------------------------------------------- the start
 
 def test_user_part_is_small_when_nothing_is_named(reg, rs):
@@ -86,17 +109,63 @@ def test_live_events_capped_at_eight_lines_with_the_askers_answer(reg, rs):
     assert len(lines) == st.START_EVENTS
     assert all(len(ln) <= st.EVENT_LINE_CHARS for ln in lines)
     assert lines[0].endswith(f"the asker: {rc.answer_word(events[0], 'in', None)}")
-    assert "And 2 more events" in text
+    assert "\nAnd 2 more events. The event lookup reads them." in text
+    real_event(reg, rs, days=11)
+    assert "\nAnd 3 more events. The event lookup reads them." in start(viewer(reg, rs))
 
 
-def test_a_rehearsal_is_a_live_event_only_to_its_tester(reg, rs):
+def test_one_more_event_is_said_in_the_singular(reg, rs):
+    askers(reg)
+    for d in range(1, st.START_EVENTS + 2):
+        real_event(reg, rs, days=d)
+    text = start(viewer(reg, rs))
+    assert "\nAnd 1 more event. The event lookup reads it." in text and "1 more events" not in text
+
+
+def _without_own_answer(lines):
+    return [ln.split(" · the asker: ", 1)[0] for ln in lines]
+
+
+def test_a_rehearsal_is_a_live_event_only_to_its_tester_in_private_and_marked(reg, rs):
     askers(reg)
     real = real_event(reg, rs)
-    open_test_run(reg, rs, "barrow_deeps", days=1, test_by=MARROW)
+    test = open_test_run(reg, rs, "barrow_deeps", days=1, test_by=MARROW)
     for uid, officer in ((WREN, False), (PELLOW, False)):
-        assert event_lines(start(viewer(reg, rs, uid, officer))) == [event_lines(start(viewer(reg, rs, uid, officer)))[0]]
-        assert at.run_title(reg, real) in event_lines(start(viewer(reg, rs, uid, officer)))[0]
-    assert len(event_lines(start(viewer(reg, rs, MARROW, True)))) == 2  # the tester sees their own rehearsal
+        for public in (False, True):
+            lines = event_lines(start(viewer(reg, rs, uid, officer, public=public)))
+            assert len(lines) == 1 and at.run_title(reg, real) in lines[0]
+    # the tester, privately: their own rehearsal, marked in the page's word as the `event` lookup's header marks it
+    mine = event_lines(start(viewer(reg, rs, MARROW, True)))
+    assert len(mine) == 2
+    marked = [ln for ln in mine if f" · {PAGE_WORDS['test_run']}" in ln]
+    assert len(marked) == 1 and at.run_title(reg, test) in marked[0]
+    assert f"{PAGE_WORDS['test_run']}" not in next(ln for ln in mine if ln not in marked)
+    # where members read the reply, the officer's start is a member's: the rehearsal never shows, not even to its tester
+    officer_public = start(viewer(reg, rs, MARROW, True, public=True))
+    member_public = start(viewer(reg, rs, PELLOW, False, public=True))
+    assert _without_own_answer(event_lines(officer_public)) == _without_own_answer(event_lines(member_public))
+    assert PAGE_WORDS["test_run"] not in officer_public
+
+
+def test_where_members_read_an_officers_start_is_a_members_but_for_who_asks(reg, rs):
+    """The rule: the officer-where-members-read start equals a member's start apart from the asker's own identity
+    lines and the asker's own answer on each event line."""
+    askers(reg)
+    real_event(reg, rs)
+    real_event(reg, rs, days=5)
+    open_test_run(reg, rs, "barrow_deeps", days=1, test_by=MARROW)
+
+    def shape(text):
+        out = []
+        for ln in text.splitlines():
+            if ln.startswith(("Asker: ", "Their characters ")):
+                continue
+            out.append(ln.split(" · the asker: ", 1)[0])
+        return out
+
+    officer = start(viewer(reg, rs, MARROW, True, public=True))
+    for uid in (WREN, PELLOW):
+        assert shape(officer) == shape(start(viewer(reg, rs, uid, False, public=True)))
 
 
 def test_where_the_reply_is_read_and_the_role_follow_the_viewer(reg, rs):
