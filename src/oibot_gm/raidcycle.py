@@ -4337,7 +4337,9 @@ class LockForces(BaseModel):
     """Who the lock keeps on and off the roster, as _solve_run hands them to the solver (THE reader: the lock box's
     count, the planner's candidates and the all-kept-off refusal read the same lists, so they never drift).
     `kept_off` = an "out" pin or the comp policy's always_bench, never a name placed on the board (the board place
-    wins); `kept_on` = an "in" pin, a board place or the policy's never_bench, never an "out" pin. Signup names, in the
+    wins); `kept_on` = an "in" pin, a board place or the policy's never_bench, never an "out" pin. `placed` = the board
+    without the Bench answers Auto-fill placed (ev.auto_placed): the solve decides again whether a seat is free for them,
+    so a Join after the Auto-fill comes first; a Bench answer an officer placed by hand is kept. Signup names, in the
     order the solve adds them (pins first, then policy lines), duplicates as the solve sees them."""
 
     pool: list[str]
@@ -4359,7 +4361,10 @@ def lock_forces(reg: Registry, rs, ev: RaidEvent, players: list[Player] | None =
     by_uid = {str(sg.discord_id): sg.display_name for sg in ev.signups.values()}
     pin_in = [by_uid[u] for u, v in ev.pins.items() if v == "in" and u in by_uid]
     pin_out = [by_uid[u] for u, v in ev.pins.items() if v == "out" and u in by_uid]
-    layout = [[n for n in g if n in names] for g in (ev.layout or [])]
+    # a Bench answer AUTO-FILL put on the board is not the officers' decision: the solve decides again whether a seat is
+    # free for them (the Bench is last — a Join after the Auto-fill comes first); one an officer placed by hand stays
+    auto_bench = set(ev.auto_placed) & {p.signup_name for p in players if p.status == "bench"}
+    layout = [[n for n in g if n in names and n not in auto_bench] for g in (ev.layout or [])]
     placed = {n: gi for gi, g in enumerate(layout) for n in g}
     pool = [p.signup_name for p in players]
     inpool = set(pool)
@@ -4413,9 +4418,8 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
     if joined and joined <= set(forces.kept_off):  # nobody who joined may play: never an empty roster
         raise RuntimeError(f"no roster found: {ALL_KEPT_OFF}")
     k = groups_per_roster(reg, size)
-    layout = [[n for n in g if n in names] for g in (ev.layout or [])]
-    placed = forces.placed
-    used = max((gi for gi, g in enumerate(layout) if g), default=-1) + 1  # groups up to the last one holding someone: empty rosters drawn on the board force nothing
+    placed = forces.placed  # the board as the lock keeps it (lock_forces: an Auto-fill Bench place is not kept)
+    used = max(placed.values(), default=-1) + 1  # groups up to the last one holding someone: empty rosters drawn on the board force nothing
     n_rosters = _roster_count(reg, ev, players, used)
     strategy = strategy or run_strategy(reg, ev)
     bonus = seat_bonus(reg, rs, ev, players)
@@ -4680,9 +4684,10 @@ def record_moves(ev: RaidEvent, name: str, at_before: dict, groups: list[list[st
     ev.auto_placed = [n for n in ev.auto_placed if n not in changed]  # moved by a person: a hand placement now
 
 
-NOT_ON_SHEET = "{name} hasn't answered Join or Bench on this event"  # apply_move's and plain text's run_move refusal
-NOT_ON_SHEET_MANY = "These names haven't answered Join or Bench on this event: {names}"  # plain text's run_board refusal
-BENCH_LOCKED = "{name} answered Bench, so ask them with Fill seats to put them on the roster."  # a Bench answer off a locked roster
+NOT_ON_SHEET = "{name} hasn't answered Join or Bench on this event."  # apply_move's and plain text's run_move refusal
+NOT_ON_SHEET_MANY = "These names haven't answered Join or Bench on this event: {names}."  # plain text's run_board refusal
+# a Bench answer off a locked roster: they can't be dragged on; a seat must be open, and then Fill seats asks the bench first
+BENCH_LOCKED = "{name} answered Bench and isn't rostered, so More › Fill seats… asks the bench first once a seat opens."
 
 
 def board_names(ev: RaidEvent) -> set[str]:
@@ -4880,13 +4885,13 @@ def board_rosters(reg: Registry, ev: RaidEvent, layout: list[list[str]], size: i
 def board_complete(reg: Registry, rs, p: RaidEvent) -> bool:
     """An open raid whose board leaves its lock nothing to decide: everyone who joined and is not kept off
     (lock_forces) is placed, and no Bench answer who is not kept off waits for a seat the board leaves open (placed
-    fewer than run_size × run_rosters). Its lock then rosters exactly the board (every placed name is fixed), so a later
+    fewer than run_size × run_rosters) — a Bench answer Auto-fill placed counts as waiting (lock_forces decides it again). Its lock then rosters exactly the board (every placed name is fixed), so a later
     raid's Auto-fill counts the board instead of solving it (event_board_preview's `complete_boards`)."""
     joined = {s.display_name for s in p.by_status("in")}
     if p.state != "open" or not joined:
         return False
-    placed = {n for g in (p.layout or []) for n in g}
-    kept_off = set(lock_forces(reg, rs, p).kept_off)
+    lf = lock_forces(reg, rs, p)
+    placed, kept_off = set(lf.placed), set(lf.kept_off)  # the board the lock keeps (an Auto-fill Bench place is decided again)
     if not joined - kept_off <= placed:
         return False
     bench = {s.display_name for s in p.by_status("sub")} - kept_off - placed

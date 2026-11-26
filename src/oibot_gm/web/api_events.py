@@ -39,7 +39,6 @@ SWITCH_OVER = "This event is over, so nobody can switch roles on it."
 PICK_A_ROW = "Pick someone from the list of role switches."
 SWITCH_GONE = "That switch is no longer on the list. The list now shows what is short."
 NOBODY_ASKED = "Nobody could be asked, so nothing was sent."
-CLEARED = "The board is clear. Everyone who joined is in Not placed."
 
 
 def _refused(why) -> JSONResponse:
@@ -109,7 +108,7 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
                 again = cq.clear_board_box(v.reg, rs, ev)
                 return JSONResponse({"error": CONFIRM_WORDS["changed"], "box": again}, status_code=409)
         await ops_mod.audited(bot.ops, v.reg, v.name, f"cleared the board of {rv.run_title(v.reg, first)}", via=v.via, by_id=v.uid)
-        return {"message": CLEARED}
+        return {"message": cq.CLEARED}
 
     @app.get("/api/event/{key}/lineup")
     async def event_lineup(request: Request, key: str):

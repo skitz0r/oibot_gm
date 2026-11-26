@@ -576,3 +576,114 @@ def test_plain_texts_whole_board_takes_a_bench_name_and_refuses_no_thanks(reg, r
     assert "haven't answered" not in ok and trial.display_name in ok
     assert rc.NOT_ON_SHEET_MANY.format(names=out.display_name) in configops.describe(
         reg, ConfigOp(op="run_board", target=ev.key, value=out.display_name))
+
+
+# ---------------------------------------------------------------- task 5 fix: Auto-fill's Bench places, Clear, words
+
+def _autofilled_case_one(reg, rs):
+    """Case 1 with Auto-fill's board written as the page writes it (auto placements): the two Bench answers fill the
+    two empty seats."""
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    layout, auto = rc.autofill(reg, rs, ev)
+    ev.layout, ev.auto_placed = layout, sorted(auto)
+    rs.save(ev, "auto-fill (test)")
+    assert {core.display_name, raider.display_name} <= {n for g in rs.events[ev.key].layout for n in g}
+    return rs.events[ev.key], joiners, core, raider, trial
+
+
+def test_a_join_after_auto_fill_comes_before_the_bench_answers_it_placed(reg, rs):
+    ev, joiners, core, raider, trial = _autofilled_case_one(reg, rs)
+    late = people(reg, 2, DPS)
+    join(reg, rs, ev, late)
+    ev = rs.events[ev.key]
+    assert names(late) | names(joiners) == set(seated(reg, rs, ev)), "both later joiners play, no Bench answer does"
+    lf = rc.lock_forces(reg, rs, ev)
+    assert core.display_name not in lf.kept_on and core.display_name not in lf.placed
+
+
+def test_a_join_after_auto_fill_leaves_the_bench_answer_a_seat_still_empty(reg, rs):
+    ev, joiners, core, raider, trial = _autofilled_case_one(reg, rs)
+    late = people(reg, 1, DPS)[0]
+    join(reg, rs, ev, [late])
+    ev = rs.events[ev.key]
+    assert set(seated(reg, rs, ev)) == names(joiners) | {late.display_name, core.display_name}
+
+
+def test_preview_lock_after_auto_fill_puts_a_new_joiner_before_the_bench(reg, rs):
+    import asyncio
+    from contextlib import asynccontextmanager
+
+    from oibot_gm.discord_raid import RaidMixin
+
+    class Bare:
+        lock_preview = RaidMixin.lock_preview
+
+        @asynccontextmanager
+        async def solving(self, reg, key):
+            yield
+
+    ev, joiners, *_ = _autofilled_case_one(reg, rs)
+    late = people(reg, 2, DPS)
+    join(reg, rs, ev, late)
+    ev = rs.events[ev.key]
+    shown = asyncio.run(Bare().lock_preview(reg, rs, ev, by="t"))
+    assert {p.signup_name for r in shown for p in r.selected} == names(joiners) | names(late)
+
+
+def test_a_bench_answer_an_officer_placed_is_kept_on_beside_auto_fills(reg, rs):
+    ev, joiners, core, raider, trial = _autofilled_case_one(reg, rs)
+    ev.layout = [list(ev.layout[0]) + [trial.display_name]] + [list(g) for g in ev.layout[1:]]
+    rs.save(ev, "hand place (test)")  # trial is NOT in auto_placed: the officer's decision
+    join(reg, rs, ev, people(reg, 2, DPS))
+    ev = rs.events[ev.key]
+    lf = rc.lock_forces(reg, rs, ev)
+    assert trial.display_name in lf.kept_on and core.display_name not in lf.kept_on
+    assert trial.display_name in seated(reg, rs, ev)
+
+
+def test_a_board_holding_an_auto_fill_bench_place_is_not_complete(reg, rs):
+    ev, *_ = _autofilled_case_one(reg, rs)
+    assert not rc.board_complete(reg, rs, ev), "the lock decides the Bench place again, so the board is not the roster"
+
+
+def test_clear_the_board_counts_placed_bench_names(reg, rs):
+    from oibot_gm import consequences as cq
+
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    ev.layout = [[core.display_name, raider.display_name]]
+    rs.save(ev, "bench only (test)")
+    b = cq.clear_board_box(reg, rs, ev)
+    assert b["verb"] == "Clear the board" and b["sentences"][0] == "2 placed people come off the board.", b
+    ev.layout = [[core.display_name, joiners[0].display_name, joiners[1].display_name]]
+    rs.save(ev, "mixed (test)")
+    assert cq.clear_board_box(reg, rs, ev)["sentences"][0] == "3 placed people come off the board."
+    ev.layout = [[core.display_name]]
+    rs.save(ev, "one (test)")
+    assert cq.clear_board_box(reg, rs, ev)["sentences"][0] == "The one placed person comes off the board."
+
+
+def test_the_board_refusals_are_whole_sentences(reg, rs):
+    from oibot_gm import configops
+    from oibot_gm import consequences as cq
+    from oibot_gm.configops import ConfigOp
+
+    for s in (rc.NOT_ON_SHEET.format(name="Bqzz"), rc.NOT_ON_SHEET_MANY.format(names="Bqzz"), rc.BENCH_LOCKED.format(name="Bqzz")):
+        assert s.endswith(".") and len(s.split()) <= 20, s
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    out = people(reg, 1, DPS)[0]
+    join(reg, rs, ev, [out], "out")
+    b = cq.board_move_box(reg, ev, out.display_name, (0, 0))
+    assert b["sentences"] == [rc.NOT_ON_SHEET.format(name=out.display_name)], b
+    d = configops.describe(reg, ConfigOp(op="run_move", target=ev.key, member=out.display_name, value="g1"))
+    assert rc.NOT_ON_SHEET.format(name=out.display_name) in d and ".." not in d, d
+
+
+def test_the_parsers_board_lists_unplaced_bench_answers(reg, rs):
+    from oibot_gm import configops
+
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    ev.layout = [[joiners[0].display_name, core.display_name]]
+    text = configops.board_text(reg, ev)
+    head, bench = text.split(" · Bench: ")
+    assert set(bench.split(", ")) == {raider.display_name, trial.display_name}, text
+    assert set(head.split(" · not placed: ")[1].split(", ")) == names(joiners[1:]), text

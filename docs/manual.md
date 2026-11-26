@@ -1121,9 +1121,9 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    there, or pushing it there by a swap, only takes it out of its group. Keeping someone off the roster is their **⋮ ›
    Keep off the roster** (a placed person comes off the board at once; the word *kept off* then shows on their line;
    **Unpin** takes it back; dragging them into a group takes it back too, and **Undo my moves** puts it back). A placed
-   person whose answer leaves Join (Bench, No thanks, Can't make it, an absence, leaving the server, a retired
-   character) or who changes the character or spec they come as goes back to *Not placed* at once too — Auto-fill or the
-   lock places them again if they still play. **Auto-fill groups**, under the *Not placed* heading,
+   person whose answer leaves Join and Bench (No thanks, Can't make it, an absence, leaving the server, a retired
+   character) or who changes the character or spec they come as comes off the board at once too — Auto-fill or the
+   lock places them again if they still play; a placed name moving between Join and Bench keeps its place. **Auto-fill groups**, under the *Not placed* heading,
    places everyone still there the way the lock would right now — the lock's own placement, with every name you placed
    by hand kept where it is and every *kept off* honoured — and writes it into the groups; it asks nothing first (it
    changes only the board). While it works the button shows *Filling the groups the way the lock would. The board
@@ -1136,10 +1136,11 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    the board stays as it was.*); a Preview lock on the same event stops it too (*A lock preview started on this event
    while the groups were being filled, so the board stays as it was.*), and when no roster fits it
    says why under the button (the lock would fail the same way). With nothing changed afterwards, **Lock** rosters
-   exactly the board Auto-fill wrote; if you never press it, the lock fills the open seats from *Not placed*, as it
-   always has. **More › Clear the board…** empties every group of the event back to *Not placed* (your placements and
-   Auto-fill's alike; pins stay) after the bot's box (*14 placed people go back to Not placed.* · *Nobody is told.* ·
-   *Auto-fill groups can place everyone again.*). A locked event's board is the roster: no drag, and **⋮ ›
+   exactly the board Auto-fill wrote. A Bench answer Auto-fill placed is the one exception: the lock decides their seat
+   again, so someone who joins after the Auto-fill comes first; a Bench answer you placed by hand keeps the place. If you never press it, the lock fills the open seats from *Not placed*, as it
+   always has. **More › Clear the board…** empties every group of the event (your placements and Auto-fill's alike,
+   Bench answers too; pins stay) after the bot's box (*14 placed people go back to Not placed.* — *come off the board*
+   when Bench answers are among them · *Nobody is told.* · *Auto-fill groups can place everyone again.*). A locked event's board is the roster: no drag, and **⋮ ›
    Move to…** (a group, *Swap with …*, or back to *Not rostered*) shows the bot's box first — which move it is (*Move*,
    *Swap*, *Put on the roster*, *Put in the seat*, *Take off the roster*) and what it does for the person — and the press
    makes only that move; when the board changed while the box was open the new box comes back and waits again; *Placed* becomes *Rostered* (*10 of 10 seats*), who holds a

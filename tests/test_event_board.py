@@ -676,7 +676,9 @@ def test_leaving_join_and_bench_takes_a_placed_name_off_every_raid_of_the_event(
     assert fill(bot, reg, rs, bd) is None and ms[1].display_name in placed(bd)
     asyncio.run(bot.set_answer(reg, rs, ev, ms[1], "sub", None, "Jon", by_id=OWNER))  # an officer answers Bench for them
     assert not gone(ev, ms[1]) and not gone(rs.events[bd.key], ms[1]), "a Bench answer keeps its place on both boards (task 5)"
-    assert ms[1].display_name in rc.lock_forces(reg, rs, ev).placed
+    assert ms[1].display_name in placed(ev)
+    # Auto-fill placed them: as a Bench answer that place is decided again at the lock (task 5 fix), never kept on
+    assert ms[1].display_name in ev.auto_placed and ms[1].display_name not in rc.lock_forces(reg, rs, ev).placed
     asyncio.run(bot.set_answer(reg, rs, ev, ms[1], "out", None, "Jon", by_id=OWNER))  # then No thanks
     assert gone(ev, ms[1]) and gone(rs.events[bd.key], ms[1]), "the answer is the evening's: both boards"
     assert ms[1].display_name not in rc.lock_forces(reg, rs, ev).placed

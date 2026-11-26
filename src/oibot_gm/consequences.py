@@ -1027,6 +1027,7 @@ def undo_box_for(reg: Registry, ev: rc.RaidEvent, viewer: int | None) -> dict | 
 
 CLEAR_LOCKED = "The roster is locked, so the board is the roster now and can't be cleared."
 CLEAR_EMPTY = "Nobody is placed on the board, so there is nothing to clear."
+CLEARED = "The board is clear, so nobody is placed in a group now."  # the Clear the board route's answer
 
 
 def clear_board_box(reg: Registry, rs, ev: rc.RaidEvent) -> dict:
@@ -1042,11 +1043,16 @@ def clear_board_box(reg: Registry, rs, ev: rc.RaidEvent) -> dict:
     if not parts:
         return refusal_box(title, CLEAR_LOCKED)
     # people, not places: someone placed on two raids of the evening is one person going back
-    n = len({s.discord_id for p in parts for g in rc.board_layout(reg, p) for x in g
-             if (s := rc.signup_by_name(p, x)) is not None and s.status == "in"})
+    # every name the board may hold (rc.board_names: Join and Bench answers)
+    on = {s.discord_id: s.status for p in parts for g in rc.board_layout(reg, p) for x in g
+          if x in rc.board_names(p) and (s := rc.signup_by_name(p, x)) is not None}
+    n = len(on)
     if not n:
         return refusal_box(title, CLEAR_EMPTY)
-    head = "The one placed person goes back to Not placed." if n == 1 else f"{n} placed people go back to Not placed."
+    if "sub" in on.values():  # a Bench answer goes back to the bench, not to Not placed
+        head = "The one placed person comes off the board." if n == 1 else f"{n} placed people come off the board."
+    else:
+        head = "The one placed person goes back to Not placed." if n == 1 else f"{n} placed people go back to Not placed."
     return box(title, [head, "Nobody is told.", "Auto-fill groups can place everyone again."], "Clear the board",
                rev=":".join(rc.board_rev(reg, p) for p in parts))
 

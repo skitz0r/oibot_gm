@@ -252,7 +252,7 @@ def test_live_runs_text_has_the_board_and_unopened_runs(reg, rs):
     ev, names = board_run(reg, rs)
     run(bot.save_board(reg, rs, ev, [names[:2]], by="t"))
     text = configops.live_runs_text(reg, rs)
-    assert f"\n<data>\n{ev.key} board: g1 {names[0]}, {names[1]} · bench: {', '.join(names[2:])}\n</data>" in text, "names people chose are fenced as data (stage C L1)"
+    assert f"\n<data>\n{ev.key} board: g1 {names[0]}, {names[1]} · not placed: {', '.join(names[2:])}\n</data>" in text, "names people chose are fenced as data (stage C L1)"
     assert "## Upcoming events not opened yet" in text
     line = next(ln for ln in text.splitlines() if ln.startswith("- barrow_deeps: "))
     assert line.count(" barrow-deeps") == 6 and " 19:30 barrow-deeps" in line  # each run by its schedule id

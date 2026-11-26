@@ -226,8 +226,9 @@ def test_after_autofill_a_kept_off_name_is_not_rostered(reg, rs):
 
 
 def test_after_autofill_a_placed_name_that_answers_bench_keeps_its_place(reg, rs):
-    """Task 5 of 2026-11-25: a placed name whose answer becomes Bench stays on the board (rc.board_names), so the
-    lock keeps it on like any placement — and Preview lock shows the roster Lock builds."""
+    """Task 5 of 2026-11-25: a placed name whose answer becomes Bench stays on the board (rc.board_names). Auto-fill
+    placed it, so the lock decides that seat again (task 5 fix: not kept on); with seats still empty they are rostered,
+    and Preview lock shows the roster Lock builds."""
     reg.seed_test_members(24, "t")
     start = (reg.now_local() + timedelta(days=3)).replace(hour=18, minute=30, second=0, microsecond=0)
     ev = rc.open_run(reg, rs, HYJAL, start, by="t", schedule=rc.ADHOC_SCHEDULE)
@@ -238,7 +239,7 @@ def test_after_autofill_a_placed_name_that_answers_bench_keeps_its_place(reg, rs
     who = next(m for m in ms if m.display_name in {x for g in ev.layout for x in g})
     asyncio.run(bot.set_answer(reg, rs, ev, who, "sub", None, "Jon", by_id=OWNER))
     assert who.display_name in {x for g in ev.layout or [] for x in g}, "a Bench answer keeps its place"
-    assert who.display_name in rc.lock_forces(reg, rs, ev).kept_on
+    assert who.display_name in ev.auto_placed and who.display_name not in rc.lock_forces(reg, rs, ev).kept_on
     shown = asyncio.run(bot.lock_preview(reg, rs, ev, by="Jon"))
     line = asyncio.run(bot.lock_run(reg, rs, ev, by="Jon"))
     assert ev.state == "locked" and shape(shown) == shape(ev.all_rosters), line

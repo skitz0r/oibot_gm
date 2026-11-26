@@ -132,14 +132,20 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        clears whose it was; any moved name leaves auto_placed), own_moves / own_pins / undo_rev; open_seat_roles (a locked roster's).
                        board_names(ev) = THE names a board may hold (task 5 of 2026-11-25): open = Join or Bench answers; locked = Join answers +
                        every rostered name (a Bench answer the lock rostered survives an officer's drag) — prune_board, apply_move, autofill,
-                       RaidMixin._write_board and configops' run_move / run_board read it; NOT_ON_SHEET / NOT_ON_SHEET_MANY = the refusal of any
-                       other name, BENCH_LOCKED = a Bench answer off a locked roster (Fill seats asks them). An older build prunes a placed
+                       RaidMixin._write_board and configops' run_move / run_board (configops._board_check, the one check) read it;
+                       NOT_ON_SHEET / NOT_ON_SHEET_MANY = the refusal of any other name (whole sentences), BENCH_LOCKED = a Bench answer off a
+                       locked roster (once a seat opens, More › Fill seats… asks the bench first); configops.board_text lists the parser the
+                       unplaced Join answers ('not placed' / 'not rostered') and, apart, the unplaced Bench answers. An older build prunes a placed
                        Bench name at that run's next save (nothing is rewritten at start).
                        prune_board(ev) = in EVERY RaidStore.save of an open run: a placed name neither Join nor Bench, pinned out, or whose
                        character|spec changed since placed (RaidEvent.placed_as) leaves the board in that save (Join ↔ Bench stays); unplace_member(rs, uid, why) (left the server);
                        board_complete(reg, rs, p) → a later raid's Auto-fill counts that board (event_board_preview(complete_boards=)); False
-                       while a Bench answer not kept off waits unplaced and the board holds fewer than run_size × run_rosters. The lock: lock_forces(reg, rs, ev, players) → LockForces = THE builder of who is kept on and
+                       while a Bench answer not kept off waits unplaced (or Auto-fill placed it) and the board holds fewer than run_size ×
+                       run_rosters. The lock: lock_forces(reg, rs, ev, players) → LockForces = THE builder of who is kept on and
                        off (_solve_run's force_in / force_out, the lock box's count, kept_off_ids — role_plan never asks a kept-off name);
+                       a Bench answer AUTO-FILL placed (ev.auto_placed) is not on the lock's board — not kept on, no group pin, not
+                       first_come_bench_out's `fixed`: the solve decides again, so a Join after the Auto-fill comes first; one an officer placed
+                       by hand is kept (task 5 fix); _solve_run's groups used = lock_forces.placed's;
                        ALL_KEPT_OFF raised before solving when every joiner is kept off; Bench last (2026-11-25): _roster_count(reg, ev, players,
                        layout_groups_used) = _solve_run's roster count (how_many_rosters counts joiners only: Bench never adds a roster), and on a
                        first-to-join event first_come_bench_out(profile, players, seats, role_min, fixed, late, kept_off) forces out the Bench
@@ -292,8 +298,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
   web/api_events.py    install_events_api (called from api.py; §5.67 phase 4) = thin callers of event_view, officers, each in a thread (GET
                        /api/events stays the live stream): GET /api/event-list?history_offset=, GET /api/event-new, GET /api/event/{key} (any part's
                        key; the officers' boards, each open raid's Auto-fill line from event_board.AutoFill.state — nothing solves; NO_EVENT 404
-                       for a gone or dropped key), POST /api/event/{key}/clear (More › Clear the board: consequences.clear_board_box, preview / seen,
-                       one save_board per open raid, pins untouched), GET /api/event/{key}/lineup +
+                       for a gone or dropped key), POST /api/event/{key}/clear (More › Clear the board: consequences.clear_board_box — counts every
+                       placed name rc.board_names holds, Bench answers too ("come off the board") —, preview / seen, one save_board per open
+                       raid, pins untouched, answers consequences.CLEARED), GET /api/event/{key}/lineup +
                        POST it {lineup} (What this makes, nothing written — the Save is /api/run/{key}/lineup), GET /api/event/coming/{sid}/{occurrence}
                        (404 {error, key}), POST /api/run/{key}/switch {uid, character, spec, part, seat, option, rev, preview?, seen?} → one Role
                        switches row: before the lock RaidMixin.set_answer(spec=) on the first raid, after it send_plan(seats=[seat]) on its raid; a row

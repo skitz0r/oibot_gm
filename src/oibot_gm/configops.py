@@ -320,8 +320,10 @@ def live_runs_text(reg: Registry, raids=None) -> str:
 
 
 def board_text(reg: Registry, ev) -> str:
-    """The board compactly: 'g1 A, B, C | g2 D | … · bench: E, F' (before lock the officers' layout, after lock the
-    roster); with several rosters the groups read '1.1', '2.1' (roster.group). Empty groups are left out."""
+    """The board compactly: 'g1 A, B, C | g2 D | … · not placed: E, F · Bench: G' (before lock the officers' layout,
+    after lock the roster — 'not rostered'); with several rosters the groups read '1.1', '2.1' (roster.group). Empty
+    groups are left out. The Join answers off the board, then the Bench answers off it (the board may hold both:
+    rc.board_names), so the parser sees every name it may place."""
     from . import raidcycle as rc
 
     layout = rc.board_layout(reg, ev)
@@ -329,10 +331,13 @@ def board_text(reg: Registry, ev) -> str:
     many = len(layout) > n
     groups = [f"{(f'{gi // n + 1}.{gi % n + 1}' if many else f'g{gi + 1}')} {', '.join(g)}" for gi, g in enumerate(layout) if g]
     placed = {x for g in layout for x in g}
-    bench = [s.display_name for s in ev.signups.values() if s.status == "in" and s.display_name not in placed]
-    if not groups and not bench:
+    waiting = [s.display_name for s in ev.signups.values() if s.status == "in" and s.display_name not in placed]
+    bench = [s.display_name for s in ev.signups.values() if s.status == "sub" and s.display_name not in placed]
+    if not groups and not waiting and not bench:
         return ""
-    return (" | ".join(groups) or "(nobody placed)") + (f" · bench: {', '.join(bench)}" if bench else "")
+    bank = rc.BANK_WORDS["open" if ev.state == "open" else "locked"].lower()
+    return ((" | ".join(groups) or "(nobody placed)") + (f" · {bank}: {', '.join(waiting)}" if waiting else "")
+            + (f" · Bench: {', '.join(bench)}" if bench else ""))
 
 
 def data_row(text) -> str:
@@ -1815,6 +1820,17 @@ def op_run_key(reg: Registry, op: ConfigOp, raids=None) -> str | None:
         return None
 
 
+def _board_check(ev, layout: list[list[str]]) -> None:
+    """run_board's one check (describe, apply, apply_async): every name on the board is one it may hold
+    (rc.board_names), else RegistryError(NOT_ON_SHEET_MANY) naming the others."""
+    from . import raidcycle as rc
+
+    names = rc.board_names(ev)
+    unknown = [n for g in layout for n in g if n not in names]
+    if unknown:
+        raise RegistryError(rc.NOT_ON_SHEET_MANY.format(names=", ".join(unknown)))
+
+
 def _joined_name(ev, m) -> str:
     """The display name a member has on this sheet; RegistryError unless the board may hold it (rc.board_names)."""
     from . import raidcycle as rc
@@ -2926,15 +2942,10 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         return f"{label}: auto-fill the board — the bot builds the groups, placing the {len(ev.by_status('in'))} joined around the {placed} already placed (nothing is locked or sent)"
     if op.op == "run_board":
         layout = _layout(op.value)
-        from . import raidcycle as rc
-
-        names = rc.board_names(ev)
-        unknown = [n for g in layout for n in g if n not in names]
-        if unknown:
-            raise RegistryError(rc.NOT_ON_SHEET_MANY.format(names=", ".join(unknown)))
+        _board_check(ev, layout)
         groups = " | ".join(", ".join(g) for g in layout) or "(empty)"
         if ev.state == "open":
-            return f"{label}: board → {groups} (the layout the lock will use; unplaced joiners are bench)"
+            return f"{label}: board → {groups} (the layout the lock will use; it places the rest)"
         before = {p.signup_name for p in ev.seated()}
         after = {n for g in layout for n in g}
         added, removed = sorted(after - before), sorted(before - after)
@@ -3175,12 +3186,7 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         if ev.state != "open":
             raise RegistryError(f"run_board on a locked event {NEEDS_BOT}")
         layout = _layout(op.value)
-        from . import raidcycle as rc
-
-        names = rc.board_names(ev)
-        unknown = [n for g in layout for n in g if n not in names]
-        if unknown:
-            raise RegistryError(rc.NOT_ON_SHEET_MANY.format(names=", ".join(unknown)))
+        _board_check(ev, layout)
         ev.layout = layout if any(layout) else None
         ev.log.append(f"{by}: board set")
         rs.save(ev, f"board (by {by})")
@@ -3678,10 +3684,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         layout = _layout(op.value)
         from . import raidcycle as rc
 
-        names = rc.board_names(ev)
-        unknown = [n for g in layout for n in g if n not in names]
-        if unknown:
-            raise RegistryError(rc.NOT_ON_SHEET_MANY.format(names=", ".join(unknown)))
+        _board_check(ev, layout)
         was_open = ev.state == "open"
         line = await bot.save_board(reg, rs, ev, layout, rev=rev, by=by, via=via)
         return line if was_open else f"{run_words(reg, ev)}: {line}"  # before lock the line names the run itself
