@@ -42,6 +42,7 @@ ASKERS: dict[str, tuple[int, str, str, str, str, bool]] = {
 
 IRONFEATHER = ("Ironfeather Breastplate", "Ironfeather Leggings", "Ironfeather Shoulders")
 LOOT_ITEM = "Robe of the Bench"
+LOOT_TO = "Thornwick"   # who an_award gives LOOT_ITEM to: the loot cases' scripts and their `must` both come from it
 LOOT_REASON = "kept for the tank"
 
 
@@ -110,10 +111,10 @@ def a_schedule(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
 
 
 def an_award(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
-    """One award to Thornwick, read back as the newest award of the guild's ledger."""
+    """One award of LOOT_ITEM to LOOT_TO, read back as the newest award of the guild's ledger."""
     askers(reg)
     reg.store.append_jsonl(f"{reg.key}/ledger.jsonl", {
-        "raider": "Thornwick", "discord_id": WREN, "item_id": 0, "item_name": LOOT_ITEM, "tier": "S", "total_weight": 1.0,
+        "raider": LOOT_TO, "discord_id": WREN, "item_id": 0, "item_name": LOOT_ITEM, "tier": "S", "total_weight": 1.0,
         "received": "2026-09-02", "instance": "bd", "boss": "Gatekeeper", "offspec": False, "import_id": "bench-d1",
         "source": "override", "bot_pick": "Briarwood"})
     newest = max(RegistryLootContext(reg, reg.store, None).ledger, key=lambda a: a.received)
@@ -182,7 +183,7 @@ BENCH: list[BenchCase] = [
               script=([call("schedule")], [reply(answer="We raid Barrow Deeps on Tuesdays at 7:30 PM.")])),
     BenchCase("loot", "member", "public", "who got {item}?", an_award,
               must=("{character}",), expect_tools=("loot",),
-              script=([call("loot", item=LOOT_ITEM)], [reply(answer=f"Thornwick got the {LOOT_ITEM}.")])),
+              script=([call("loot", item=LOOT_ITEM)], [reply(answer=f"{LOOT_TO} got the {LOOT_ITEM}.")])),
     BenchCase("attendance", "member", "private", "what's my attendance?", askers,
               must=("not tracked yet",), expect_tools=("attendance",),
               script=([call("attendance")], [reply(answer="Your attendance is not tracked yet.")])),
@@ -202,7 +203,7 @@ BENCH: list[BenchCase] = [
               script=([call("section", key="absences")], [reply(answer="Ask me in a private message for that.")])),
     BenchCase("loot_reason_member", "member", "public", "why did {character} get {item}?", an_award_with_reason,
               never=(LOOT_REASON,),
-              script=([call("loot", item=LOOT_ITEM)], [reply(answer=f"Thornwick got the {LOOT_ITEM}; the council's reasons are for officers.")])),
+              script=([call("loot", item=LOOT_ITEM)], [reply(answer=f"{LOOT_TO} got the {LOOT_ITEM}; the council's reasons are for officers.")])),
     BenchCase("record_other_member", "member2", "public", "what's Thornwick's record?", away_next_week,
               never=("dentist",),
               script=([call("member", name="Thornwick")], [reply(answer="Thornwick plays a Survival Hunter.")])),

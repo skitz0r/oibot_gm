@@ -1,6 +1,7 @@
 """The scripted stand-in for the answering model (answer tools, design §10): `ScriptedProvider(steps)` plays a fixed
 list of turns through `converse` — no network, no model. A step is a list of `call(name, **input)` dicts (tool calls)
-or a string (a text-only turn). Every request is kept in `.requests` so a test can read what the loop sent."""
+or a string (a text-only turn) or an Exception instance, raised when the loop reaches it (BudgetExceeded on the
+second request, Refused, CutShort, any RuntimeError). Every request is kept in `.requests` so a test can read what the loop sent."""
 from __future__ import annotations
 
 import copy
@@ -23,7 +24,7 @@ def reply(**fields) -> dict:
 class ScriptedProvider:
     name = "scripted"
 
-    def __init__(self, steps: list[list[dict] | str]):
+    def __init__(self, steps: list[list[dict] | str | BaseException]):
         self.steps = list(steps)
         self.requests: list[dict] = []
         self.n = 0
@@ -34,6 +35,8 @@ class ScriptedProvider:
             raise AssertionError(f"the scripted model ran past its script ({len(self.steps)} steps)")
         step = self.steps[self.n]
         self.n += 1
+        if isinstance(step, BaseException):
+            raise step
         if isinstance(step, str):
             return Turn(content=[{"type": "text", "text": step}], calls=[], text=step, stop_reason="end_turn", usage=dict(USAGE))
         calls = [ToolCall(f"call-{self.n}-{i}", c["name"], dict(c["input"])) for i, c in enumerate(step)]

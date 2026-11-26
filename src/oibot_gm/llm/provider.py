@@ -80,9 +80,25 @@ def for_guild(key: str | None):
         CURRENT_GUILD.reset(token)
 
 
+def model_id(model: str) -> str:
+    """THE model id normaliser (price_of and forced_tool_ok read it): a platform prefix ('us.anthropic.'), a bracketed
+    option ('[1m]'), an '@' version, a dated snapshot ('-20251001') and a Bedrock version ('-v1:0') come off, so
+    'us.anthropic.claude-opus-5-5-20261001-v1:0[1m]' reads as 'claude-opus-5-5'. Any other id is returned as is."""
+    m = model.strip()
+    if "claude-" in m:
+        m = "claude-" + m.split("claude-", 1)[1]
+    m = re.sub(r"\[[^\]]*\]$", "", m)
+    m = m.split("@", 1)[0]
+    m = re.sub(r"-v\d+(:\d+)?$", "", m)
+    return re.sub(r"-\d{8}$", "", m)
+
+
 def price_of(model: str) -> tuple[float, float, float, float]:
-    """Exact id, else the model's family (claude-opus-5-5 → claude-opus-5); an unknown family is priced like the
-    dearest one and logged, so the cap errs towards stopping early rather than overspending."""
+    """Exact id (after model_id), else the model's family (claude-opus-5-5 → claude-opus-5); an unknown family is
+    priced like the dearest one and logged, so the cap errs towards stopping early rather than overspending."""
+    if model in PRICES:
+        return PRICES[model]
+    model = model_id(model)
     if model in PRICES:
         return PRICES[model]
     family = next((k for k in sorted(PRICES, key=len, reverse=True) if model.startswith(k.rsplit("-", 1)[0] + "-")), None)
@@ -96,9 +112,31 @@ class BudgetExceeded(RuntimeError):
     pass
 
 
+class Refused(RuntimeError):
+    """converse: the model declined the request (stop_reason "refusal"). `category` = the API's stop_details category
+    when it gave one (e.g. "cyber"), else None — for logs and code, never for a person to read."""
+
+    def __init__(self, category: str | None = None):
+        super().__init__("the model refused the request")
+        self.category = category
+
+
+class CutShort(RuntimeError):
+    """converse: the response hit max_tokens — a tool input or a sentence may be cut off, so nothing in it is used."""
+
+    def __init__(self) -> None:
+        super().__init__("the model's response was cut off at max_tokens")
+
+
 # Models that answer a forced tool_choice ({"type": "tool"} / {"type": "any"}) with a 400: converse asks them with
 # {"type": "auto"} and the prompt names the tool instead.
 NO_FORCED_TOOL: frozenset[str] = frozenset({"claude-fable-5-1", "claude-fable-5-2", "claude-mythos-5-1", "claude-mythos-5-2", "claude-opus-5-5", "claude-sonnet-5-5"})
+
+
+def forced_tool_ok(model: str) -> bool:
+    """Whether the model takes a forced tool_choice: its id read through model_id (so 'claude-opus-5-5[1m]', a dated
+    or a platform-prefixed id counts as its model) is not in NO_FORCED_TOOL."""
+    return model_id(model) not in NO_FORCED_TOOL
 
 
 @dataclass(frozen=True)
@@ -248,11 +286,11 @@ class AnthropicProvider:
         """One request of a tool-use conversation: the caller owns the loop and the history. Two cache breakpoints:
         the system block (tools render before it, so it caches tools + system) and the last content block of the newest
         user message — set on a copy, so the caller's history never piles up breakpoints. `force` names a tool the
-        model must call, sent only to a model that takes a forced tool_choice (else auto). One usage row per request;
-        a refusal is an error."""
+        model must call, sent only to a model that takes a forced tool_choice (else auto). One usage row per request,
+        written before a refusal (Refused) or a response cut off at max_tokens (CutShort) is raised."""
         self._check_budget(workload)
         model, effort = self.route(workload)
-        choice = {"type": "tool", "name": force} if force and model not in NO_FORCED_TOOL else {"type": "auto"}
+        choice = {"type": "tool", "name": force} if force and forced_tool_ok(model) else {"type": "auto"}
         resp = self.client.messages.create(
             model=model,
             max_tokens=8000,
@@ -266,8 +304,11 @@ class AnthropicProvider:
         row = self._usage_row(workload, model, resp.usage)
         self._record(row)
         self.last_usage = row
-        if resp.stop_reason == "refusal":
-            raise RuntimeError("the model refused the request (stop_reason=refusal)")
+        if resp.stop_reason == "refusal":  # billed all the same: the row above is written first
+            details = getattr(resp, "stop_details", None)
+            raise Refused(getattr(details, "category", None) if details is not None else None)
+        if resp.stop_reason == "max_tokens":
+            raise CutShort()
         content = [b.model_dump(mode="json", exclude_none=True) for b in resp.content]
         calls = [ToolCall(b.id, b.name, dict(b.input or {})) for b in resp.content if b.type == "tool_use"]
         text = "".join(b.text for b in resp.content if b.type == "text")
@@ -284,8 +325,10 @@ def _cache_last_user(messages: list[dict]) -> list[dict]:
         msg = copy.deepcopy(out[i])
         if isinstance(msg.get("content"), str):
             msg["content"] = [{"type": "text", "text": msg["content"]}]
-        if msg.get("content"):
-            msg["content"][-1]["cache_control"] = {"type": "ephemeral"}
+        last = msg["content"][-1] if msg.get("content") else None
+        # an empty text block can't carry a breakpoint (the API refuses it): no breakpoint then
+        if last is not None and not (last.get("type") == "text" and not last.get("text")):
+            last["cache_control"] = {"type": "ephemeral"}
         out[i] = msg
         break
     return out
