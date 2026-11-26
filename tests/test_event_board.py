@@ -113,7 +113,7 @@ def test_short_reads_the_needs_never_a_solve(reg, rs, monkeypatch, web_bot):
 
 def test_the_footer_and_the_bank_say_the_new_truth():
     assert "lock" in PAGE_WORDS["board_footer"] and PAGE_WORDS["autofill_button"] in PAGE_WORDS["board_footer"]
-    assert "stays off" not in PAGE_WORDS["not_placed_note"] and "not_placed_off" not in PAGE_WORDS
+    assert "not_placed_note" not in PAGE_WORDS and "not_placed_off" not in PAGE_WORDS, "Not placed carries no how-to sentence (issue #12)"
     for gone in ("board_working", "board_failed"):
         assert gone not in PAGE_WORDS
 
@@ -185,6 +185,28 @@ def test_the_move_route_carries_the_officer(reg, rs, web_bot):
     r = web_bot.c.post(f"/api/run/{ev.key}/move", json={"member": n[12], "to": {"r": 0, "g": 1, "i": 0}, "state": "open"}, headers=H())
     assert r.status_code == 200, r.text
     assert ev.layout[1] == [n[12]] and ev.placed_by == {n[12]: OWNER} and not ev.pins
+
+
+def test_a_refused_move_answers_the_board_as_it_stands_and_its_sentence(reg, rs, web_bot):
+    """Issue #12: the page draws the move's own answer, so a refusal must carry the board as it stands (the name back
+    where it was) and the sentence the page shows — a full group, and a drag dropped after the event locked."""
+    ev = one_off(reg, rs, lineup=[])
+    ms = reg.test_members()
+    join(reg, rs, ev, ms)
+    n = [m.display_name for m in ms]
+    g = int(reg.profile.comp_rules["group_size"])
+    for i in range(g):
+        assert web_bot.c.post(f"/api/run/{ev.key}/move", json={"member": n[i], "to": {"r": 0, "g": 0, "i": i}, "state": "open"}, headers=H()).status_code == 200
+    before = [list(x) for x in ev.layout]
+    r = web_bot.c.post(f"/api/run/{ev.key}/move", json={"member": n[g], "to": {"r": 0, "g": 0, "i": 99}, "state": "open"}, headers=H())
+    assert r.status_code == 409 and r.json()["error"][:1].isupper(), r.text
+    j = r.json()
+    assert [s["display_name"] for s in j["board"]["rosters"][0]["groups"][0]] == n[:g], "the full group as it stands"
+    assert n[g] in [s["display_name"] for s in j["board"]["bank"]], "the name is back in Not placed"
+    assert j["rev"] == rc.board_rev(reg, ev) and ev.layout == before, "nothing written"
+    ev.state = "locked"
+    r = web_bot.c.post(f"/api/run/{ev.key}/move", json={"member": n[g], "to": {"r": 0, "g": 1, "i": 0}, "state": "open"}, headers=H())
+    assert r.status_code == 409 and "locked" in r.json()["error"] and "board" in r.json() and r.json()["state"] == "locked"
 
 
 # ---------------------------------------------------------------- Undo my moves

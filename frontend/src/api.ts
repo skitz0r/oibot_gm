@@ -147,7 +147,7 @@ export interface PageWords {
   open_in_discord: string; no_answer_yet: string; answers_one: string; bot_asks: string; officer_asks: string; every_main: string;
   used_when: string; one_off_rule: string; priority: Record<"regular" | "rank" | "main" | "sat_out" | "signup_order", string>;
   rosters_of: string; placed_of: string; board_footer: string; show_switches: string; hide_switches: string; raid_short: string; switch_item: string;
-  sheet_waits: string; sheet_not_posted: string; open_seat: string; not_placed_note: string; kept_off: string; seats_of: string; no_moves: string;
+  sheet_waits: string; sheet_not_posted: string; open_seat: string; kept_off: string; seats_of: string; no_moves: string;
   bank_empty: Record<"nobody" | "placed" | "rostered", string>;
   /** Auto-fill groups (event_board.AutoFill): the button, its working line and its outcomes */
   autofill_button: string; autofill_working: string; autofill_done: string; autofill_changed: string; autofill_stopped: string;

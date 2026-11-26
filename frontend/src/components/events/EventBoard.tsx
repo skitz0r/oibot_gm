@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Button, Group, Loader, Stack, Text, Tooltip } from "@mantine/core";
-import { api, type Box as ConfirmBoxShape, type EventView, type Meta } from "../../api";
+import { api, type Board, type Box as ConfirmBoxShape, type EventView, type Meta, type Sheet } from "../../api";
 import { fail, ok } from "../Page";
 import { useConfirmBox } from "../ConfirmBox";
 import { ViewSection } from "../Facts";
@@ -30,10 +30,17 @@ export function ShortRoles({ meta, roles }: { meta: Meta; roles: Record<string, 
  *  answers at once, the button then shows the server's working words until the board updates (`run:` reload), and an
  *  auto-fill that wrote nothing leaves its server sentence under it. The footer sentence and Undo my moves (the server's
  *  box, its count) while the sheet is open. A locked event shows its roster; a finished one the board as it was locked,
- *  read only. The page places nobody: every move goes to the server and the reload draws its answer. */
-export function EventBoard({ meta, view, onReload }: { meta: Meta; view: EventView; onReload: () => void }) {
+ *  read only. The page places nobody: every move goes to the server and the board is drawn from the move's own answer
+ *  at once (issue #12: one round trip, not the move then a whole-event read). The rest of the page (Placed, Signups,
+ *  Role switches) follows on the live `run:` reload the write sets off — the page fetches nothing of its own after a
+ *  move, so a drop costs one event read, not two. `sentAt` = when the GET behind `view` was SENT (performance.now): the
+ *  move's board is drawn until a view asked for after it arrives, so an older read that lands late never draws the
+ *  board back. */
+type Answered = { key: string; board: Board; needs?: Sheet["needs"]; rev?: string; at: number };
+export function EventBoard({ meta, view, onReload, sentAt = 0 }: { meta: Meta; view: EventView; onReload: () => void; sentAt?: number }) {
   const parts = view.parts.filter((p) => p.sheet?.board);
   const [pick, setPick] = useState<string | null>(null);
+  const [answered, setAnswered] = useState<Answered | null>(null);
   const [ask, dialog] = useConfirmBox(["run:"]);
   const [pressing, setPressing] = useState(false);
   const part = parts.find((p) => p.key === pick) || parts[0];
@@ -44,6 +51,8 @@ export function EventBoard({ meta, view, onReload }: { meta: Meta; view: EventVi
   const short = Object.keys(part.short || {}).length > 0;
   const url = `/api/run/${encodeURIComponent(part.key)}/layout`;
   const af = open && !finished ? part.autofill : null;
+  const own = answered && answered.key === part.key && answered.at > sentAt ? answered : null;
+  const sheet: Sheet = own ? { ...part.sheet, board: own.board, ...(own.needs ? { needs: own.needs } : {}), ...(own.rev ? { rev: own.rev } : {}) } : part.sheet;
 
   /** Auto-fill groups: the route answers at once (a refusal is its sentence); the reload draws the server's working line. */
   async function autofill() {
@@ -88,7 +97,8 @@ export function EventBoard({ meta, view, onReload }: { meta: Meta; view: EventVi
         {part.rostered_words && !(finished && parts.length === 1) && <div><dt>{"Rostered"}</dt><dd>{part.rostered_words}</dd></div>}
         {short && <div><dt>Short</dt><dd><ShortRoles meta={meta} roles={part.short} /></dd></div>}
       </dl>
-      <BoardView key={part.key} variant="event" e={part.sheet} meta={meta} onBoard={() => onReload()} onReload={onReload}
+      <BoardView key={part.key} variant="event" e={sheet} meta={meta} onReload={onReload}
+        onBoard={(key, board, needs, rev) => setAnswered({ key, board, needs, rev, at: performance.now() })}
         bankAction={af ? (
           <Stack gap={4} mt={6}>
             <Button variant="light" size="sm" mih={44} disabled={af.working || pressing} onClick={autofill}

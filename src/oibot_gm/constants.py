@@ -97,9 +97,8 @@ PAGE_WORDS = {
     "sheet_waits": "Posts once a signup channel is set on the Config page's Channels tab", "sheet_not_posted": "Not in Discord yet",
     # a locked Board's empty seat a minimum wants (beside its role icon)
     "open_seat": "open seat",
-    # the Board's Not placed list before the lock (the owner's tweaks C): a name there is only not placed yet — the lock
-    # places them — and one kept off through the ⋮ menu (an "out" pin) carries the word `kept_off` on its line
-    "not_placed_note": "Nobody here is placed yet. The lock seats them where a seat is open, unless they are kept off.",
+    # the Board's Not placed list before the lock: a name kept off through the ⋮ menu (an "out" pin) carries this word on
+    # its line (the list carries no how-to sentence under its heading: issue #12, the owner, 2026-11-25)
     "kept_off": "kept off",
     # Auto-fill groups (event_board.AutoFill): the button beside Not placed, its working line, what an MCP press that
     # waited is told, and each outcome that writes nothing (shown beside the button while the board is unchanged)

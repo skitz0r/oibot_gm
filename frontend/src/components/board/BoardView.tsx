@@ -28,10 +28,12 @@ type Verb = "move" | "roster" | "swap" | "substitute" | "release";
  *  into. `onHide`: before the lock the card collapses it back to one line.
  *  `variant="event"` (the Events page): before the lock the board is the OFFICERS' layout (nothing solved) — no Clear,
  *  Place the rest or split control here (Clear the board is in the event's More menu); `bankAction` (Auto-fill groups)
- *  sits beside Not placed, under it the server's note that a name there is only not placed yet, and a name kept off
- *  through the ⋮ menu carries the server's word `kept_off` on its line. A locked roster's `open` roles (the server's)
+ *  sits beside Not placed (no note under it: issue #12), and a name kept off through the ⋮ menu carries the server's
+ *  word `kept_off` on its line. A locked roster's `open` roles (the server's)
  *  are drawn as dashed slots, role icon + "open seat". A drop or Move to… sends ONE move and the page draws what the
- *  server answers, never a place of its own. Before the lock a move goes at once; a locked event takes no drag, and its
+ *  server answers (the answer's board, through `onBoard`), never a place of its own; while it is written the moved name
+ *  is dimmed in place — no "saving" line, nothing shifts (issue #12) — and a refusal leaves it where it was with the
+ *  server's sentence. Before the lock a move goes at once; a locked event takes no drag, and its
  *  Move to… asks through the server-worded box (useConfirmBox); a finished event is read only. Without `variant` (the
  *  Test bench) as before. */
 export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAction }: { e: Sheet; meta: Meta; onBoard: OnBoard; onHide?: () => void; onReload?: () => Promise<void> | void; variant?: "event"; bankAction?: React.ReactNode }) {
@@ -45,6 +47,7 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAct
   const drag = useRef<Drag | null>(null);
   const [over, setOver] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [moving, setMoving] = useState<string | null>(null);  // the name a move is being written for: dimmed in place, no line
   const [placing, setPlacing] = useState(false);
   const [splitOpen, setSplitOpen] = useState(false);
   const [ask, confirmDialog] = useConfirm();
@@ -64,8 +67,9 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAct
 
   type Reply = { board: Board; needs: Sheet["needs"]; rev?: string; message?: string };
   /** Any board write. A refusal (someone else got there first, group full) still carries the current board: show it. */
-  async function send(path: string, payload: unknown) {
+  async function send(path: string, payload: unknown, name?: string) {
     setSaving(true);
+    if (name) setMoving(name);
     try {
       const r = await api.post<Reply>(`/api/run/${encodeURIComponent(e.key)}/${path}`, payload);
       onBoard(e.key, r.board, r.needs, r.rev);
@@ -74,13 +78,13 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAct
       const b = (err as { body?: Partial<Reply> }).body;
       if (b?.board) onBoard(e.key, b.board, b.needs, b.rev);
       fail(err);
-    } finally { setSaving(false); }
+    } finally { setSaving(false); if (name) setMoving(null); }
   }
   /** Whole-board writes (Clear, Use this split) are tied to the board this officer was looking at. */
   const commit = (groups: string[][][], strategy?: string) => send("layout", { groups: groups.flat(), rev: e.rev, ...(strategy ? { strategy } : {}) });
   /** A drag is sent as one move and applied server-side to the board as it is now, so two officers merge. `state` = the
    *  state this board was drawn in: a drag dropped after the scheduler locked the run is refused (409 + the board). */
-  const move = (member: string, to: { r: number; g: number; i: number } | null) => send("move", { member, to, state: e.state === "open" ? "open" : "locked" });
+  const move = (member: string, to: { r: number; g: number; i: number } | null) => send("move", { member, to, state: e.state === "open" ? "open" : "locked" }, member);
 
   async function clear() {
     // the sentence comes from the server (consequences.py "clear"); the browser prints it, never composes one
@@ -209,7 +213,7 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAct
     onDrop: (ev: React.DragEvent) => { ev.preventDefault(); onDrop(); },
   });
   const chip = (s: Seat, from: Drag["from"], mark?: string | null) => (
-    <Box key={s.display_name} draggable={drags && !readOnly} onDragStart={drags && !readOnly ? onDragStart(s.display_name, from) : undefined} style={{ cursor: drags && !readOnly ? "grab" : undefined, padding: "2px 6px", borderRadius: 6, background: from ? "transparent" : "var(--mantine-color-slate-6)", border: from ? "1px solid transparent" : "1px solid var(--mantine-color-slate-5)" }}>
+    <Box key={s.display_name} draggable={drags && !readOnly} onDragStart={drags && !readOnly ? onDragStart(s.display_name, from) : undefined} style={{ cursor: drags && !readOnly ? "grab" : undefined, opacity: moving === s.display_name ? 0.5 : undefined, padding: "2px 6px", borderRadius: 6, background: from ? "transparent" : "var(--mantine-color-slate-6)", border: from ? "1px solid transparent" : "1px solid var(--mantine-color-slate-5)" }}>
       <SeatLine meta={meta} s={s} mark={locked && !readOnly && (!event || e.confirms !== false) ? (mark ?? null) : undefined} right={<>{event && !locked && !from && pins[s.display_name] === "out" && <Text span size="xs" c="red.4" style={{ whiteSpace: "nowrap" }}>{meta.page_words.kept_off}</Text>}<PinMark meta={meta} pin={pins[s.display_name]} />{!readOnly && <Box ml="auto" onClick={(ev) => ev.stopPropagation()}><MemberMenu run={e.key} uid={s.uid} name={s.display_name} onDone={onReload || (() => undefined)} moves={movesFor(s.display_name, from)} /></Box>}</>} />
     </Box>
   );
@@ -223,7 +227,7 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAct
           {!event && !readOnly && <Legend meta={meta} locked={locked} />}
           {canSplit && multi && e.split && <Text size="xs" c="dimmed">{e.split.runs} rosters this slot · {SPLIT_LABEL[e.split.strategy] || e.split.strategy}{board.balance ? ` · ${board.balance}` : ""}</Text>}
           {canSplit && reason && <SplitReasonLine meta={meta} r={reason} />}
-          {placing ? <Text size="xs" c="dimmed">placing the rest…</Text> : saving && <Text size="xs" c="dimmed">saving…</Text>}
+          {placing && <Text size="xs" c="dimmed">placing the rest…</Text>}
         </Group>
         {!locked && !event && (
           <Group gap="xs" wrap="wrap">
@@ -241,7 +245,6 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAct
             <SegmentedControl size="xs" value={bankSort} onChange={pickSort} data={[{ value: "signup", label: "signup" }, { value: "spec", label: "spec" }, { value: "role", label: "role" }]} />
           </Group>
           {event && !locked && bankAction}
-          {event && !locked && <Text size="xs" c="dimmed" mt={4}>{meta.page_words.not_placed_note}</Text>}
           <Stack gap={4} mt={6} p={8} style={{ minHeight: 120, border: `1px dashed ${over === "bank" ? "var(--mantine-color-teal-4)" : "var(--mantine-color-slate-5)"}`, borderRadius: 8, background: "var(--mantine-color-slate-7)" }} {...zone("bank", () => drop("bank"))}>
             {board.bank.length === 0 && !event && <Text size="xs" c="dimmed">{!placed ? "Nobody has joined yet — the sheet is in Discord." : locked ? "Everyone who joined is rostered. A name dragged here frees their seat." : "Everyone who joined is placed. A name dragged here goes back to not placed — still joined, the lock seats them."}</Text>}
             {board.bank.length === 0 && event && <Text size="xs" c="dimmed">{meta.page_words.bank_empty[!placed ? "nobody" : locked ? "rostered" : "placed"]}</Text>}

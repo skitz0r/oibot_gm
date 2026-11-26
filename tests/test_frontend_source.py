@@ -1296,7 +1296,7 @@ def test_the_event_board_draws_the_servers_picture_and_never_fights_a_drag():
     """Phase 4, Task 9 (Review Focus 3 on the page), as the owner's tweaks C left it: a drop sends ONE move and the page
     draws what the server answers (no optimistic place); a reload that lands mid-drag waits for the drop; open seats are
     the server's roles (role icon + page_words.open_seat); Not placed carries the server's note (a name there is only not
-    placed yet) and a kept-off name the server's word; Auto-fill groups sits beside Not placed with the server's label,
+    placed yet — removed by issue #12) and a kept-off name the server's word; Auto-fill groups sits beside Not placed with the server's label,
     working line and outcome sentence; Undo is the server's box and verb; the history shows the board as it was locked.
     Role switches print the server's rows, why sentences and button words, send the plan rev and `seen`, and keep their
     fold per viewer."""
@@ -1306,7 +1306,7 @@ def test_the_event_board_draws_the_servers_picture_and_never_fights_a_drag():
     hist = _code_only((SRC / "components" / "events" / "HistoryView.tsx").read_text())
     sw = _code_only((SRC / "components" / "events" / "RoleSwitches.tsx").read_text())
     assert view.count('send("move"') == 1 and "shown" not in view, "a drop is one move on the board as the server holds it"
-    assert "page_words.open_seat" in view and "r.open" in view and "page_words.not_placed_note" in view and "page_words.kept_off" in view
+    assert "page_words.open_seat" in view and "r.open" in view and "page_words.kept_off" in view
     assert "not_placed_off" not in view and "board_working" not in board and "board_error" not in board
     assert "bankAction={af ?" in board and "words.autofill_button" in board and "af.words" in board and "<Loader" in board
     assert "/autofill`" in board and "af.working" in board
@@ -1357,6 +1357,27 @@ def test_the_row_menu_prints_the_servers_box():
     assert "useConfirm(" not in menu and "confirmLabel" not in menu and "message: consequence" not in menu
     assert 'it.a.key === "callout" ? <NoteField' in rec and "<Textarea" in menu, "a callout's note is a field inside the box"
     assert "rev: list.rev" not in menu, "the box's fp is the check, never the list's older rev"
+
+
+def test_a_drop_shifts_nothing_and_draws_the_moves_own_answer():
+    """Issue #12 (the owner, 2026-11-25): a drop pops in no "saving…" line and Not placed carries no how-to sentence —
+    nothing under the bank's heading but Auto-fill groups; the moved name is dimmed in place while the move is written
+    (an opacity, never a line that pushes the page down) and a refusal leaves it where it was with the server's sentence
+    (`fail`) and draws the board the refusal carries (a 409's fresh board). The Events board is drawn from the move's own
+    answer at once — the page fetches nothing of its own after a move (the live `run:` reload brings the rest, ONE read
+    per drop, not two) — and a read SENT before that answer never draws the board back (`sentAt`)."""
+    view = _code_only((SRC / "components" / "board" / "BoardView.tsx").read_text())
+    board = _code_only((SRC / "components" / "events" / "EventBoard.tsx").read_text())
+    page = _code_only((SRC / "pages" / "Events.tsx").read_text())
+    assert "saving…" not in view and "saving..." not in view, "no saving line"
+    assert "placing the rest…" in view, "the Test bench's Place the rest keeps its working line (a solve, seconds long)"
+    assert "not_placed_note" not in view and "not_placed_note" not in _code_only((SRC / "api.ts").read_text())
+    assert "opacity: moving === s.display_name ? 0.5 : undefined" in view and "setMoving(null)" in view
+    assert 'send("move", { member, to, state: e.state === "open" ? "open" : "locked" }, member)' in view
+    assert "if (b?.board) onBoard(e.key, b.board, b.needs, b.rev);" in view and "fail(err);" in view, "a refusal draws the board it carries and says why"
+    assert "onBoard={() => onReload()}" not in board and "setAnswered({ key, board, needs, rev, at: performance.now() })" in board
+    assert "answered.at > sentAt" in board and "e={sheet}" in board
+    assert "const at = performance.now();" in page and "setSentAt(at)" in page and "sentAt={sentAt}" in page
 
 
 def test_the_event_board_fix_round_one():

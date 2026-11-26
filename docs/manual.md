@@ -1114,8 +1114,10 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    someone; its tooltip says so). Before the lock the board is what officers placed: nothing is worked out when the
    page opens, when someone answers or when a name is dragged. A drag (or a name's **⋮ › Move to…**, on a phone or a
    keyboard) moves at once, with no box; into a full group Move to… offers *Swap with Nyx*, one entry per person there.
-   *Not placed* says *Nobody here is placed yet. The lock seats them where a seat is open, unless they are kept off.* —
-   with more joiners than seats (or late joiners on a first-to-join event) some stay out at the lock. Dropping a name
+   The name you moved is dimmed where it was until the bot has written the move, then the board shows the bot's answer;
+   nothing else on the page moves. A move the bot refuses (a full group, an event that locked meanwhile) leaves the name
+   where it was and says why. Everyone in *Not placed* is still joined: the lock seats them where a seat is open, unless
+   they are kept off — with more joiners than seats (or late joiners on a first-to-join event) some stay out. Dropping a name
    there, or pushing it there by a swap, only takes it out of its group. Keeping someone off the roster is their **⋮ ›
    Keep off the roster** (a placed person comes off the board at once; the word *kept off* then shows on their line;
    **Unpin** takes it back; dragging them into a group takes it back too, and **Undo my moves** puts it back). A placed

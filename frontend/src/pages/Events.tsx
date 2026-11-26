@@ -81,15 +81,17 @@ function EventPane({ evKey, meta, tick, onChanged }: { evKey: string; meta: Meta
   const navigate = useNavigate();
   const [ev, setEv] = useState<EventView | null>(null);
   const [gone, setGone] = useState<string | null>(null);
+  const [sentAt, setSentAt] = useState(0);  // when the GET behind `ev` was sent: the board's own move answer outranks older reads
   const seq = useRef(0);
   const lastLive = useRef<EventView | null>(null);
   const held = useAnyBoxOpen();
   const afterDrag = useAfterDrag();  // one pending answer while a drag is on: the newest is drawn after the drop
   useEffect(() => {
     const n = ++seq.current;
+    const at = performance.now();
     api.get<EventView>(`/api/event/${encodeURIComponent(evKey)}`).then((v) => afterDrag(() => {  // never redrawn under a drag
       if (n !== seq.current) return;  // a newer GET was sent meanwhile: its answer is the one drawn
-      setEv(v); setGone(null);
+      setEv(v); setSentAt(at); setGone(null);
       if (v.key !== evKey) navigate(`/events/${encodeURIComponent(v.key)}`, { replace: true });
     })).catch((e) => {
       if (n !== seq.current) return;
@@ -99,17 +101,17 @@ function EventPane({ evKey, meta, tick, onChanged }: { evKey: string; meta: Meta
   }, [evKey, tick]);  // eslint-disable-line react-hooks/exhaustive-deps
   const closed = !!ev && (ev.state === "done" || ev.state === "cancelled");
   if (ev && !closed) lastLive.current = ev;
-  if (held && lastLive.current && (gone || closed)) return <LiveEvent ev={lastLive.current} meta={meta} onChanged={onChanged} />;
+  if (held && lastLive.current && (gone || closed)) return <LiveEvent ev={lastLive.current} meta={meta} onChanged={onChanged} sentAt={sentAt} />;
   if (gone) return <Text c="dimmed">{gone}</Text>;
   if (!ev) return <Text c="dimmed">Loading…</Text>;
   if (closed) return <HistoryView ev={ev} meta={meta} onChanged={onChanged} />;
-  return <LiveEvent ev={ev} meta={meta} onChanged={onChanged} />;
+  return <LiveEvent ev={ev} meta={meta} onChanged={onChanged} sentAt={sentAt} />;
 }
 
 /** An open or locked event (Main.dc.html): the header (Reschedule, Lock now), Details, Signups, then Activity with the
  *  quiet Cancel event at its right. Lock now and Cancel event print the server's box; the press sends the fp of the box
  *  on screen as `seen`, so a box whose facts changed comes back fresh (409) and waits again. */
-function LiveEvent({ ev, meta, onChanged }: { ev: EventView; meta: Meta; onChanged: () => void }) {
+function LiveEvent({ ev, meta, onChanged, sentAt }: { ev: EventView; meta: Meta; onChanged: () => void; sentAt: number }) {
   const [ask, dialog] = useConfirmBox(["run:", "member"]);
   const [reschedule, rescheduleDialog] = useRescheduleBox(ev, onChanged);
   const run = `/api/run/${encodeURIComponent(ev.key)}`;
@@ -159,7 +161,7 @@ function LiveEvent({ ev, meta, onChanged }: { ev: EventView; meta: Meta; onChang
       <EventDetails details={ev.details} />
       <SignupsSection ev={ev} meta={meta} onDone={onChanged} />
       <RoleSwitches meta={meta} view={ev} onReload={onChanged} />
-      <EventBoard meta={meta} view={ev} onReload={onChanged} />
+      <EventBoard meta={meta} view={ev} onReload={onChanged} sentAt={sentAt} />
       <ActivitySection activity={ev.activity}
         action={ev.actions.cancel && ev.boxes.cancel ? <Button variant="subtle" color="gray" size="xs" onClick={cancel}>Cancel event</Button> : undefined} />
       {dialog}

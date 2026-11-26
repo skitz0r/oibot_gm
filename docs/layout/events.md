@@ -184,7 +184,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        Phase 4 (§5.67): solving(reg, key, lock=) = the solver's single flight per run AND the lock first: lock=True (lock_run) stops
                        every running Auto-fill (stop_all), a preview only its event's (stop_event) — wrapped so an auto-fill fault never touches the lock; board_move(…, by_id=) (before the lock
                        rc.apply_move on the officers' layout: a drop on Not placed only un-places — no pin —, a place in a group lifts a kept-off pin;
-                       recorded per officer); _write_board(…, auto=) (Auto-fill's write: ev.auto_placed; save_board empties it); undo_moves(reg,
+                       recorded per officer; before the lock it awaits only RaidStore.save — the file and the synchronous git commit, no
+                       Discord edit —, after it _write_board's after_board_change awaits the confirm DM, the sheet and card edits and the fill
+                       before the route answers (measured in issue #12)); _write_board(…, auto=) (Auto-fill's write: ev.auto_placed; save_board empties it); undo_moves(reg,
                        rs, ev, by_id, by, rev=) = Undo my moves (only that officer's placements and the pins their drags changed, rc.undo_rev checked);
                        set_answer(…, spec=, via=) (a role switch: the spec on the answer for the whole evening, a notice, one audited line);
                        send_plan(…, seats=) (one ask: the Events page's Switch after the lock); open_run_and_post(…, lock_hours=, first_rosters=);
