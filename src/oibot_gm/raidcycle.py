@@ -89,11 +89,15 @@ class Signup(BaseModel):
     # officer's ask), reset by a fresh Join after Bench / No thanks. Ad hoc first come (D4) orders by it, never by
     # updated_at (the last touch). None = not Join, or a file from before it was stored (updated_at stands in)
     joined_at: Optional[str] = None
+    # when this Bench began, kept the same way (Bench pressed again, another character): a first-to-join event seats the
+    # Bench in that order after every joiner. None = not Bench, or a file from before it was stored (updated_at stands in)
+    benched_at: Optional[str] = None
 
     @property
     def order_at(self) -> str:
-        """The signup's place in the queue: when the Join began (joined_at), else when it was last set."""
-        return self.joined_at or self.updated_at
+        """The signup's place in the queue: when the Join (joined_at) or the Bench (benched_at) began, else when it was
+        last set."""
+        return self.joined_at or self.benched_at or self.updated_at
 
 
 class Callout(BaseModel):
@@ -2504,7 +2508,7 @@ def sync_parts(rs: "RaidStore", first: RaidEvent) -> bool:
         for uid, s in first.signups.items():
             c = s.model_copy()
             if s.discord_id in fev.leaving and c.status != "out":
-                c.status, c.source, c.note, c.joined_at = "out", "callout", LEAVING_NOTE, None
+                c.status, c.source, c.note, c.joined_at, c.benched_at = "out", "callout", LEAVING_NOTE, None, None
             want[uid] = c
         for uid, s in fev.signups.items():  # a row of the part's own (a pool member's yes to a fill on it) stays
             want.setdefault(uid, s)
@@ -2687,14 +2691,17 @@ def _signup(reg: Registry, m: Member, c: RegisteredCharacter, status: str, sourc
 
 
 def carry_joined(old: Signup | None, s: Signup) -> Signup:
-    """Keep the queue place of a Join that stays a Join (a re-press, another character, a yes to an ask); a fresh Join
-    (after Bench / No thanks, or a first answer) starts now; anything but Join holds none."""
-    if s.status != "in":
-        s.joined_at = None
-    elif old is not None and old.status == "in":
-        s.joined_at = old.order_at
+    """Keep the queue place of a Join that stays a Join (a re-press, another character, a yes to an ask) and of a Bench
+    that stays a Bench (benched_at, the same way); a fresh Join or Bench (after another answer, or a first answer)
+    starts now; No thanks holds neither."""
+    s.joined_at = s.benched_at = None
+    if s.status not in ("in", "sub"):
+        return s
+    at = old.order_at if old is not None and old.status == s.status else s.updated_at
+    if s.status == "in":
+        s.joined_at = at
     else:
-        s.joined_at = s.updated_at
+        s.benched_at = at
     return s
 
 
@@ -4269,23 +4276,27 @@ def first_come_out(players: list[Player], seats: int, role_min: dict[str, int], 
     return out
 
 
-def first_come_bench_out(players: list[Player], seats: int, role_min: dict[str, int], fixed: set[str], late: set[str],
-                         kept_off: set[str]) -> set[str]:
+def first_come_bench_out(profile, players: list[Player], seats: int, role_min: dict[str, int], fixed: set[str],
+                         late: set[str], kept_off: set[str]) -> set[str]:
     """A first-to-join event's Bench answers (the Bench is strictly last, design §3 of 2026-11-25): after every joiner,
-    in the order they answered (Player.pos — a Bench answer's place is its last touch, Signup.order_at). A seat the
-    joiners leave empty (the joiners not `late` nor `kept_off` against `seats`) goes to the next Bench answer; a Bench
-    answer who plays a tank / healer role the joiners leave short of its minimum (`role_min`, over every roster) is
-    kept for the solver's exception; one placed by hand (`fixed`) is kept. Returns the Bench answers to force out."""
-    joiners = [p for p in players if p.status == "signed" and p.signup_name not in late | kept_off]
+    in the order they answered (Player.pos — a Bench answer's place is when its Bench began, Signup.order_at). A seat
+    the joiners leave empty (the joiners not `late` nor `kept_off` against `seats`) goes to the next Bench answer; a
+    Bench answer who can play (main or offspec) a tank / healer seat the solver may refund — solver.bench_refund_room,
+    THE rule the solve's own cap reads, over `role_min` (every roster) and the same joiners — is kept for the solve to
+    decide; one placed by hand (`fixed`) is kept. Returns the Bench answers to force out."""
+    skip = late | kept_off
+    joiners = [p for p in players if p.status == "signed" and p.signup_name not in skip]
     free = seats - len(joiners)
-    short = {r: int(role_min.get(r, 0)) - sum(1 for p in joiners if p.role == r) for r in EXTRA_ROLES}
+    room = solver.bench_refund_room(profile, players, role_min, skip=skip)
     bench = sorted((p for p in players if p.status == "bench" and p.signup_name not in kept_off), key=lambda p: p.pos)
     keep: set[str] = set()
     for p in bench:
+        off = solver.switch_spec(profile, p)
+        plays = [r for r in room if room[r] > 0 and (p.role == r or (off is not None and off.role == r))]
         if p.signup_name in fixed:
             pass
-        elif short.get(p.role, 0) > 0:
-            short[p.role] -= 1
+        elif plays:
+            room[plays[0]] -= 1
         elif free <= 0:
             continue
         keep.add(p.signup_name)
@@ -4437,7 +4448,7 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
         late = first_come_out([p for p in players if p.signup_name not in benched], size * n_rosters,
                               {r: n * n_rosters for r, n in role_min.items() if r in EXTRA_ROLES}, kept)
         # the Bench after every joiner, in the order they answered (a seat no joiner takes, or a short tank / healer)
-        late |= first_come_bench_out(players, size * n_rosters, {r: n * n_rosters for r, n in role_min.items() if r in EXTRA_ROLES},
+        late |= first_come_bench_out(reg.profile, players, size * n_rosters, {r: n * n_rosters for r, n in role_min.items() if r in EXTRA_ROLES},
                                      kept, late, benched)
     opts = solver.SolveOptions(
         time_limit_s=time_limit, raid_size=size,
@@ -5034,6 +5045,7 @@ def _apply_layout_locked(reg: Registry, rs: RaidStore, ev: RaidEvent, layout: li
     ev.rosters[0].benched = [p for u, p in players.items() if u not in seated and p.status == "signed"]
     for sg in added:
         sg.joined_at = sg.order_at if sg.status == "in" else now()
+        sg.benched_at = None
         sg.status, sg.source, sg.updated_at = "in", "officer", now()
     ev.log.append("board: " + (f"+{', '.join(s.display_name for s in added)} " if added else "") + (f"-{', '.join(removed)}" if removed else "") or "board: groups moved")
     rs.save(ev, "board updated")

@@ -10,9 +10,15 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        rostered as extra; scaled_role_minimums = the game's tank / healer minimums, rounded up — design §5.67 phase 2;
                        BENCH LAST (2026-11-25 Part B): _bench_terms (after _extra_role_terms) costs each seatable Bench answer (status "bench",
                        not in force_out) BENCH_SEAT_FACTOR 4 × EXTRA_ROLE_COST + 2 × EXTRA_ROLE_COST per further minimum one Bench seat counts
-                       toward (sized from the model's bounds: no weight, minimum, synergy or extra-role cost out-bids it); the one exception =
-                       a tank / healer minimum the seatable joiners can't meet: a refund of that cost for up to `short` Bench seats of the role,
-                       per roster only up to the minimum; no seatable Bench answer = no new variable, constraint or term (the same proto);
+                       toward (sized from the model's bounds: no weight, minimum, synergy or extra-role cost out-bids it); a seatable Bench seat
+                       counts toward a tank / healer minimum only (_minimum_terms skips it for a class, spec, melee or ranged slot); the one
+                       exception = a tank / healer minimum the joiners can't meet: per roster up to the seats the joiners rostered there leave
+                       short, over every roster up to bench_refund_room(profile, players, need, skip, allow_offspec) = THE shared rule
+                       (raidcycle.first_come_bench_out reads it too: the minimum minus the joiners HELD to the role — no offspec of another
+                       role, switch_spec), each refunded seat gets back all of the cost but one EXTRA_ROLE_COST — so a hybrid counts once (the
+                       only tank who could heal tanks; a healer wanted for a spec minimum plays it; a spare tank who can heals instead);
+                       no seatable Bench answer = no new variable, constraint or term (the same proto); _build_model = THE model of one
+                       solve_rosters call, every step and the objective (tests build it there);
                        REPEATABLE per budget: interleave_search with RANDOM_SEED 0 and a deterministic-time limit (time_limit_s × DTIME_PER_SECOND), so
                        Preview lock and Lock land on one roster; the wall clock only a HANG GUARD, WALL_CEILING 10 × the budget (2 × cut solves
                        short under load — the final fix wave) — re-check tests/test_solver_repeatable.py on every OR-tools upgrade); ONE ANSWER
@@ -127,9 +133,10 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        off (_solve_run's force_in / force_out, the lock box's count, kept_off_ids — role_plan never asks a kept-off name);
                        ALL_KEPT_OFF raised before solving when every joiner is kept off; Bench last (2026-11-25): _roster_count(reg, ev, players,
                        layout_groups_used) = _solve_run's roster count (how_many_rosters counts joiners only: Bench never adds a roster), and on a
-                       first-to-join event first_come_bench_out(players, seats, role_min, fixed, late, kept_off) forces out the Bench answers past
-                       the seats the joiners leave, in answer order (Player.pos — a Bench answer's place is its last touch, Signup.order_at),
-                       keeping a hand-placed one and one playing a tank / healer the joiners leave short; _solve_run's later-raid branch no longer reuses the groups per
+                       first-to-join event first_come_bench_out(profile, players, seats, role_min, fixed, late, kept_off) forces out the Bench
+                       answers past the seats the joiners leave, in answer order (Player.pos — a Bench answer's place is when its Bench began:
+                       Signup.benched_at, kept by carry_joined like joined_at, absent on older files = updated_at; Signup.order_at), keeping a
+                       hand-placed one and one able to play a tank / healer seat solver.bench_refund_room leaves the Bench; _solve_run's later-raid branch no longer reuses the groups per
                        roster as the part number (a hand place past a later raid's first groups reaches the solve); SOLVER_WORDS + conflict_sentence →
                        solver_error_text (a timeout checked before infeasible; never an exception's words; a stored sentence reads as itself).
                        Role switches: event_switches(reg, rs, first, viewer=) → {short [{raid, roles, why}], rows, revs} composed from each live raid's

@@ -21,14 +21,15 @@ def _name(i: int) -> str:
     return "Bq" + chr(97 + i // 26 % 26) + chr(97 + i % 26)
 
 
-def people(reg: Registry, n: int, cls_spec: tuple[str, str], rank: str = "raider") -> list:
-    """`n` new members playing `cls_spec` as their main, of `rank` (not puppets: a regular spot needs a real member)."""
+def people(reg: Registry, n: int, cls_spec: tuple[str, str], rank: str = "raider", off: str | None = None) -> list:
+    """`n` new members playing `cls_spec` as their main (`off` its offspec), of `rank` (not puppets: a regular spot needs
+    a real member)."""
     out = []
     for _ in range(n):
         i = _made[0] = _made[0] + 1
         uid = Registry.TEST_BASE + 7000 + i
         name = _name(i)
-        m, c = reg.add_character(uid, name, name, cls_spec[0], cls_spec[1], None, True)
+        m, c = reg.add_character(uid, name, name, cls_spec[0], cls_spec[1], off, True)
         c.rank, c.confirmed_by = rank, "t"
         reg.save(m, f"bench test member {name}")
         out.append(reg.members[uid])
@@ -138,7 +139,8 @@ def test_a_first_to_join_event_seats_the_bench_in_answer_order_after_every_joine
     join(reg, rs, ev, bench, "sub")
     order = [bench[3], bench[0], bench[4], bench[1], bench[2]]  # t1 < … < t5, not the order they were added in
     for i, m in enumerate(order):
-        ev.signups[str(m.discord_id)].updated_at = f"2026-11-25T10:0{i + 1}:00+00:00"
+        sg = ev.signups[str(m.discord_id)]
+        sg.updated_at = sg.benched_at = f"2026-11-25T10:0{i + 1}:00+00:00"
     assert seated(reg, rs, ev) == names(joiners) | names(order[:3])
 
 
@@ -243,3 +245,103 @@ def test_a_later_raid_fills_from_the_bench_too(reg, rs):
         assert {p.signup_name for p in ev.all_rosters[0].selected} == want, ev.key
         assert len(ev.all_rosters[0].selected) == 10
     assert len(rc.event_parts(rs, lead)) == 2
+
+
+def test_a_first_to_join_event_keeps_a_benched_healer_the_joiners_cannot_spare(reg, rs):
+    """The shared rule (solver.bench_refund_room): a first-to-join event keeps a benched healer for the solve whenever
+    the joiners held to the role leave a healer seat short — here a Restoration Druid joined, but fills the Druid:Feral
+    minimum, so the third healer seat is the bench's."""
+    reg.set_minimums(RID, {"healer": {"min": 3}, "Druid:Feral": {"min": 1}}, "t")
+    ev = one_off(reg, rs)
+    assert rc.run_first_come(reg, ev)
+    druid = people(reg, 1, ("Druid", "Restoration"), off="Feral")[0]
+    joiners = people(reg, 2, TANK) + people(reg, 2, HEAL) + [druid] + people(reg, 5, DPS)
+    join(reg, rs, ev, joiners)
+    healer = people(reg, 1, HEAL)[0]
+    join(reg, rs, ev, [healer], "sub")
+    rc.propose(reg, rs, ev, save=False)
+    r = ev.all_rosters[0]
+    got = {p.signup_name for p in r.selected}
+    assert healer.display_name in got and druid.display_name in got and len(got) == 10
+    assert r.spec_switches == {druid.display_name: "Feral"}
+
+
+def _bench_queue(reg, rs):
+    """A first-to-join event, 8 joined (2 free seats), three benched damage dealers who answered at t1 < t2 < t3 in a
+    file from before a Bench answer's time was kept (updated_at only)."""
+    ev = one_off(reg, rs)
+    assert rc.run_first_come(reg, ev)
+    join(reg, rs, ev, base_eight(reg))
+    bench = people(reg, 3, DPS)
+    join(reg, rs, ev, bench, "sub")
+    for i, m in enumerate(bench):
+        sg = ev.signups[str(m.discord_id)]
+        sg.updated_at, sg.benched_at = f"2000-01-01T10:0{i + 1}:00+00:00", None
+    return ev, bench
+
+
+def test_pressing_bench_again_keeps_a_bench_answers_place(reg, rs):
+    ev, (a, b, c) = _bench_queue(reg, rs)
+    rc.set_signup(reg, rs, ev, a, None, "sub", source="test")  # the earliest presses Bench again: still first
+    assert ev.signups[str(a.discord_id)].order_at == "2000-01-01T10:01:00+00:00"
+    got = seated(reg, rs, ev)
+    assert a.display_name in got and b.display_name in got and c.display_name not in got
+
+
+def test_benching_another_character_keeps_a_bench_answers_place(reg, rs):
+    ev, (a, b, c) = _bench_queue(reg, rs)
+    _m, alt = reg.add_character(a.discord_id, a.display_name, "Bqaltbench", "Mage", "Frost", None, False)
+    rc.set_signup(reg, rs, ev, reg.members[a.discord_id], alt.label, "sub", source="test")
+    assert ev.signups[str(a.discord_id)].character == alt.label
+    got = seated(reg, rs, ev)
+    assert a.display_name in got and b.display_name in got and c.display_name not in got
+
+
+def _sg(status: str, at: str, **kw) -> rc.Signup:
+    return rc.Signup(discord_id=1, display_name="a", character="a", cls="Mage", spec="Fire", role="ranged", status=status,
+                     updated_at=at, **kw)
+
+
+def test_join_bench_join_lands_at_the_back_of_the_joiners():
+    s = rc.carry_joined(None, _sg("in", "t1"))
+    s = rc.carry_joined(s, _sg("sub", "t2"))
+    assert (s.joined_at, s.benched_at, s.order_at) == (None, "t2", "t2")
+    s = rc.carry_joined(s, _sg("in", "t3"))
+    assert (s.joined_at, s.benched_at, s.order_at) == ("t3", None, "t3")
+
+
+def test_bench_join_bench_lands_at_the_back_of_the_bench():
+    s = rc.carry_joined(None, _sg("sub", "t1"))
+    assert s.order_at == "t1"
+    s = rc.carry_joined(s, _sg("sub", "t2"))  # Bench again: the first Bench's time stays
+    assert (s.benched_at, s.order_at) == ("t1", "t1")
+    s = rc.carry_joined(s, _sg("in", "t3"))
+    s = rc.carry_joined(s, _sg("sub", "t4"))
+    assert (s.joined_at, s.benched_at, s.order_at) == (None, "t4", "t4")
+    s = rc.carry_joined(s, _sg("out", "t5"))
+    assert (s.joined_at, s.benched_at, s.order_at) == (None, None, "t5")
+
+
+def test_an_older_file_without_a_bench_time_reads_its_last_touch():
+    old = rc.Signup.model_validate({"discord_id": 1, "display_name": "a", "character": "a", "cls": "Mage", "spec": "Fire",
+                                    "role": "ranged", "status": "sub", "updated_at": "t1"})
+    assert old.benched_at is None and old.order_at == "t1"
+    assert rc.carry_joined(old, _sg("sub", "t2")).order_at == "t1"
+
+
+def test_a_benched_player_with_the_lead_seat_bonus_never_takes_a_joiners_seat_on_a_later_raid(reg, rs):
+    """A later raid: the benched player was rostered on both raids before it (LEAD_SEAT_BONUS twice, never charged as
+    extra), the joiners on none; ten joiners for ten seats → the joiners play (_solve_run's own `earlier` path)."""
+    unlock_hyjal(reg)
+    start = (reg.now_local() + timedelta(days=3)).replace(hour=18, minute=30, second=0, microsecond=0)
+    lead = rc.open_run(reg, rs, LEAD, start, by="t", schedule=rc.ADHOC_SCHEDULE, lineup=[{"raid": RID, "rosters": 1}])
+    fev = rc.follow_of(rs, lead)
+    joiners = base_eight(reg) + people(reg, 2, DPS)
+    join(reg, rs, lead, joiners)
+    star = people(reg, 1, DPS, "core")[0]
+    join(reg, rs, lead, [star], "sub")
+    fev = rs.events[fev.key]
+    assert str(star.discord_id) in fev.signups
+    _players, rosters, _n = rc._solve_run(reg, rs, fev, whatif=False, earlier={star.discord_id: 2})
+    got = {p.signup_name for r in rosters for p in r.selected}
+    assert got == names(joiners)

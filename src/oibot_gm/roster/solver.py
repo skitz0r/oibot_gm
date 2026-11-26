@@ -120,6 +120,16 @@ def solve_rosters(profile: GameProfile, players: list[Player], raid_id: str, opt
     (e.g. sat-out points) for landing in roster 1. `avoid` = earlier roster assignments (name → roster) the answer
     must differ from by at least `min_changes` people; `avoid_groups` the same at group level (name → group index) for
     a single-roster "another layout". Pinned players can't move, so they never count towards the difference."""
+    s = _build_model(profile, players, raid_id, opts, rosters, strategy, roster_bonus, avoid, min_changes, avoid_groups)
+    solver, status = _run(s)
+    return _extract(s, solver, status)
+
+
+def _build_model(profile: GameProfile, players: list[Player], raid_id: str, opts: SolveOptions, rosters: int,
+                 strategy: str, roster_bonus: dict[int, dict[str, int]] | None, avoid: list[dict[str, int]] | None,
+                 min_changes: int, avoid_groups: list[dict[str, int]] | None) -> "_Model":
+    """THE model of one `solve_rosters` call, every step in order, the objective set (the kept-answer key hashes it;
+    tests build it here, so a new step can't drift past them)."""
     s = _setup(profile, players, raid_id, opts, rosters, strategy)
     _refuse_conflicts(s)
     _build_vars(s)
@@ -135,8 +145,8 @@ def solve_rosters(profile: GameProfile, players: list[Player], raid_id: str, opt
     _raid_cover_terms(s)
     _add_symmetry_break(s)
     _balance_terms(s)
-    solver, status = _run(s)
-    return _extract(s, solver, status)
+    s.m.Maximize(sum(s.terms) + sum(s.synergy_terms) + sum(s.balance_terms))
+    return s
 
 
 # ---------------------------------------------------------------- model state
@@ -220,18 +230,24 @@ def _build_vars(s: _Model) -> None:
     s.y = {(p.signup_name, g): m.NewBoolVar(f"y_{p.signup_name}_{g}") for p in s.players for g in range(s.n_groups)}
     s.xr = {(p.signup_name, r): sum(s.y[p.signup_name, g] for g in s.groups_of(r))
             for p in s.players for r in range(s.rosters)}
-    if not s.opts.allow_offspec:
-        return
     for p in s.players:
-        if p.offspec and p.offspec != p.spec:
-            try:
-                os_ = s.profile.spec(p.cls, p.offspec)
-            except KeyError:
-                continue
-            if os_.role != s.specs[p.signup_name].role:
-                s.off_specs[p.signup_name] = os_
-                s.o[p.signup_name] = m.NewBoolVar(f"o_{p.signup_name}")
-                m.Add(s.o[p.signup_name] <= s.x[p.signup_name])
+        os_ = switch_spec(s.profile, p, s.opts.allow_offspec)
+        if os_ is not None:
+            s.off_specs[p.signup_name] = os_
+            s.o[p.signup_name] = m.NewBoolVar(f"o_{p.signup_name}")
+            m.Add(s.o[p.signup_name] <= s.x[p.signup_name])
+
+
+def switch_spec(profile: GameProfile, p: Player, allow_offspec: bool = True) -> SpecInfo | None:
+    """The offspec player p may be switched to at the solve: a valid spec of ANOTHER role (None without one, or
+    without `allow_offspec`). _build_vars and bench_refund_room both read it."""
+    if not allow_offspec or not p.offspec or p.offspec == p.spec:
+        return None
+    try:
+        os_ = profile.spec(p.cls, p.offspec)
+    except KeyError:
+        return None
+    return os_ if os_.role != profile.spec(p.cls, p.spec).role else None
 
 
 def _switched(s: _Model, n: str, r: int | None, tag: str):
@@ -239,13 +255,14 @@ def _switched(s: _Model, n: str, r: int | None, tag: str):
     return s.o[n] if r is None else m_and(s.m, s.o[n], s.xr[n, r], f"{tag}_{n}_{r}")
 
 
-def _role_expr(s: _Model, role: str, r: int | None = None, only: set[str] | None = None) -> list:
+def _role_expr(s: _Model, role: str, r: int | None = None, only: set[str] | None = None,
+               skip: frozenset[str] = frozenset()) -> list:
     """Players raiding as `role` (offspec switches counted), over the whole pool or one roster; `only` limits it to
-    those players."""
+    those players, `skip` leaves those out."""
     terms = []
     for p in s.players:
         n = p.signup_name
-        if only is not None and n not in only:
+        if (only is not None and n not in only) or n in skip:
             continue
         seat = s.x[n] if r is None else s.xr[n, r]
         if n in s.o:
@@ -272,18 +289,18 @@ def _group_role_expr(s: _Model, role: str, g: int) -> list:
     return terms
 
 
-def _slot_expr(s: _Model, slot: str, r: int | None = None) -> list:
+def _slot_expr(s: _Model, slot: str, r: int | None = None, skip: frozenset[str] = frozenset()) -> list:
     """Seats that count toward a minimum's slot, over the whole pool or one roster: a role (offspec switches
     counted, as `_role_expr`), a class (every seat of a player of that class) or `Class:Spec` (the seats of players
     who play that spec: their signed spec unless switched, their offspec when switched — so a hybrid counts toward
-    one spec's minimum, never two)."""
+    one spec's minimum, never two). `skip` leaves those players out."""
     if slot in ROLES:
-        return _role_expr(s, slot, r)
+        return _role_expr(s, slot, r, skip=skip)
     cls, _, spec = slot.partition(":")
     terms = []
     for p in s.players:
         n = p.signup_name
-        if p.cls != cls:
+        if p.cls != cls or n in skip:
             continue
         seat = s.x[n] if r is None else s.xr[n, r]
         if not spec:
@@ -451,13 +468,17 @@ def _minimum_terms(s: _Model, roster_bonus: dict[int, dict[str, int]] | None) ->
     goes to anyone else (the rule set in review, 2026-11-22), the odd player beating even a lead's rostered player
     (LEAD_SEAT_BONUS rides in `bonus`). A preference, never a bound: a hybrid who could fill two minimums fills one,
     a player forced out earns nothing, a minimum the joiners can't meet leaves the rest of the roster as it would be,
-    and a board that fills every seat still solves."""
+    and a board that fills every seat still solves. A seatable Bench answer's seat counts toward a tank or healer
+    minimum only — never a class, spec, melee or ranged one —, so no such minimum ever brings a Bench answer in (Bench
+    last, 2026-11-25: with no seatable Bench answer every expression is what it was)."""
     reward = 2 * _extra_role_cost(s, roster_bonus)
+    out = set(s.opts.force_out)
+    bench = frozenset(p.signup_name for p in s.players if p.status == "bench" and p.signup_name not in out)
     for slot, n in s.minimums.items():
         if n <= 0:
             continue
         for r in _per_roster(s):
-            have = _slot_expr(s, slot, r)
+            have = _slot_expr(s, slot, r, skip=frozenset() if slot in ("tank", "healer") else bench)
             if not have:
                 continue
             filled = s.m.NewIntVar(0, n, f"min_{slot}_{r}")
@@ -514,32 +535,55 @@ def _bench_minimum_slots(s: _Model, p: Player) -> int:
             + any(slot == f"{p.cls}:{sp}" for slot in slots for sp in specs))
 
 
+def bench_refund_room(profile: GameProfile, players: list[Player], need: dict[str, int], skip=(),
+                      allow_offspec: bool = True) -> dict[str, int]:
+    """THE shared rule of the Bench exception (the solver's cap and raidcycle.first_come_bench_out read it): for each of
+    tank and healer with a minimum over every roster `need[role]` > 0, how many seats of that role a Bench answer may
+    take at most = the minimum minus the joiners HELD to it — status not "bench", not in `skip` (kept off, late),
+    playing the role and with no offspec of another role to switch to (switch_spec). A joiner who can play two needed
+    roles, or is wanted in another spec for another minimum, is not counted: the solve itself decides where they play,
+    and a refunded Bench seat is taken only when it fills more minimum seats than the joiners alone can."""
+    out = set(skip)
+    room = {}
+    for role in ("tank", "healer"):
+        n = int(need.get(role, 0))
+        if n <= 0:
+            continue
+        held = sum(1 for p in players if p.status != "bench" and p.signup_name not in out and p.role == role
+                   and switch_spec(profile, p, allow_offspec) is None)
+        room[role] = max(0, n - held)
+    return room
+
+
 def _bench_terms(s: _Model, roster_bonus: dict[int, dict[str, int]] | None) -> None:
     """Bench last: each seatable Bench answer (status "bench", not in force_out) costs BENCH_SEAT_COST when seated
     (the block above says why it can't be out-bid). The one exception (the designer's, the owner told): a tank or
-    healer minimum the joiners cannot meet — `short` = the role's minimum over every roster minus the seatable joiners
-    who play it (main or offspec role) — refunds the cost of up to `short` Bench seats of that role, per roster only
-    for the seats the joiners there leave short of the minimum. With no seatable Bench answer it adds nothing, so the
-    model (and its kept answer) is exactly what it was."""
+    healer minimum the joiners cannot meet. Per roster `refund[role, r]` Bench seats of the role, no more than the
+    seats the joiners rostered there leave short of the minimum, and over every roster no more than
+    bench_refund_room (the joiners held to the role); each refunded seat gets back all of BENCH_SEAT_COST but one
+    EXTRA_ROLE_COST. So a refunded Bench seat still costs more than any joiner's seat, and the solve takes it only
+    where it fills a minimum seat the joiners can't fill however they are arranged (a hybrid counts once: the only tank
+    who could heal tanks, a healer wanted for a spec minimum plays it): its minimum's reward (2×) less that one
+    EXTRA_ROLE_COST is more than the displaced joiner's seat earns, and a joiner able to fill the same seat earns the
+    same reward without the cost. With no seatable Bench answer it adds nothing, so the model (and its kept answer) is
+    exactly what it was."""
     out = set(s.opts.force_out)
     bench = [p for p in s.players if p.status == "bench" and p.signup_name not in out]
     if not bench:
         return
     factor = BENCH_SEAT_FACTOR + 2 * max(0, max(_bench_minimum_slots(s, p) for p in bench) - 1)
-    cost = factor * _extra_role_cost(s, roster_bonus)
+    extra = _extra_role_cost(s, roster_bonus)
+    cost = factor * extra
     for p in bench:
         s.terms.append(-cost * s.x[p.signup_name])
     names = {p.signup_name for p in bench}
     joiners = {p.signup_name for p in s.players if p.status != "bench" and p.signup_name not in out}
-    for role in ("tank", "healer"):
-        n = int(s.minimums.get(role, 0))
-        if n <= 0:
-            continue
-        capable = sum(1 for p in s.players if p.signup_name in joiners
-                      and (p.role == role or (p.signup_name in s.off_specs and s.off_specs[p.signup_name].role == role)))
-        short = max(0, n * s.rosters - capable)
+    need = {role: int(s.minimums.get(role, 0)) * s.rosters for role in ("tank", "healer")}
+    room = bench_refund_room(s.profile, s.players, need, skip=out, allow_offspec=s.opts.allow_offspec)
+    for role, short in room.items():
         if not short:
             continue
+        n = need[role] // s.rosters
         refunds = []
         for r in _per_roster(s):
             on_bench = _role_expr(s, role, r, only=names)
@@ -548,7 +592,7 @@ def _bench_terms(s: _Model, roster_bonus: dict[int, dict[str, int]] | None) -> N
             refund = s.m.NewIntVar(0, n, f"bench_refund_{role}_{r}")
             s.m.Add(refund <= sum(on_bench))
             s.m.Add(refund + sum(_role_expr(s, role, r, only=joiners)) <= n)
-            s.terms.append(cost * refund)
+            s.terms.append((cost - extra) * refund)
             refunds.append(refund)
         if refunds:
             s.m.Add(sum(refunds) <= short)
@@ -790,11 +834,10 @@ def _keep(key: str, s: _Model, solver: cp_model.CpSolver, status: int) -> _Answe
 
 
 def _run(s: _Model) -> tuple["cp_model.CpSolver | _Answer", int]:
-    """Maximise seat quality + synergy + balance within the deterministic budget (the same input, the same answer);
+    """Maximise seat quality + synergy + balance (the objective _build_model set) within the deterministic budget (the same input, the same answer);
     raise when nothing feasible was found. A model answered before takes its kept answer without searching (see
     ANSWERS_MAX); a stopped handle raises Stopped either way."""
     global ceiling_hits
-    s.m.Maximize(sum(s.terms) + sum(s.synergy_terms) + sum(s.balance_terms))
     key = _model_key(s)
     with _answers_lock:
         kept = _answers.get(key)
