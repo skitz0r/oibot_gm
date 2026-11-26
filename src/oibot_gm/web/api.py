@@ -1312,7 +1312,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         if ans == ACT:
             return {"act": True, "answer": None}
         if ans is None:
-            return {"answer": None, "guide": True, "message": f"Free-form questions here are for {v.reg.config.ask_audience}; /help lists what the bot does."}
+            from .api_ops import ASK_GUIDE
+
+            return {"answer": None, "guide": True, "message": ASK_GUIDE.format(audience=v.reg.config.ask_audience)}
         return {"answer": ans, "officer_view": officer}
 
     def live_event(reg, key: str):

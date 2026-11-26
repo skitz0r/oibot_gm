@@ -421,7 +421,7 @@ def _reply_private(bot, reg: Registry, message: discord.Message) -> bool:
 
 async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.PolicyStore, provider, ops: Ops, text: str, *, bot, channel,
                         req: configops.ConfigRequest | None = None, to_help: bool | None = None, conversation: str | None = None,
-                        hold=None):
+                        hold=None, entry: str = "act"):
     """Shared by /gm change, @mentions and DMs. `interaction_or_message` is an Interaction (deferred) or a Message;
     `channel`: where it was asked (channel id, None = DMs) — Registry.may_plain decides per op what may act there;
     `req`: an already parsed request (the router parsed first). Refused ops are listed; the rest can still apply.
@@ -432,7 +432,12 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     (design §5.51). Every reply is remembered with the bot's message id; a /gm change shares the channel's ring.
     `hold`: an async fn(req) for a message the bot only OVERHEARD (listening, 2026-11-21): a request that would change
     something is handed to it instead of being answered — nothing is posted; the writer's 👀 click brings it back here
-    with `req`. Questions are answered as ever."""
+    with `req`. Questions are answered as ever.
+    `entry`: where the message came in, for the answers log (an act channel and /gm change name themselves). With the
+    answer tools' switch on for the guild (answer_loop.enabled, design §8) the parser never answers a question: its
+    verdict `question` with no ops — with or without questions of its own, whatever `to_help` says — goes to
+    bot.help_answer once with acting off, and that answer is what the person reads. Its verdict `change` keeps
+    everything, its questions for a missing detail included."""
     from . import conversation as conv_mod
 
     is_msg = isinstance(interaction_or_message, discord.Message)
@@ -475,6 +480,20 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
         return
     if to_help is None:  # an act channel or /gm change: a plain question gets the full /ask answer, not the parser's line
         to_help = not is_msg or reg.plain_mode(channel) == "act"
+    from .answer_loop import enabled as answers_on
+
+    if req.kind == "question" and not req.ops and answers_on(reg.key) and getattr(bot, "help_answer", None) is not None:
+        # the switch on (design §8): the parser's words never answer a question — the loop does, once, with acting off
+        # (so it can't hand the message back here); outside the ask audience the static guide, never the parser's line
+        where = "change" if not is_msg else "act" if reg.plain_mode(channel) == "act" else entry
+        answer = await bot.help_answer(reg, author.id, officer, text, may_act=False, public=public, **conv_kw, entry=where)
+        if not answer:
+            from .discord_help import guide_intro, guide_view
+
+            await send(guide_intro(reg), view=guide_view(reg), ephemeral=True)
+            return
+        keep(await send(answer[:1950], ephemeral=True), answer[:1950])
+        return
     if req.kind == "question" and not req.ops and not req.questions and to_help and getattr(bot, "help_answer", None) is not None:
         from .answer_loop import entry_kw  # the answers log's entry point: an act channel, or /gm change
 

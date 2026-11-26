@@ -30,6 +30,7 @@ log = logging.getLogger(__name__)
 
 PREVIEW_TTL = 600  # seconds a preview token stays good (Discord's Apply view waits as long)
 BOOT = secrets.token_hex(4)  # this process: a token minted before a restart is told apart from one that merely expired
+ASK_GUIDE = "Free-form questions here are for {audience}; /help lists what the bot does."  # outside the ask audience (/api/ask too)
 
 
 def need_token_error(restarted: bool) -> dict:
@@ -309,6 +310,19 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
             except Exception as e:  # noqa: BLE001
                 desc.append(f"{op.op}: {e}")
         out = {"kind": req.kind, "reply": req.reply, "questions": list(req.questions), "ops": ops, "describe": desc, "applied": [], "refused": refused}
+        from ..answer_loop import enabled as answers_on
+
+        answer_fn = getattr(bot, "help_answer", None)
+        if req.kind == "question" and not req.ops and answer_fn is not None and answers_on(v.reg.key):
+            # the switch on (design §8): the parser's words never answer a question — the help answer does, once,
+            # with acting off; the box prints `reply` as it always has
+            try:
+                ans = await answer_fn(v.reg, v.uid, bool(v.officer), text, may_act=False, public=False, link=False, entry="site",
+                                      **({"conversation": convo} if convo else {}))
+            except Exception as e:  # noqa: BLE001 — never a type name in a reply
+                ans = await configops.report_error(bot.ops, v.reg.config, e, f"[{v.via}] {v.name} plain-text question")
+            out["reply"] = ans or ASK_GUIDE.format(audience=v.reg.config.ask_audience)
+            out["questions"] = []
         if req.kind == "change" and req.ops:
             try:
                 described = await asyncio.to_thread(lambda: configops.describe_ops(v.reg, req.ops, refused, by_id=v.uid))

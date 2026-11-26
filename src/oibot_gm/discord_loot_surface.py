@@ -680,6 +680,23 @@ class LootSurfaceMixin:
         if fb.kind == "ignore":
             return
         if fb.kind == "question":
+            from .answer_loop import enabled as answers_on
+
+            if answers_on(reg.key):  # the switch on (design §8): the parser never answers a question — the loop does, once, acting off
+                async with message.channel.typing():
+                    try:
+                        answer = await self.help_answer(reg, uid, True, text, may_act=False, public=False, data=loot_digest(session), entry="loot",
+                                                        **({"conversation": convo} if convo else {}))
+                    except Exception as e:  # noqa: BLE001
+                        await message.reply(await configops.report_error(self.ops, reg.config, e, "loot chat"))
+                        return
+                if not answer:
+                    from .discord_help import guide_intro
+
+                    answer = guide_intro(reg)
+                sent = await message.reply(answer[:1900])
+                conversation.remember(reg, here, uid, text, answer[:1900], message_id=getattr(message, "id", None), reply_message_id=getattr(sent, "id", None))
+                return
             await message.reply((fb.reply or "Ask me about a proposal — who, why, or why not someone else.")[:1900])
             return
         changes, refused = loot_changes(self, session, fb, text)

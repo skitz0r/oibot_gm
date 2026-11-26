@@ -1373,8 +1373,8 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
             mem_kw = {"memory": mem.memory_block(memory, mem.guild_tz(reg))} if memory else {}
             entry_kw = answer_loop.entry_kw(reg.key, entry or ("mention" if message.guild else "dm"))  # the answers log's entry point
             answer = await self.help_answer(reg, uid, officer, text, may_act=may_act, public=public, **conv_kw, **mem_kw, **entry_kw)
-            if answer == HELP_ACT:
-                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, conversation=convo, **hold_kw)
+            if answer == HELP_ACT:  # the parser's question verdict comes back to the loop as this entry (switch on only)
+                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, conversation=convo, **hold_kw, **entry_kw)
                 return
         if answer is None:  # outside the ask audience: static guide only
             await message.reply(guide_intro(reg), view=apply_button(guide_view(reg)), allowed_mentions=quiet)

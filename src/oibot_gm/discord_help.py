@@ -269,8 +269,20 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
             await interaction.response.send_message(guide_intro(reg), view=view, ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        text = await bot.help_answer(reg, interaction.user.id, officer, question)
+        from . import answer_loop
+
+        if not answer_loop.enabled(reg.key):  # the answer tools' switch off: exactly as before (no recent exchange)
+            text = await bot.help_answer(reg, interaction.user.id, officer, question)
+            await interaction.followup.send(text, ephemeral=True)
+            return
+        from . import conversation  # design §8: /ask carries the recent exchange, so a question asked back can be followed up
+
+        uid, channel = interaction.user.id, (interaction.channel_id if interaction.guild_id else None)
+        convo = conversation.context_block(conversation.recall(reg, channel, uid))
+        text = await bot.help_answer(reg, uid, officer, question, entry="ask", **({"conversation": convo} if convo else {}))
         await interaction.followup.send(text, ephemeral=True)
+        if text:  # the reply is ephemeral: no message id to reply to, the same person here within the window continues it
+            conversation.remember(reg, channel, uid, question, text)
 
 
 ACT = "\x00act"  # help_answer's "this was a request to do something" (never shown)
