@@ -7,7 +7,8 @@ only explains the result.
 
 `solve_rosters` builds the model in named steps that share one `_Model` state:
 setup → variables → seat/group constraints → forces, pairs, pins → avoid →
-objective terms (seat quality, minimums, extra tanks/healers, preferences, synergy, symmetry, balance) →
+objective terms (seat quality, minimums, extra tanks/healers, the bench last, preferences, synergy, symmetry,
+balance) →
 solve → extract. The order of the steps is part of the model (variable and
 constraint indices), so keep it when editing."""
 from __future__ import annotations
@@ -128,6 +129,7 @@ def solve_rosters(profile: GameProfile, players: list[Player], raid_id: str, opt
     _selection_terms(s, roster_bonus)
     _minimum_terms(s, roster_bonus)
     _extra_role_terms(s, roster_bonus)
+    _bench_terms(s, roster_bonus)
     _preference_terms(s)
     _synergy_terms(s)
     _raid_cover_terms(s)
@@ -487,6 +489,69 @@ def _extra_role_terms(s: _Model, roster_bonus: dict[int, dict[str, int]] | None)
             extra = s.m.NewIntVar(0, len(s.players), f"extra_{role}_{r}")
             s.m.Add(extra >= sum(have) - allowed)
             s.terms.append(-cost * extra)
+
+
+# Bench is strictly last (design §3 of 2026-11-25, the owner's rule): a player who answered Bench takes a seat only
+# when no joiner can — a seat left empty once every joiner is placed, or a tank / healer minimum the joiners cannot
+# meet. BENCH_SEAT_COST = BENCH_SEAT_FACTOR × EXTRA_ROLE_COST per Bench seat, raised by 2 × EXTRA_ROLE_COST for each
+# further minimum one Bench seat can count toward (a role, a class and a Class:Spec slot: at most three), so it is
+# sized from the model's own bounds: one seat earns at most MINIMUM_REWARD (2×) per minimum it counts toward, the
+# joiner it would displace can cost at most one EXTRA_ROLE_COST (1×), and seat values, synergy, raid cover, group
+# preference and the balance gap together stay under one EXTRA_ROLE_COST (1×, by its own sizing) — so a Bench seat
+# never out-bids a joiner, whatever their weights.
+BENCH_SEAT_FACTOR = 4
+
+
+def _bench_minimum_slots(s: _Model, p: Player) -> int:
+    """How many of the minimums (n > 0) one seat of player p can count toward: one role slot, one class slot and one
+    Class:Spec slot at most, each counted in any spec the player may raid as (an offspec switch included)."""
+    n = p.signup_name
+    roles = {p.role} | ({s.off_specs[n].role} if n in s.o else set())
+    specs = {p.spec} | ({p.offspec} if n in s.o and p.offspec else set())
+    slots = [slot for slot, k in s.minimums.items() if k > 0]
+    return (any(slot in roles for slot in slots if slot in ROLES)
+            + any(slot == p.cls for slot in slots)
+            + any(slot == f"{p.cls}:{sp}" for slot in slots for sp in specs))
+
+
+def _bench_terms(s: _Model, roster_bonus: dict[int, dict[str, int]] | None) -> None:
+    """Bench last: each seatable Bench answer (status "bench", not in force_out) costs BENCH_SEAT_COST when seated
+    (the block above says why it can't be out-bid). The one exception (the designer's, the owner told): a tank or
+    healer minimum the joiners cannot meet — `short` = the role's minimum over every roster minus the seatable joiners
+    who play it (main or offspec role) — refunds the cost of up to `short` Bench seats of that role, per roster only
+    for the seats the joiners there leave short of the minimum. With no seatable Bench answer it adds nothing, so the
+    model (and its kept answer) is exactly what it was."""
+    out = set(s.opts.force_out)
+    bench = [p for p in s.players if p.status == "bench" and p.signup_name not in out]
+    if not bench:
+        return
+    factor = BENCH_SEAT_FACTOR + 2 * max(0, max(_bench_minimum_slots(s, p) for p in bench) - 1)
+    cost = factor * _extra_role_cost(s, roster_bonus)
+    for p in bench:
+        s.terms.append(-cost * s.x[p.signup_name])
+    names = {p.signup_name for p in bench}
+    joiners = {p.signup_name for p in s.players if p.status != "bench" and p.signup_name not in out}
+    for role in ("tank", "healer"):
+        n = int(s.minimums.get(role, 0))
+        if n <= 0:
+            continue
+        capable = sum(1 for p in s.players if p.signup_name in joiners
+                      and (p.role == role or (p.signup_name in s.off_specs and s.off_specs[p.signup_name].role == role)))
+        short = max(0, n * s.rosters - capable)
+        if not short:
+            continue
+        refunds = []
+        for r in _per_roster(s):
+            on_bench = _role_expr(s, role, r, only=names)
+            if not on_bench:
+                continue
+            refund = s.m.NewIntVar(0, n, f"bench_refund_{role}_{r}")
+            s.m.Add(refund <= sum(on_bench))
+            s.m.Add(refund + sum(_role_expr(s, role, r, only=joiners)) <= n)
+            s.terms.append(cost * refund)
+            refunds.append(refund)
+        if refunds:
+            s.m.Add(sum(refunds) <= short)
 
 
 def _preference_terms(s: _Model) -> None:

@@ -4269,6 +4269,41 @@ def first_come_out(players: list[Player], seats: int, role_min: dict[str, int], 
     return out
 
 
+def first_come_bench_out(players: list[Player], seats: int, role_min: dict[str, int], fixed: set[str], late: set[str],
+                         kept_off: set[str]) -> set[str]:
+    """A first-to-join event's Bench answers (the Bench is strictly last, design §3 of 2026-11-25): after every joiner,
+    in the order they answered (Player.pos — a Bench answer's place is its last touch, Signup.order_at). A seat the
+    joiners leave empty (the joiners not `late` nor `kept_off` against `seats`) goes to the next Bench answer; a Bench
+    answer who plays a tank / healer role the joiners leave short of its minimum (`role_min`, over every roster) is
+    kept for the solver's exception; one placed by hand (`fixed`) is kept. Returns the Bench answers to force out."""
+    joiners = [p for p in players if p.status == "signed" and p.signup_name not in late | kept_off]
+    free = seats - len(joiners)
+    short = {r: int(role_min.get(r, 0)) - sum(1 for p in joiners if p.role == r) for r in EXTRA_ROLES}
+    bench = sorted((p for p in players if p.status == "bench" and p.signup_name not in kept_off), key=lambda p: p.pos)
+    keep: set[str] = set()
+    for p in bench:
+        if p.signup_name in fixed:
+            pass
+        elif short.get(p.role, 0) > 0:
+            short[p.role] -= 1
+        elif free <= 0:
+            continue
+        keep.add(p.signup_name)
+        free -= 1
+    return {p.signup_name for p in bench} - keep
+
+
+def _roster_count(reg: Registry, ev: RaidEvent, players: list[Player], layout_groups_used: int) -> int:
+    """How many rosters the lock builds: as many as the joiners support (how_many_rosters: a Bench answer never adds
+    one), or as many as the board's groups up to the last one holding someone reach, whichever is more."""
+    raid_id = ev.instance if ev.instance in reg.profile.raids else next(iter(reg.profile.raids))
+    size = run_size(reg, ev)
+    k = groups_per_roster(reg, size)
+    used = layout_groups_used
+    return max(how_many_rosters(reg, players, size, reg.role_bounds(raid_id, size), want=run_rosters(reg, ev)),
+               -(-used // k) if used else 1)
+
+
 def merged_role_min(rb: dict, policy: dict[str, int] | None) -> dict[str, int]:
     """The lock's role minimums: the raid's tank/healer minimums (role_bounds — a 0 the raid set is kept, so the game's
     own doesn't come back in the solver) with the comp policy's role_min laid over them PER ROLE — a policy line about
@@ -4367,7 +4402,7 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
     layout = [[n for n in g if n in names] for g in (ev.layout or [])]
     placed = forces.placed
     used = max((gi for gi, g in enumerate(layout) if g), default=-1) + 1  # groups up to the last one holding someone: empty rosters drawn on the board force nothing
-    n_rosters = max(how_many_rosters(reg, players, size, rb, want=run_rosters(reg, ev)), -(-used // k) if used else 1)
+    n_rosters = _roster_count(reg, ev, players, used)
     strategy = strategy or run_strategy(reg, ev)
     bonus = seat_bonus(reg, rs, ev, players)
     lead_rostered: tuple[str, ...] = ()
@@ -4401,6 +4436,9 @@ def _solve_run(reg: Registry, rs: RaidStore, ev: RaidEvent, strategy: str | None
         # otherwise the same name lands in force_in and force_out, or a seat goes unfilled (INFEASIBLE)
         late = first_come_out([p for p in players if p.signup_name not in benched], size * n_rosters,
                               {r: n * n_rosters for r, n in role_min.items() if r in EXTRA_ROLES}, kept)
+        # the Bench after every joiner, in the order they answered (a seat no joiner takes, or a short tank / healer)
+        late |= first_come_bench_out(players, size * n_rosters, {r: n * n_rosters for r, n in role_min.items() if r in EXTRA_ROLES},
+                                     kept, late, benched)
     opts = solver.SolveOptions(
         time_limit_s=time_limit, raid_size=size,
         keep_together=tuple((resolve(a), resolve(b)) for a, b in cc["keep_together"] if resolve(a) and resolve(b)),

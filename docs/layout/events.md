@@ -8,6 +8,11 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        constraint: _minimum_terms rewards each seat up to a minimum MINIMUM_REWARD = 2 × EXTRA_ROLE_COST, _extra_role_terms costs a
                        tank / healer past theirs EXTRA_ROLE_COST; no role maximum; SolveOptions.lead_rostered = a follow-on never charges the lead's
                        rostered as extra; scaled_role_minimums = the game's tank / healer minimums, rounded up — design §5.67 phase 2;
+                       BENCH LAST (2026-11-25 Part B): _bench_terms (after _extra_role_terms) costs each seatable Bench answer (status "bench",
+                       not in force_out) BENCH_SEAT_FACTOR 4 × EXTRA_ROLE_COST + 2 × EXTRA_ROLE_COST per further minimum one Bench seat counts
+                       toward (sized from the model's bounds: no weight, minimum, synergy or extra-role cost out-bids it); the one exception =
+                       a tank / healer minimum the seatable joiners can't meet: a refund of that cost for up to `short` Bench seats of the role,
+                       per roster only up to the minimum; no seatable Bench answer = no new variable, constraint or term (the same proto);
                        REPEATABLE per budget: interleave_search with RANDOM_SEED 0 and a deterministic-time limit (time_limit_s × DTIME_PER_SECOND), so
                        Preview lock and Lock land on one roster; the wall clock only a HANG GUARD, WALL_CEILING 10 × the budget (2 × cut solves
                        short under load — the final fix wave) — re-check tests/test_solver_repeatable.py on every OR-tools upgrade); ONE ANSWER
@@ -120,7 +125,11 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        changed since placed (RaidEvent.placed_as) leaves the board in that save; unplace_member(rs, uid, why) (left the server);
                        board_complete(reg, rs, p) → a later raid's Auto-fill counts that board (event_board_preview(complete_boards=)). The lock: lock_forces(reg, rs, ev, players) → LockForces = THE builder of who is kept on and
                        off (_solve_run's force_in / force_out, the lock box's count, kept_off_ids — role_plan never asks a kept-off name);
-                       ALL_KEPT_OFF raised before solving when every joiner is kept off; _solve_run's later-raid branch no longer reuses the groups per
+                       ALL_KEPT_OFF raised before solving when every joiner is kept off; Bench last (2026-11-25): _roster_count(reg, ev, players,
+                       layout_groups_used) = _solve_run's roster count (how_many_rosters counts joiners only: Bench never adds a roster), and on a
+                       first-to-join event first_come_bench_out(players, seats, role_min, fixed, late, kept_off) forces out the Bench answers past
+                       the seats the joiners leave, in answer order (Player.pos — a Bench answer's place is its last touch, Signup.order_at),
+                       keeping a hand-placed one and one playing a tank / healer the joiners leave short; _solve_run's later-raid branch no longer reuses the groups per
                        roster as the part number (a hand place past a later raid's first groups reaches the solve); SOLVER_WORDS + conflict_sentence →
                        solver_error_text (a timeout checked before infeasible; never an exception's words; a stored sentence reads as itself).
                        Role switches: event_switches(reg, rs, first, viewer=) → {short [{raid, roles, why}], rows, revs} composed from each live raid's
