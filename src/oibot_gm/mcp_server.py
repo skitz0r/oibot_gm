@@ -559,8 +559,9 @@ def member_inbox(member: str, guild: Guild = None) -> dict:
 
 @mcp.tool()
 def set_layout(run: str, groups: list[list[str]], rev: str | None = None, guild: Guild = None) -> dict:
-    """Set the board: `groups` = lists of display names per group (only members who answered Join count). Before lock it
-    is the layout the lock will use; after lock it edits the roster (someone added from the bench is asked to confirm,
+    """Set the board: `groups` = lists of display names per group (members who answered Join or Bench count; once
+    locked, Join and the rostered). Before lock it is the layout the lock will use (a Bench name it places is decided
+    again at the lock); after lock it edits the roster (someone added from the bench is asked to confirm,
     someone removed is freed). Pass `rev` from get_run: when someone changed the board since, nothing is written and
     the error says so (read it again). Returns the board and the roster's needs."""
     body: dict[str, Any] = {"groups": groups}

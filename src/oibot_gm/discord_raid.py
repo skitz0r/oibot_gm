@@ -1207,7 +1207,8 @@ class RaidMixin:
         """A whole-board write (the site's Clear / Use this split, MCP set_layout, plain text run_board). `rev` = the
         rc.board_rev the author was looking at: when the board changed since, rc.BoardChanged is raised and nothing is
         written. Join and Bench names count (rc.board_names); a Bench name on it is recorded as auto-placed, so the
-        lock decides it again; returns the line to show. `via`: the surface, for the audit line's prefix.
+        lock decides it again — except one an officer dragged that the write leaves in the same group; returns the line
+        to show. `via`: the surface, for the audit line's prefix.
         `strategy`: the split philosophy the layout came from (Use this split) — written in the SAME step, under the same
         lock and rev check, so a strategy can't be saved while its layout is refused (design B6, one request)."""
         state = ev.state
@@ -1217,9 +1218,12 @@ class RaidMixin:
             if strategy:
                 ev.split_strategy = strategy
             # a whole board a person writes keeps its JOINERS as theirs (the next Auto-fill keeps them), but its Bench
-            # names are decided again at the lock (the Bench is last): only an officer's own drag of a Bench name fixes it
+            # names are decided again at the lock (the Bench is last): only an officer's own drag of a Bench name fixes
+            # it — and the write keeps that drag when it leaves the name in the SAME group (a Bench name new to the
+            # board or moved by the write is decided again)
             bench = {s.display_name for s in ev.by_status("sub")} if ev.state == "open" else set()
-            auto = [n for g in groups for n in g if n in bench]
+            hand = {n: gi for gi, g in enumerate(ev.layout or []) for n in g if n in bench and n not in ev.auto_placed}
+            auto = [n for gi, g in enumerate(groups) for n in g if n in bench and hand.get(n) != gi]
             return await self._write_board(reg, rs, ev, groups, by, via=via, auto=auto)
 
     async def board_move(self, reg, rs, ev, name: str, to: tuple[int, int] | None, by: str, *, rev: str | None = None, via: str = "web",

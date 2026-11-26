@@ -201,11 +201,16 @@ class _LockFacts:
         self.auto_on = sorted(on_board & set(ev.auto_placed) & bench)  # Bench places decided again at the lock
         self.hand_bench = [n for n in lf.kept_on if n in bench]  # placed by hand, pinned in, or the policy's never_bench
         self.hand_on_board = [n for n in self.hand_bench if n in lf.placed]
+        # a kept-on Bench answer the board does not show (pinned in, or the policy's never_bench): rostered all the same
+        self.hand_off_board = [n for n in self.hand_bench if n not in lf.placed]
         waiting = self.joiners_waiting or self.bench_waiting
         self.empty = not self.placed
         # the board IS the roster: every seat of every roster the lock builds is placed, or nobody is left to place —
-        # and no Bench place on it is decided again
-        self.full = not self.empty and not self.auto_on and (len(self.placed) >= self.seats or not waiting)
+        # no Bench place on it is decided again, and every name kept on (a pin, the policy's never_bench) is on it
+        self.full = (not self.empty and not self.auto_on and set(lf.kept_on) <= set(lf.placed)
+                     and (len(self.placed) >= self.seats or not waiting))
+        # the bench the head must name: a Bench answer the lock still decides on, or one kept on off the board
+        self.bench_named = bool(self.bench_waiting or self.hand_off_board or self.auto_on)
         self.short_roles = rc.bench_short_roles(reg, rs, ev) if self.bench_waiting and not self.full else []
 
     def key(self) -> tuple:
@@ -216,7 +221,7 @@ class _LockFacts:
             return ("FH", len(self.hand_on_board) > 1) if loses else ("full",)
         if self.hand_bench and len(self.joined) >= self.seats:
             return ("H", many)  # a joiner is certainly not rostered: the hand-placed / pinned Bench answer holds a seat
-        if not self.bench_waiting:
+        if not self.bench_named:
             return ("empty",) if self.empty else ("part",)
         if self.short_roles:
             return ("EX", tuple(self.short_roles))
@@ -290,15 +295,17 @@ def _lock_head(reg: Registry, ev: rc.RaidEvent, rs=None) -> str:
     return "Everyone on the board keeps their place, and the lock fills the open seats from Not placed."
 
 
-# the lock box's head when Auto-fill or a whole-board write put a Bench answer on the board: the lock decides that
-# place again (lock_forces in raidcycle), so a later joiner comes first
-AUTO_AGAIN = "The lock fills open seats from those who joined, then the bench, and Bench places nobody dragged count as open."
+# the lock box's head when a Bench answer's place on the board is decided again at the lock (lock_forces in
+# raidcycle): one Auto-fill or a whole-board write placed, or a placed joiner who then answered Bench
+AUTO_AGAIN = "The lock decides again each Bench answer's place unless an officer dragged them there as a Bench answer."
 
 
 def _short_first(roles: tuple) -> str:
     """The lock box's head when the Bench exception may fire (rc.bench_short_roles): a benched tank or healer comes
     before a joiner only for a minimum those who joined together cannot fill."""
-    return f"The lock fills seats from those who joined, then the bench, but a needed benched {' or '.join(roles)} comes first."
+    if len(roles) > 1:
+        return f"A {' or '.join(roles)} on the bench is rostered ahead of those who joined if they cannot meet those minimums."
+    return f"A {roles[0]} on the bench is rostered ahead of those who joined if they cannot meet the {roles[0]} minimum."
 
 
 def _lock(reg: Registry, ev: rc.RaidEvent, rs=None) -> list[str]:
@@ -1188,16 +1195,13 @@ def clear_board_box(reg: Registry, rs, ev: rc.RaidEvent) -> dict:
     if not parts:
         return refusal_box(title, CLEAR_LOCKED)
     # people, not places: someone placed on two raids of the evening is one person going back
-    # every name the board may hold (rc.board_names: Join and Bench answers)
-    on = {s.discord_id: s.status for p in parts for g in rc.board_layout(reg, p) for x in g
+    # every name the board may hold (rc.board_names: Join and Bench answers); where each goes: back_sentence
+    first = rc.first_part(rs, ev)
+    on = {s.discord_id: s.display_name for p in parts for g in rc.board_layout(reg, p) for x in g
           if x in rc.board_names(p) and (s := rc.signup_by_name(p, x)) is not None}
-    n = len(on)
-    if not n:
+    if not on:
         return refusal_box(title, CLEAR_EMPTY)
-    if "sub" in on.values():  # a Bench answer goes back to the bench, not to Not placed
-        head = "The one placed person comes off the board." if n == 1 else f"{n} placed people come off the board."
-    else:
-        head = "The one placed person goes back to Not placed." if n == 1 else f"{n} placed people go back to Not placed."
+    head = back_sentence(first, list(on.values()), "on the board")
     return box(title, [head, "Nobody is told.", "Auto-fill groups can place everyone again."], "Clear the board",
                rev=":".join(rc.board_rev(reg, p) for p in parts))
 

@@ -2516,6 +2516,8 @@ def sync_parts(rs: "RaidStore", first: RaidEvent) -> bool:
         # the same answer pressed again only moves the first part's updated_at (the last touch): not a change to the part
         if {k: v.model_dump(exclude={"updated_at"}) for k, v in want.items()} == {k: v.model_dump(exclude={"updated_at"}) for k, v in fev.signups.items()}:
             continue
+        for uid, c in want.items():  # a placed joiner of this part who answers Bench is decided again here too
+            bench_again(fev, fev.signups.get(uid), c)
         fev.signups = want
         rs.save(fev, "answers follow the first raid")
         changed = True
@@ -2770,9 +2772,22 @@ def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character
         s.spec, s.offspec, s.role = old.spec, old.offspec, old.role  # no spec picked: a seated switch stays (the seat keeps it too);
         # a respec of the character (its own spec changed) is not a switch: the signup follows the new spec
     ev.signups[str(m.discord_id)] = s
+    bench_again(ev, old, s)
     ev.log.append(f"{m.display_name} {status} as {c.label}" + (f", {s.spec}" if spec else "") + f" ({source}" + (f", switched by {by})" if by else ")"))
     rs.save(ev, f"{m.display_name} {status}")
     return s
+
+
+def bench_again(ev: RaidEvent, old: Signup | None, new: Signup) -> None:
+    """A placed joiner who answers Bench (design §3 of 2026-11-25, fix round 2): their own answer now says "only if you
+    need me", so the place stays on the board but goes into auto_placed — the lock decides it again, as it does a Bench
+    place Auto-fill made. Bench → Join leaves the name as it is. Open runs only (the first part's answer write, and
+    sync_parts for every later part)."""
+    if ev.state != "open" or old is None or old.status != "in" or new.status != "sub":
+        return
+    if any(n in (old.display_name, new.display_name) for g in ev.layout or [] for n in g):
+        ev.auto_placed = list(dict.fromkeys([*ev.auto_placed, *(n for g in ev.layout or [] for n in g
+                                                                 if n in (old.display_name, new.display_name))]))
 
 
 def signup_by_name(ev: RaidEvent, display_name: str) -> Optional[Signup]:
@@ -4332,7 +4347,8 @@ def bench_short_roles(reg: Registry, rs, ev: RaidEvent) -> list[str]:
     """The tank / healer roles the Bench exception may bring a Bench answer in for (the lock box's rule sentence, never
     a count): a role whose minimum seats the joiners together cannot fill (solver.bench_refund_room, the solve's own
     rule, with the same `need` and the same left-out names as _solve_run) and that a Bench answer the lock still
-    decides on can play (not kept off, not kept on, main or offspec). [] = the exception cannot fire. Pure: no solve."""
+    decides on can play (not kept off, not kept on, main or offspec). [] = the exception cannot fire — also when the
+    names kept on (pins "in", board places, never_bench) already hold every seat. Pure: no solve."""
     from .policy import PolicyStore
 
     players = players_for(reg, ev)
@@ -4344,6 +4360,8 @@ def bench_short_roles(reg: Registry, rs, ev: RaidEvent) -> list[str]:
     raid_id = ev.instance if ev.instance in reg.profile.raids else next(iter(reg.profile.raids))
     size = run_size(reg, ev)
     n_rosters = _roster_count(reg, ev, players, max(forces.placed.values(), default=-1) + 1)
+    if len(set(forces.kept_on)) >= size * n_rosters:  # the names kept on hold every seat: none is left for the exception
+        return []
     cc = PolicyStore(rs.store if rs is not None else reg.store, rs.key if rs is not None else reg.key).comp_constraints()
     need = {r: n * n_rosters for r, n in merged_role_min(reg.role_bounds(raid_id, size), cc["role_min"]).items() if r in EXTRA_ROLES}
     gone = set(off)
@@ -6252,7 +6270,8 @@ def bench_promise(reg: Registry, s: Signup) -> str:
     """What a Bench answer can rely on (the receipt's tail, design §3 of 2026-11-25): the lock rosters them when a seat
     would otherwise stay empty — or, when they can play tank or healer (main or offspec), when the event is short one
     nobody who joined can cover (solver.bench_refund_room's rule) — and they are among the first asked when a seat opens
-    later (the fill engine asks the bench first). Never "only if": an officer may also place them by hand."""
+    later (the fill engine asks the bench first). "May": others on the bench can be ahead of them; never "only if": an
+    officer may also place them by hand."""
     roles = {s.role}
     if s.offspec:
         try:
@@ -6261,7 +6280,7 @@ def bench_promise(reg: Registry, s: Signup) -> str:
             pass
     can = [r for r in EXTRA_ROLES if r in roles]
     short = f" or the event is short a {' or '.join(can)} nobody who joined can cover" if can else ""
-    return f"you're rostered if a seat would otherwise stay empty{short}, and you're among the first asked when one opens later."
+    return f"you may be rostered if a seat would otherwise stay empty{short}, and you're among the first asked when one opens later."
 
 
 def answer_receipt(reg: Registry, ev: RaidEvent, m: Member) -> str:

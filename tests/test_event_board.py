@@ -433,11 +433,11 @@ def test_clear_the_board_through_the_servers_box(reg, rs, monkeypatch, web_bot):
     url = f"/api/event/{ev.key}/clear"
     box = web_bot.c.post(url, json={"preview": True}, headers=H()).json()["box"]
     assert box["title"].startswith("Clear the board") and box["verb"] == "Clear the board" and not box["danger"]
-    assert box["sentences"] == [f"{n} placed people go back to Not placed.", "Nobody is told.", "Auto-fill groups can place everyone again."]
+    assert box["sentences"] == [f"The {n} people on the board go back to Not placed.", "Nobody is told.", "Auto-fill groups can place everyone again."]
     asyncio.run(bot.board_move(reg, rs, first, ms[1].display_name, (0, 1), "Jon", by_id=OWNER))  # a drag while the box is open
     n2 = len(placed(first) | placed(rs.events[bd.key]))
     r = web_bot.c.post(url, json={"seen": box["fp"]}, headers=H())
-    assert r.status_code == 409 and r.json()["box"]["sentences"][0] == f"{n2} placed people go back to Not placed."
+    assert r.status_code == 409 and r.json()["box"]["sentences"][0] == f"The {n2} people on the board go back to Not placed."
     r = web_bot.c.post(url, json={"seen": r.json()["box"]["fp"]}, headers=H())
     assert r.status_code == 200, r.text
     for p in (first, bd):
@@ -797,7 +797,7 @@ def test_clear_counts_people_once_across_raids(reg, rs, monkeypatch):
     bd = rc.event_parts(rs, ev)[1]
     fill(bot, reg, rs, bd)
     n = len({m.display_name for m in ms} & (placed(ev) | placed(rs.events[bd.key])))
-    assert cq.clear_board_box(reg, rs, ev)["sentences"][0] == f"{n} placed people go back to Not placed."
+    assert cq.clear_board_box(reg, rs, ev)["sentences"][0] == f"The {n} people on the board go back to Not placed."
 
 
 def test_the_test_bench_place_the_rest_gets_its_board_and_its_rev_is_honoured(reg, rs, monkeypatch, web_bot):

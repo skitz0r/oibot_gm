@@ -653,13 +653,13 @@ def test_clear_the_board_counts_placed_bench_names(reg, rs):
     ev.layout = [[core.display_name, raider.display_name]]
     rs.save(ev, "bench only (test)")
     b = cq.clear_board_box(reg, rs, ev)
-    assert b["verb"] == "Clear the board" and b["sentences"][0] == "2 placed people come off the board.", b
+    assert b["verb"] == "Clear the board" and b["sentences"][0] == "The 2 Bench answers on the board go back to Bench.", b
     ev.layout = [[core.display_name, joiners[0].display_name, joiners[1].display_name]]
     rs.save(ev, "mixed (test)")
-    assert cq.clear_board_box(reg, rs, ev)["sentences"][0] == "3 placed people come off the board."
+    assert cq.clear_board_box(reg, rs, ev)["sentences"][0] == "The 3 people on the board go back to Not placed or Bench, by their answer."
     ev.layout = [[core.display_name]]
     rs.save(ev, "one (test)")
-    assert cq.clear_board_box(reg, rs, ev)["sentences"][0] == "The one placed person comes off the board."
+    assert cq.clear_board_box(reg, rs, ev)["sentences"][0] == "The one Bench answer on the board goes back to Bench."
 
 
 def test_the_board_refusals_are_whole_sentences(reg, rs):
@@ -859,10 +859,47 @@ def _case_a1b_plain_text_board_then_two_joins(reg, rs):
     return rs.events[ev.key]
 
 
+# the second review's cases (fix round 2): a kept-on name the box's earlier rules could not see
+def _case_p1_full_board_and_a_pinned_bench_answer_off_it(reg, rs):
+    """8 joined, all placed on the board, plus a Bench answer pinned "in" who is NOT on the board: the lock rosters 9,
+    so the board is not the whole roster."""
+    ev = schedule_event(reg, rs)
+    joiners = base_eight(reg)
+    join(reg, rs, ev, joiners)
+    pinned = people(reg, 1, DPS)[0]
+    join(reg, rs, ev, [pinned], "sub")
+    ev.pins[str(pinned.discord_id)] = "in"
+    ns = sorted(names(joiners))
+    ev.layout = [ns[:5], ns[5:]]
+    return ev
+
+
+def _case_b12_pinned_joiners_hold_every_seat(reg, rs):
+    """12 damage dealers joined, 10 of them pinned "in", a healer minimum of 2, a healer on the Bench, an empty board:
+    the pinned joiners hold every seat, so the benched healer cannot come in."""
+    ev = _case_healer(reg, rs)
+    for s in sorted(ev.by_status("in"), key=lambda s: s.display_name)[:10]:
+        ev.pins[str(s.discord_id)] = "in"
+    return ev
+
+
+def _case_b13_one_pinned_bench_answer_empty_board(reg, rs):
+    """8 joined, one Bench answer pinned "in", an empty board, no other Bench answer: the lock rosters the Bench answer."""
+    ev = schedule_event(reg, rs)
+    join(reg, rs, ev, base_eight(reg))
+    pinned = people(reg, 1, DPS)[0]
+    join(reg, rs, ev, [pinned], "sub")
+    ev.pins[str(pinned.discord_id)] = "in"
+    return ev
+
+
 REVIEW_CASES = {"B1": _case_b1_full_hand_board_healer_short, "B6": _case_b6_pinned_bench_on_a_full_event,
                 "B6b": _case_b6b_pinned_bench_with_seats_left, "B11": _case_b11_second_rosters_group,
                 "B12": _case_b12_auto_fill_then_two_joins, "B13": _case_b13_auto_fill_then_one_join,
-                "A1": _case_a1_proposal_used_then_two_joins, "A1b": _case_a1b_plain_text_board_then_two_joins}
+                "A1": _case_a1_proposal_used_then_two_joins, "A1b": _case_a1b_plain_text_board_then_two_joins,
+                "P1": _case_p1_full_board_and_a_pinned_bench_answer_off_it,
+                "B12 pinned joiners": _case_b12_pinned_joiners_hold_every_seat,
+                "B13 pinned bench": _case_b13_one_pinned_bench_answer_empty_board}
 ALL_CASES = {**BOX_CASES, **REVIEW_CASES}
 
 
@@ -882,8 +919,13 @@ def contradictions(reg, rs, ev) -> tuple[dict, list[str]]:
     rc.propose(reg, rs, ev, save=False)
     sel = [p for r in ev.all_rosters for p in r.selected]
     got = {p.signup_name for p in sel}
-    bench_in = {p.signup_name for p in sel if p.status == "bench"} - kept_bench
+    bench_all = {p.signup_name for p in sel if p.status == "bench"}
+    bench_in = bench_all - kept_bench
+    # a Bench answer the head must name: every one rostered that the board does not already show (a kept-on one off the
+    # board counts — a pin "in" or the policy's never_bench rosters them as surely as the solve does)
+    unseen = bench_all - set(lf.placed)
     left = joined - got
+    exception = head in {cq._short_first(r) for r in (("tank",), ("healer",), ("tank", "healer"))}
     bad = []
     if re.search(r"\d", head):
         bad.append(f"a number in the head: {head}")
@@ -899,14 +941,16 @@ def contradictions(reg, rs, ev) -> tuple[dict, list[str]]:
         bad.append("someone on the board lost their place")
     if "ahead of people who joined" in head and (not kept_bench <= got or not left):
         bad.append("no hand-placed Bench answer is rostered ahead of a joiner")
-    if bench_in and left and "needed benched" not in head:
+    if bench_in and left and not exception:
         bad.append(f"a Bench answer {sorted(bench_in)} is rostered while {sorted(left)} who joined is not")
-    if "needed benched" in head and bench_in and left:
+    if exception and bench_in and left:
         roles = {p.role for p in sel if p.signup_name in bench_in}
         if not roles <= set(rc.EXTRA_ROLES):
             bad.append("a benched damage dealer came before a joiner")
-    if "from the bench" not in head and "then the bench" not in head and "Bench" not in head and bench_in:
-        bad.append(f"the head never names the bench, the lock rosters {sorted(bench_in)}")
+    if exception and not any(p.role in rc.EXTRA_ROLES for p in sel if p.signup_name in bench_in):
+        bad.append("the exception sentence, but the lock rosters no benched tank or healer")
+    if "bench" not in head.lower() and unseen:
+        bad.append(f"the head never names the bench, the lock rosters {sorted(unseen)}")
     return b, bad
 
 
@@ -949,13 +993,28 @@ def test_the_box_says_a_hand_placed_or_pinned_bench_answer_comes_ahead(reg, rs):
         "A Bench answer an officer placed or pinned is rostered ahead of people who joined."
 
 
-def test_the_box_says_a_needed_benched_healer_comes_first(reg, rs):
+def test_the_box_says_a_benched_healer_comes_ahead_for_the_healer_minimum(reg, rs):
     from oibot_gm import consequences as cq
 
     for make in (_case_healer, _case_only_tank_heals):
         head = cq.lock_box(reg, make(reg, rs), rs)["sentences"][0]
-        assert head == "The lock fills seats from those who joined, then the bench, but a needed benched healer comes first.", head
+        assert head == "A healer on the bench is rostered ahead of those who joined if they cannot meet the healer minimum.", head
     assert rc.bench_short_roles(reg, rs, _case_spare_tank_heals(reg, rs)) == [], "the joiners together cover the minimums"
+
+
+def test_the_box_names_the_bench_for_a_kept_on_bench_answer_off_the_board(reg, rs):
+    """Fix round 2: P1 (a full board of joiners and a pinned Bench answer off it) is not 'the board becomes the roster';
+    B13 (one pinned Bench answer, an empty board) names the bench; B12 (pinned joiners hold every seat) says no exception."""
+    from oibot_gm import consequences as cq
+
+    b = cq.lock_box(reg, _case_p1_full_board_and_a_pinned_bench_answer_off_it(reg, rs), rs)
+    assert b["sentences"][:2] == ["The lock keeps the board and fills open seats from those who joined, then from the bench.",
+                                  "Everyone rostered gets the Confirm or Can't make it DM."], b
+    for make in (_case_b13_one_pinned_bench_answer_empty_board, _case_b12_pinned_joiners_hold_every_seat):
+        ev = make(reg, rs)
+        assert cq.lock_box(reg, ev, rs)["sentences"][0] == \
+            "The lock builds the roster for Barrow Deeps from those who joined, then from the bench.", make.__name__
+    assert rc.bench_short_roles(reg, rs, ev) == [], "the pinned joiners hold every seat"
 
 
 def test_the_box_with_bench_answers_and_nobody_placed(reg, rs):
@@ -1047,10 +1106,72 @@ def test_plain_text_run_board_leaves_its_bench_name_decided_again(reg, rs):
     assert core not in seated(reg, rs, ev), "both later joiners come before the Bench answer"
 
 
+def _placed_joiner_answers_bench(reg, rs, joined: int):
+    """`joined` joined (base eight + damage dealers); an officer places the last one, who then answers Bench."""
+    ev = schedule_event(reg, rs)
+    joiners = base_eight(reg) + people(reg, joined - 8, DPS)
+    join(reg, rs, ev, joiners)
+    who = joiners[-1]
+    ev.layout = rc.apply_move(reg, ev, who.display_name, (1, 0))
+    rs.save(ev, "board (test)")
+    rc.set_signup(reg, rs, ev, who, None, "sub", source="test")
+    ev = rs.events[ev.key]
+    assert who.display_name in ev.layout[1], "the place stays on the board"
+    assert who.display_name in ev.auto_placed, "their own answer says only if you need me: decided again at the lock"
+    return ev, who
+
+
+def test_a_placed_joiner_who_answers_bench_is_left_out_of_an_event_full_of_joiners(reg, rs):
+    ev, who = _placed_joiner_answers_bench(reg, rs, 11)
+    assert who.display_name not in seated(reg, rs, ev), "ten joiners fill the ten seats"
+
+
+def test_a_placed_joiner_who_answers_bench_is_rostered_for_a_seat_left_empty(reg, rs):
+    ev, who = _placed_joiner_answers_bench(reg, rs, 9)
+    assert who.display_name in seated(reg, rs, ev)
+
+
+def test_a_bench_answer_placed_by_hand_who_answers_join_stays_a_hand_place(reg, rs):
+    import asyncio
+
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    asyncio.run(_night_bot(reg, rs).board_move(reg, rs, ev, core.display_name, (0, 0), "Jon", by_id=1))
+    rc.set_signup(reg, rs, rs.events[ev.key], core, None, "in", source="test")
+    ev = rs.events[ev.key]
+    assert core.display_name in ev.layout[0] and core.display_name not in ev.auto_placed
+
+
+def test_a_whole_board_write_keeps_a_dragged_bench_name_in_the_same_group_a_hand_place(reg, rs):
+    import asyncio
+
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    bot = _night_bot(reg, rs)
+    asyncio.run(bot.board_move(reg, rs, ev, core.display_name, (0, 0), "Jon", by_id=1))
+    ev = rs.events[ev.key]
+    assert core.display_name not in ev.auto_placed
+    asyncio.run(bot.save_board(reg, rs, ev, [[core.display_name], [raider.display_name]], by="Jon"))
+    ev = rs.events[ev.key]
+    assert core.display_name not in ev.auto_placed, "the officer's drag stands: same group"
+    assert raider.display_name in ev.auto_placed, "a Bench name new in the write is decided again"
+    join(reg, rs, ev, people(reg, 2, DPS))
+    assert core.display_name in seated(reg, rs, rs.events[ev.key]), "the hand place is kept at the lock"
+
+
+def test_a_whole_board_write_that_moves_a_dragged_bench_name_makes_it_decided_again(reg, rs):
+    import asyncio
+
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    bot = _night_bot(reg, rs)
+    asyncio.run(bot.board_move(reg, rs, ev, core.display_name, (0, 0), "Jon", by_id=1))
+    ev = rs.events[ev.key]
+    asyncio.run(bot.save_board(reg, rs, ev, [[], [core.display_name]], by="Jon"))
+    assert core.display_name in rs.events[ev.key].auto_placed, "moved by the write, not dragged: decided again"
+
+
 def test_the_bench_receipt_says_when_the_lock_rosters_them(reg, rs):
     ev, joiners, core, raider, trial = case_one(reg, rs)
     text = rc.answer_receipt(reg, ev, core)
-    assert "you're rostered if a seat would otherwise stay empty" in text and "first asked when one opens later" in text
+    assert "you may be rostered if a seat would otherwise stay empty" in text and "first asked when one opens later" in text
     assert "only if" not in text  # an officer may place a Bench answer by hand: never promise "only"
     assert "short a" not in text  # a damage dealer: the tank / healer exception isn't theirs
     healer = people(reg, 1, HEAL)[0]

@@ -38,11 +38,12 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        be undone); refusal_box / refusal_kind (the kind a built refusal carries — rc.Refusal past | clash — or the constant it equals,
                        never words inside it) / refusal_box_for → REFUSAL_TITLES; the twenty boxes: lock_box (1–2; the head states a RULE true whatever the solve decides, never a predicted
                        number (Task 6 fix): _LockFacts per open raid from rc.lock_forces + rc.lock_seat_count (full = every seat of every
-                       roster the lock builds placed, or nobody left to place, and no auto-placed Bench name) → key: "The board becomes the
+                       roster the lock builds placed, or nobody left to place, no auto-placed Bench name, and every kept-on name on the
+                       board; a kept-on Bench answer off the board makes the head name the bench) → key: "The board becomes the
                        roster…" (+ ", so its Bench answer is rostered ahead of people who joined" when a hand-placed one leaves a joiner off) ·
                        "A Bench answer an officer placed or pinned is rostered ahead of people who joined." (joined ≥ seats) · _short_first
-                       (rc.bench_short_roles: "… but a needed benched healer comes first.") · AUTO_AGAIN (a Bench place Auto-fill or a
-                       whole-board write made) · "… from those who joined, then from the bench." — raids that differ get the rule true of
+                       (rc.bench_short_roles: "A healer on the bench is rostered ahead of those who joined if they cannot meet the healer
+                       minimum.") · AUTO_AGAIN (a Bench place decided again: Auto-fill, a whole-board write, or a placed joiner who answered Bench) · "… from those who joined, then from the bench." — raids that differ get the rule true of
                        all (losses first); the DM sentence counts only when the board is full (the board's number), else "Everyone rostered
                        gets …" / "… ask, as a DM or on the site." with DMs off; the fp covers _lock_rev (event_rev + each open raid's
                        board_rev, auto_placed and answers); back_sentence / _bank_word / undo_box(bench=) = where names taken off the

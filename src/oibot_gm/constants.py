@@ -88,7 +88,7 @@ PAGE_WORDS = {
     "bank_empty": {"nobody": "Nobody has joined yet.", "placed": "Everyone who joined is placed.",
                    "rostered": "Everyone who joined is rostered."},
     # under the Board before the lock (the owner's tweaks C): the board is what the officers placed, the lock places the rest
-    "board_footer": "The lock keeps these groups and fills any open seat from Not placed, then from the bench. Auto-fill groups places them now the way the lock would.",
+    "board_footer": "Auto-fill groups fills the open seats now as the lock would, from Not placed first, then the bench.",
     "show_switches": "Show {n} possible switches", "hide_switches": "Hide the {n} switches", "raid_short": "{raid} is short",
     # Role switches: each row's button (rc.event_switches `button`), and why a short raid has no switch to show (`why`)
     "switch_button": "Switch", "answer_button": "Answer for them", "ask_button": "Ask",

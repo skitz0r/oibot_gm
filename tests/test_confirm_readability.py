@@ -907,7 +907,7 @@ def box_cases(reg, rs, runs, ms, dump):
     join(reg, rs, b3, ms[:2] + ms[5:12] + [reg.members[OFFICER_ID]])
     join(reg, rs, b3, ms[2:3], "sub")
     bench_case("open recurring, a benched healer the joiners lack", b3,
-               "The lock fills seats from those who joined, then the bench, but a needed benched healer comes first.")
+               "A healer on the bench is rostered ahead of those who joined if they cannot meet the healer minimum.")
     b3.layout = [[ms[2].display_name]]  # the same Bench answer placed by hand
     bench_case("open recurring, a Bench answer placed by hand on a full event", b3,
                "A Bench answer an officer placed or pinned is rostered ahead of people who joined.")
@@ -923,6 +923,26 @@ def box_cases(reg, rs, runs, ms, dump):
     bench_case("open recurring, a full board with a Bench answer ahead of a joiner", b3,
                "The board becomes the roster for Barrow Deeps, so its Bench answer is rostered ahead of people who joined.")
     b3.layout = None
+    # fix round 2: the exception's "tank or healer" form, and raids of one evening whose boards differ
+    b4 = fresh_run()  # nobody who joined tanks or heals: a benched Warrior and a benched Priest
+    join(reg, rs, b4, ms[5:12] + [reg.members[OFFICER_ID]])
+    join(reg, rs, b4, [ms[0], ms[2]], "sub")
+    bench_case("open recurring, a benched tank and healer the joiners lack", b4,
+               "A tank or healer on the bench is rostered ahead of those who joined if they cannot meet those minimums.")
+    start = (reg.now_local() + timedelta(days=20)).replace(hour=18, minute=30, second=0, microsecond=0)
+    pair = rc.open_run(reg, rs, "hyjal_summit_forever", start, by="t", schedule=rc.ADHOC_SCHEDULE,
+                       lineup=[{"raid": RID, "rosters": 1}])
+    join(reg, rs, pair, ms[:8])
+    join(reg, rs, pair, ms[8:10], "sub")
+    bench_case("two raids, both boards empty, Bench answers", pair,
+               "The lock builds the roster for Hyjal Summit and Barrow Deeps from those who joined, then from the bench.")
+    later = rc.event_parts(rs, pair)[1]
+    later.layout, later.auto_placed = [[ms[8].display_name]], [ms[8].display_name]
+    bench_case("two raids, a Bench place on the second decided again", pair, cq.AUTO_AGAIN)
+    later.layout, later.auto_placed = [[ms[0].display_name]], []
+    bench_case("two raids, one board part-filled, one empty", pair,
+               "The lock fills open seats from those who joined first, then from the bench.")
+    later.layout = None
     for m in ms:
         m.dm_opt_out = dms[m.discord_id]
     b = cq.cancel_box(reg, four, rs)
