@@ -296,3 +296,17 @@ def test_a_reply_that_still_acts_with_acting_off_ends_acts_off(reg, rs):
     assert res.ending == "acts_off" and res.answer.acts is True
     res = al.answer(ScriptedProvider([[reply(answer="I've marked you away.", acts=True)]]), tree(), viewer(reg, rs))
     assert res.ending == "acts"
+
+
+def test_the_system_text_says_to_read_the_games_shorthand_without_listing_any(reg):
+    """Task 8b (the owner, 2026-11-25: no alias table): one general rule, the same for every asker, tells the model to
+    work out the short names people write and look them up; it lists no abbreviation."""
+    import re
+
+    rules = _rules(st.system_text(None, reg.profile))
+    flat = " ".join(rules.split())
+    assert "People write in the game's shorthand: short names for professions, classes, specs, raids and items." in flat
+    assert "ask which one only when two readings are both plausible after looking" in flat
+    assert flat.count("shorthand") == 1
+    for short in ("bs", "lw", "pally", "alch", "dk", "ench", "mc", "bwl"):
+        assert not re.search(rf"\b{short}\b", rules, re.I), short

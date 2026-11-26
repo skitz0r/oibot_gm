@@ -639,7 +639,7 @@ class ListenMixin:
             return  # listening was turned off (or to watch) since the 👀
         if ask.get("req") is not None:  # a held change (_listen_hold): the diff with Apply / Cancel, now that they asked
             await handle_change(ask["message"], reg, self.policies.store(reg), self.ctx.provider, self.ops, ask["text"], bot=self,
-                                channel=ask["channel"], req=ask["req"])
+                                channel=ask["channel"], req=ask["req"], **answer_loop.entry_kw(reg.key, "listen"))
             return
         await self.plain_text(ask["message"], reg, ask["text"], ask["channel"], memory=ask.get("memory"), **answer_loop.entry_kw(reg.key, "listen"))
 

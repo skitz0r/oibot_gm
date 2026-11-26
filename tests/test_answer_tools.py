@@ -3,6 +3,7 @@ the members' tools — find, recipe, crafters, price, member, event, schedule �
 reader. No model, no network."""
 from __future__ import annotations
 
+import json
 import re
 from datetime import timedelta
 
@@ -475,3 +476,117 @@ def test_a_hostile_name_is_unfenced_in_event_and_schedule(reg, rs, monkeypatch):
     for name, args in {"event": {"which": "next"}, "schedule": {}}.items():
         text = body(at.run_tool(v, name, args))
         assert text.count("</data>") == 1 and "‹/data" in text, name
+
+
+# ---------------------------------------------------------------- the profile's own names (task 8b)
+
+FOREVER = GameProfile.load(ROOT / "profiles" / "forever")
+
+
+def _props(profile, name):
+    return next(t for t in at.tools_for(profile) if t.name == name).schema["properties"]
+
+
+@pytest.mark.parametrize("profile", [FOREVER, TBC], ids=lambda p: p.name)
+def test_profession_and_class_arguments_are_the_profiles_own_names(profile):
+    crafters_props, member_props = _props(profile, "crafters"), _props(profile, "member")
+    names = [d.name for d in profile.professions.values()]
+    if names:
+        assert crafters_props["profession"]["enum"] == names
+        assert "Blacksmithing" in names and "short form" in crafters_props["profession"]["description"]
+    else:  # a game version that lists no professions: the character argument alone, never an empty enum
+        assert set(crafters_props) == {"character"}
+    assert member_props["cls"]["enum"] == list(profile.classes)
+    assert member_props["role"]["enum"] == ["tank", "healer", "melee", "ranged"]
+    assert all(p.get("maxLength") == at.ARG_MAX for p in (*crafters_props.values(), *member_props.values()))
+    assert at.tools_for(profile) == at.tools_for(profile)
+    assert json.dumps([t.spec() for t in at.tools_for(profile)]) == json.dumps([t.spec() for t in at.tools_for(profile)])
+
+
+def test_the_two_profiles_offer_different_profession_enums():
+    assert _props(FOREVER, "crafters") != _props(TBC, "crafters")
+    assert "enum" not in at.TOOLS["crafters"].schema["properties"]["profession"], "the registry's own schema names no profile"
+
+
+def test_the_tool_list_is_the_same_for_every_asker_on_a_profile(reg, rs):
+    from answer_fakes import ScriptedProvider, reply
+    from oibot_gm import answer_loop as al
+
+    askers(reg)
+    sent = []
+    for uid, officer, public in [(WREN, False, True), (PELLOW, False, False), (MARROW, True, False), (MARROW, True, True), (OWNER, True, False)]:
+        pv = ScriptedProvider([[reply(answer="Here.")]])
+        al.answer(pv, None, viewer(reg, rs, uid, officer, public, question="who are bs in the guild"))
+        sent.append(json.dumps(pv.requests[0]["tools"]))
+    assert len(set(sent)) == 1
+    assert '"Blacksmithing"' in sent[0] and '"Paladin"' in sent[0]
+
+
+@pytest.mark.parametrize("tool,args", [
+    ("crafters", {"profession": "bs"}),
+    ("crafters", {"profession": "Smithing"}),
+    ("member", {"cls": "pally"}),
+    ("member", {"cls": "Death Knight"}),
+    ("member", {"role": "dps"}),
+    ("member", {"cls": "Paladin", "role": "heals"}),
+])
+def test_an_argument_outside_the_enum_is_the_one_nothing_matches_sentence(reg, rs, tool, args):
+    crafters(reg, rs)
+    text, err = at.run_tool(viewer(reg, rs, WREN), tool, args)
+    bad = next(v for v in args.values() if v not in ("Paladin",))
+    assert not err and at.NO_MATCH.format(name=bad) in text
+
+
+def test_a_profession_enum_value_finds_its_crafters(reg, rs):
+    askers(reg)
+    reg.set_professions(PELLOW, "Briarwood", [{"id": "blacksmithing", "skill": 285, "recipes": []}])
+    text = body(at.run_tool(viewer(reg, rs, WREN, public=True), "crafters", {"profession": "Blacksmithing"}))
+    assert "Blacksmithing, highest skill first:" in text and "Briarwood (Pellow, 285)" in text
+
+
+def test_the_member_lookup_lists_a_class_and_role(reg, rs):
+    askers(reg)
+    reg.add_character(PELLOW, "Pellow", "Dawnmere", "Paladin", "Holy", None, False)
+    reg.add_character(WREN, "Wrenfield", "Shieldrun", "Paladin", "Protection", None, False)
+    healers = body(at.run_tool(viewer(reg, rs, WREN, public=True), "member", {"cls": "Paladin", "role": "healer"}))
+    assert "- Pellow: Dawnmere Holy Paladin healer" in healers and "Shieldrun" not in healers
+    every = body(at.run_tool(viewer(reg, rs, WREN, public=True), "member", {"cls": "paladin"}))  # case aside, exact
+    assert "Dawnmere" in every and "Shieldrun Protection Paladin tank" in every
+    tanks = body(at.run_tool(viewer(reg, rs, WREN, public=True), "member", {"role": "tank"}))
+    assert "Shieldrun" in tanks and "Dawnmere" not in tanks
+    none = body(at.run_tool(viewer(reg, rs, WREN), "member", {"cls": "Druid", "role": "tank"}))
+    assert "Nobody in the guild plays a Druid tank spec yet." in none
+    assert at.NAME_OR_CLASS in body(at.run_tool(viewer(reg, rs, WREN), "member", {}))
+
+
+def test_the_class_list_keeps_the_member_lookups_visibility(reg, rs):
+    """No test puppet, nobody who left the server, no planned character; the public who-line for every asker, so a
+    member's list equals an officer's — in private and where others read."""
+    askers(reg)
+    gone = 700_000_000_000_000_077
+    reg.add_character(gone, "Gonefar", "Gonefar", "Paladin", "Holy", None, True)
+    reg.member_left(gone)
+    reg.add_character(PELLOW, "Pellow", "Dawnmere", "Paladin", "Holy", None, False)
+    puppet = reg.test_members()[0]
+    pcls = puppet.characters[0].cls
+    dentist(reg)
+    results = [body(at.run_tool(viewer(reg, rs, uid, officer, public), "member", {"cls": "Paladin"}))
+               for uid, officer, public in [(WREN, False, False), (WREN, False, True), (MARROW, True, False), (MARROW, True, True)]]
+    assert len(set(results)) == 1
+    text = results[0]
+    assert "Dawnmere" in text and "Gonefar" not in text and "dentist" not in text and "DMs" not in text
+    puppets = body(at.run_tool(viewer(reg, rs, MARROW, True), "member", {"cls": pcls}))
+    shown = {ln[2:].split(":", 1)[0] for ln in puppets.splitlines() if ln.startswith("- ")}
+    assert shown and not shown & {m.display_name for m in reg.test_members()}, shown
+
+
+def test_the_class_list_is_capped(reg, rs):
+    with reg.store.batch("paladins"):
+        for i in range(60):
+            uid = 700_000_000_000_200_000 + i
+            name = f"Lumen{chr(97 + i % 26)}{chr(97 + i // 26)}"
+            reg.add_character(uid, name, name, "Paladin", "Holy", None, True)
+    text = body(at.run_tool(viewer(reg, rs, WREN), "member", {"cls": "Paladin"}))
+    assert len(text) <= at.TOOLS["member"].cap + wrapper_len("member")
+    assert "— narrow it" in text
+    assert text.count("\n- Lumen") <= at.PLAYER_ROWS

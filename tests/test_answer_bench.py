@@ -95,3 +95,38 @@ def test_lookups_that_find_nothing_fail_the_must_check(request, reg, rs, case, m
     fmt, res, first, results, _sent = run_case(request, reg, rs, case)
     assert "nothing here" in results
     assert case.must and missing_must(case, fmt, first, results), (case.id, "passes without its lookups")
+
+
+SHORTHAND = [c for c in BENCH if "shorthand" in c.tags]
+
+
+def test_the_shorthand_group_is_the_three_cases():
+    assert [c.id for c in SHORTHAND] == ["bs_in_the_guild", "pally_healers", "lw_who"]
+    assert all(c.expect_tools and c.script for c in SHORTHAND)
+
+
+@pytest.mark.parametrize("case", SHORTHAND, ids=lambda c: c.id)
+def test_the_resolver_reads_no_shorthand(reg, rs, case):
+    """No alias table: the short name resolves to nothing the case's answer needs, so only the model's mapping to the
+    lookup's enum finds it."""
+    fmt = case.setup(reg, rs)
+    names = names_of(resolve(reg, case.question.format(**fmt))[0])
+    if case.id == "bs_in_the_guild":
+        assert names == [], names
+    assert not {"Blacksmithing", "Paladin", "Leatherworking"} & set(names), names
+
+
+def test_every_scripted_lookup_call_fits_the_profiles_schema(reg):
+    """The scripted model makes only calls a real model could make: every argument is a property of that lookup's
+    schema for the bench's profile, and an enum argument is one of the enum's values."""
+    specs = {t.name: t.schema for t in at.tools_for(reg.profile)}
+    for case in SCRIPTED:
+        for step in case.script:
+            for c in (step if isinstance(step, list) else []):
+                if c["name"] == "reply":
+                    continue
+                props = specs[c["name"]]["properties"]
+                for k, v in c["input"].items():
+                    assert k in props, (case.id, c["name"], k)
+                    if "enum" in props[k]:
+                        assert v in props[k]["enum"], (case.id, c["name"], k, v)

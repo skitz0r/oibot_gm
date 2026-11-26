@@ -27,7 +27,7 @@ from . import prices
 from . import professions
 from . import raidcycle as rc
 from .answer_names import KINDS, match_lines, people, resolve
-from .constants import PAGE_WORDS
+from .constants import PAGE_WORDS, ROLES
 from .llm.provider import unfence
 from .profiles import GameProfile
 from .raid_views import run_title
@@ -41,6 +41,7 @@ FIND_RECIPES = 5         # recipes the `recipe` lookup shows for one name
 CHARACTER_RECIPES = 40   # a character's recipe names the `crafters` lookup lists before a count
 RECIPE_CRAFTERS = 8      # crafters one recipe's line names, highest skill first, before "and N more"
 LOOT_ROWS = 15           # awards the `loot` lookup shows, newest first
+PLAYER_ROWS = 25         # characters the `member` lookup lists for a class or a role, before "and N more"
 ARG_MAX = 200            # every string argument, cut in code as the schema says
 
 OFFICERS_ONLY = "Only officers can see this."
@@ -48,6 +49,7 @@ TOOL_FAILED = "This lookup failed and shows nothing."
 NO_MATCH = "Nothing in the guild matches {name}."
 NAME_ONE = "Name one of these."
 PROFESSION_OR_CHARACTER = "Name a profession or a character, one of the two."
+NAME_OR_CLASS = "Name a member or a character, or a class or a role to list who plays it."
 NO_SCHEDULES = "No raid has a schedule yet. Officers add one on the Schedules page."
 FENCES = ("data", "question", "conversation", "memory", "member-text")
 NO_RECORD = "The asker has no record in this guild yet. They add a character with /register or on the Me page."
@@ -108,6 +110,9 @@ class Tool:
     handler: Callable[[Viewer, dict], str]
     cap: int
     available: Callable[[GameProfile], bool] = field(default=_always)
+    # the schema for one game version (a profession or class argument is an enum of that profile's own names); None =
+    # `schema` as it is. tools_for applies it, so the list stays the same for every request of a profile
+    schema_for: Callable[[GameProfile], dict] | None = None
 
     def spec(self) -> dict:
         return {"name": self.name, "description": self.description, "input_schema": self.schema}
@@ -117,8 +122,10 @@ TOOLS: dict[str, Tool] = {}
 
 
 def tools_for(profile: GameProfile) -> list[Tool]:
-    """The lookups this game version offers, sorted by name: the same list for every request of a profile."""
-    return sorted((t for t in TOOLS.values() if t.available(profile)), key=lambda t: t.name)
+    """The lookups this game version offers, sorted by name, each with its schema for this profile (schema_for): the
+    same list for every request of a profile — the prompt cache's prefix."""
+    offered = sorted((t for t in TOOLS.values() if t.available(profile)), key=lambda t: t.name)
+    return [replace(t, schema=t.schema_for(profile)) if t.schema_for else t for t in offered]
 
 
 def _schema(props: dict, required: tuple[str, ...] = ()) -> dict:
@@ -129,9 +136,28 @@ def _string(description: str) -> dict:
     return {"type": "string", "maxLength": ARG_MAX, "description": description}
 
 
-def _register(name: str, description: str, schema: dict, *, cap: int = RESULT_CAP, available=_always):
+def _choice(values, description: str) -> dict:
+    """A string argument that must be one of `values` (the profile's own names, in its order): the model maps what the
+    person typed to one of them; the handler still looks the value up exactly and answers NO_MATCH for anything else."""
+    return {**_string(description), "enum": list(values)}
+
+
+def profession_names(profile: GameProfile) -> list[str]:
+    """The profile's professions by name, in the profile's order: the `crafters` lookup's enum."""
+    return [d.name for d in profile.professions.values()]
+
+
+def class_names(profile: GameProfile) -> list[str]:
+    """The profile's classes, in the profile's order: the `member` lookup's enum."""
+    return list(profile.classes)
+
+
+SHORTHAND = ("Map what the person wrote — a short form, a plural, a misspelling — to one of these.")
+
+
+def _register(name: str, description: str, schema: dict, *, cap: int = RESULT_CAP, available=_always, schema_for=None):
     def wrap(fn):
-        TOOLS[name] = Tool(name, description, schema, fn, cap, available)
+        TOOLS[name] = Tool(name, description, schema, fn, cap, available, schema_for)
         return fn
     return wrap
 
@@ -265,9 +291,23 @@ def _recipe_name(reg, r) -> str:
     return d.name if d is not None else r.name
 
 
-@_register("crafters", "Either one profession's crafters in the guild with their skill, highest first; or one character's "
-                       "professions with skill and the recipes on their record. Give a profession or a character, not both.",
-           _schema({"profession": _string("A profession's name."), "character": _string("A character's name.")}))
+CRAFTERS_DESCRIPTION = ("Either one profession's crafters in the guild with their skill, highest first; or one character's "
+                        "professions with skill and the recipes on their record. Give a profession or a character, not both.")
+PROFESSION_ARG = "A profession's name."
+CHARACTER_ARG = "A character's name."
+
+
+def _crafters_schema(profile: GameProfile) -> dict:
+    """The profession argument as an enum of the profile's professions; a game version that lists none offers the
+    character argument alone (an enum is never empty)."""
+    names = profession_names(profile)
+    props = {"profession": _choice(names, f"{PROFESSION_ARG} {SHORTHAND}")} if names else {}
+    return _schema({**props, "character": _string(CHARACTER_ARG)})
+
+
+@_register("crafters", CRAFTERS_DESCRIPTION,
+           _schema({"profession": _string(PROFESSION_ARG), "character": _string(CHARACTER_ARG)}),
+           schema_for=_crafters_schema)
 def _crafters(v: Viewer, args: dict) -> str:
     reg = v.reg
     pname, cname = _arg(args, "profession"), _arg(args, "character")
@@ -335,12 +375,67 @@ def _member_named(reg, name: str):
     return exact or hits
 
 
-@_register("member", "One member's record by their name or a character's: their characters, class, spec and rank; more "
-                     "when the asker may see it. 'me' is the asker.",
-           _schema({"name": _string("A member's or a character's name, or 'me'.")}, ("name",)))
+MEMBER_DESCRIPTION = ("One member's record by their name or a character's: their characters, class, spec and rank; more "
+                      "when the asker may see it. 'me' is the asker. Or, with no name, everyone in the guild who plays a "
+                      "class, a role or both: each character as Label Spec Class role, * for a main, and rank.")
+MEMBER_NAME_ARG = "A member's or a character's name, or 'me'. Leave it out to list by class or role."
+CLASS_ARG = "List the characters of this class."
+ROLE_ARG = "List the characters whose spec plays this role."
+
+
+def _member_schema(profile: GameProfile) -> dict:
+    return _schema({"name": _string(MEMBER_NAME_ARG),
+                    "cls": _choice(class_names(profile), f"{CLASS_ARG} {SHORTHAND}"),
+                    "role": _choice(ROLES, f"{ROLE_ARG} {SHORTHAND}")})
+
+
+def _exact(values, text: str) -> str | None:
+    t = text.strip().lower()
+    return next((x for x in values if x.lower() == t), None)
+
+
+def _role_of(reg, c) -> str | None:
+    try:
+        return reg.profile.spec(c.cls, c.spec).role
+    except Exception:  # noqa: BLE001 — a spec the profile no longer has
+        return None
+
+
+def _players(v: Viewer, cls_text: str, role_text: str) -> str:
+    """Everyone who plays a class, a role or both, through the who section's reader (help.who_line's character words):
+    the resolver's population (no test puppet, nobody who left), active characters that aren't planned, the public
+    who-line for every asker. A value outside the enum is NO_MATCH, never a guess."""
+    reg = v.reg
+    cls = _exact(class_names(reg.profile), cls_text) if cls_text else None
+    role = _exact(ROLES, role_text) if role_text else None
+    if cls_text and cls is None:
+        return _no_match(cls_text)
+    if role_text and role is None:
+        return _no_match(role_text)
+    rows = []
+    for m, _chars in sorted(people(reg), key=lambda mc: mc[0].display_name.lower()):
+        for c in m.active():
+            if c.status == "planned" or (cls and c.cls != cls) or (role and _role_of(reg, c) != role):
+                continue
+            rows.append(help_mod._safe(f"- {m.display_name}: {help_mod._char(reg, c)}{'*' if c.is_main else ''} {c.rank}"))
+    what = " ".join(x for x in (cls, role) if x) + (" spec" if role else "")  # 'a Paladin', 'a healer spec'
+    if not rows:
+        return f"Nobody in the guild plays a {what} yet."
+    out = [f"Who plays a {what}: name: Label Spec Class role (* main) rank", *rows[:PLAYER_ROWS]]
+    if len(rows) > PLAYER_ROWS:
+        out.append(f"… and {len(rows) - PLAYER_ROWS} more — narrow it")
+    return "\n".join(out)
+
+
+@_register("member", MEMBER_DESCRIPTION,
+           _schema({"name": _string(MEMBER_NAME_ARG), "cls": _string(CLASS_ARG), "role": _string(ROLE_ARG)}),
+           schema_for=_member_schema)
 def _member(v: Viewer, args: dict) -> str:
     reg = v.reg
     name = _arg(args, "name")
+    if not name:
+        cls_text, role_text = _arg(args, "cls"), _arg(args, "role")
+        return _players(v, cls_text, role_text) if cls_text or role_text else NAME_OR_CLASS
     if name.lower() in SELF_WORDS:
         m = reg.members.get(v.user_id)
         if m is None or m.test:

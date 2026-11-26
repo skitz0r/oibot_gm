@@ -67,6 +67,7 @@ class BenchCase:
     expect_tools: tuple[str, ...] = ()
     asks_back: bool = False
     script: tuple = ()
+    tags: tuple[str, ...] = ()  # a group the probe reports together: `shorthand` = the person wrote the game's short names
 
 
 def asker_of(case: BenchCase) -> tuple[int, bool]:
@@ -183,6 +184,27 @@ def an_applicant(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
     return {"applicant": "Newbie"}
 
 
+def blacksmith(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
+    """Pellow's Briarwood knows Blacksmithing 285."""
+    askers(reg)
+    reg.set_professions(PELLOW, "Briarwood", [{"id": "blacksmithing", "skill": 285, "recipes": []}])
+    return {"crafter": "Briarwood (Pellow, 285)"}
+
+
+def paladin_healer(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
+    """Pellow has a Holy Paladin alt, Dawnmere."""
+    askers(reg)
+    _ensure(reg, PELLOW, "Pellow", "Dawnmere", "Paladin", "Holy")
+    return {"healer": "Dawnmere Holy Paladin healer"}
+
+
+def leatherworkers(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
+    """Two leatherworkers: Thornwick at 300 and Briarwood at 240, so the best one leads the lookup's list."""
+    out = crafters(reg, rs)
+    reg.set_professions(PELLOW, "Briarwood", [{"id": "leatherworking", "skill": 240, "recipes": []}])
+    return {**out, "order": "Thornwick (Wrenfield, 300)\nBriarwood (Pellow, 240)"}
+
+
 def away_next_week(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
     """Wrenfield is away next week, for the dentist."""
     out = crafters(reg, rs)
@@ -224,7 +246,7 @@ BENCH: list[BenchCase] = [
     # one per tool
     BenchCase("crafters", "member", "public", "who are our leatherworkers?", crafters,
               must=("Thornwick (Wrenfield, 300)",), expect_tools=("crafters",),
-              script=([call("crafters", profession="leatherworking")], [reply(answer="Thornwick is our leatherworker, at 300.")])),
+              script=([call("crafters", profession="Leatherworking")], [reply(answer="Thornwick is our leatherworker, at 300.")])),
     BenchCase("price", "member", "public", "what does an arcanite bar go for?", priced_bar,
               must=("{price}",), expect_tools=("price",),
               script=([call("price", name="Arcanite Bar")], [reply(answer="An Arcanite Bar goes for 48g 99s 98c.")])),
@@ -250,6 +272,19 @@ BENCH: list[BenchCase] = [
     BenchCase("section", "officer", "private", "any applications waiting?", an_applicant,
               must=("Newbie",), expect_tools=("section",),
               script=([call("section", key="applications")], [reply(answer="Newbie has applied and waits for a decision.")])),
+
+    # the game's shorthand (the owner, 2026-11-25: no alias table): the resolver finds nothing in "bs", "pally" or "lw";
+    # the model maps them to the profile's own names the lookups take as an enum. With the scripted model these prove
+    # the lookups deliver; with the real model (the probe's `shorthand` group) that no alias table is needed
+    BenchCase("bs_in_the_guild", "member", "public", "bot who are bs in the guild", blacksmith,
+              must=("{crafter}",), expect_tools=("crafters",), tags=("shorthand",),
+              script=([call("crafters", profession="Blacksmithing")], [reply(answer="Briarwood is our blacksmith, at 285.")])),
+    BenchCase("pally_healers", "member", "public", "any pally healers?", paladin_healer,
+              must=("{healer}",), expect_tools=("member",), tags=("shorthand",),
+              script=([call("member", cls="Paladin", role="healer")], [reply(answer="Pellow plays Dawnmere, a Holy Paladin.")])),
+    BenchCase("lw_who", "member", "public", "who's our best lw", leatherworkers,
+              must=("{order}",), expect_tools=("crafters",), tags=("shorthand",),
+              script=([call("crafters", profession="Leatherworking")], [reply(answer="Thornwick is our best leatherworker, at 300.")])),
 
     # visibility: what an asker must never be shown
     BenchCase("away_member", "member2", "private", "who is away next week?", away_next_week,
