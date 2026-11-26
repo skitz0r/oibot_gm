@@ -161,7 +161,8 @@ def away_next_week(reg: Registry, rs: rc.RaidStore) -> dict[str, str]:
 BENCH: list[BenchCase] = [
     # the three questions that failed on the old path
     BenchCase("ironfeather_who_has", "member", "public", "bot who has ironfeather", crafters,
-              candidates=(*IRONFEATHER, "Ironfeather"),  # the reagent item stays a candidate beside its three recipes must=("Thornwick",), expect_tools=("recipe",),
+              # the reagent item stays a candidate beside its three recipes
+              candidates=(*IRONFEATHER, "Ironfeather"), must=("Thornwick",), expect_tools=("recipe",),
               script=([call("recipe", name="Ironfeather Breastplate")], [reply(answer="Thornwick can make the Ironfeather Breastplate.")])),
     BenchCase("ironfeather_breastplate", "member", "public", "bot who can make ironfeather breastplate", crafters,
               candidates=("Ironfeather Breastplate",), must=("Thornwick",),
