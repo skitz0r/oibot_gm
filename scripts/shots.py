@@ -1,14 +1,18 @@
 """Screenshot every dashboard page (desktop + phone), for usability review. Signs in with an MCP bearer token (owner
 view). The SSE stream never goes idle, so pages are awaited on `load` plus a pause rather than `networkidle`.
 
-    uv run python scripts/shots.py BASE [--guild KEY] [--token T] [--out DIR]
+    uv run python scripts/shots.py BASE [--guild KEY] [--token T] [--out DIR] [--member-cookie FILE]
 
 BASE is required: there is no default, so a run never lands on the live bot by accident (phase 4 — screenshots are
 taken on scripts/serve_scratch.py, http://127.0.0.1:8799, whose token is the test suite's and is used when BASE is that
 address). `--token` names another token; otherwise OIBOT_MCP_TOKEN from the environment / .env.
 
 Several guilds (design §5.32): `--guild` names the one to shoot (the bearer acts as its owner; sent as the
-X-Oibot-Guild header and ?g= on every page). Without it a bot serving several guilds answers 400 "Which guild?"."""
+X-Oibot-Guild header and ?g= on every page). Without it a bot serving several guilds answers 400 "Which guild?".
+
+`--member-cookie FILE` (scripts/serve_scratch.py --member writes <data>/member_cookie.txt): shoot the members' Events
+page as that member's session, with no bearer — /app/events and the first open event from /api/me/events — into
+<view>-member-events.png and <view>-member-events-<n>.png (and the phone's tapped detail), and nothing else."""
 import argparse
 import re
 import os
@@ -31,6 +35,7 @@ ap.add_argument("base", nargs="?", default=None, help=f"the site to shoot (requi
 ap.add_argument("--guild", default=None, help="the guild key to shoot (several guilds)")
 ap.add_argument("--token", default=None, help="the bearer token (default: the scratch token on the scratch server, else OIBOT_MCP_TOKEN)")
 ap.add_argument("--out", default=None, help="where the images go (default out/shots)")
+ap.add_argument("--member-cookie", default=None, help="a member's session cookie file (serve_scratch.py --member): shoot the members' Events page only")
 args = ap.parse_args(sys.argv[1:])
 if not args.base:
     ap.error(f"name the site to shoot, e.g. {SCRATCH} (scripts/serve_scratch.py); there is no default")
@@ -88,8 +93,44 @@ def shoot(page, fn: Path, w: int) -> None:
     print(fn.name, "scrollW", page.evaluate("document.documentElement.scrollWidth"), "of", w)
 
 
+def member_shots(b) -> None:
+    """--member-cookie: the members' Events page as a member (the session cookie, no bearer): the list, then the first
+    open event and every other open event by its address; on the phone the list's first item tapped too."""
+    from urllib.parse import urlparse
+
+    cookie = Path(args.member_cookie).read_text().strip()
+    host = urlparse(BASE).hostname
+    for name, w in (("desktop", 1360), ("phone", 400)):
+        ctx = b.new_context(viewport={"width": w, "height": 900}, device_scale_factor=1,
+                            extra_http_headers={"X-Oibot-Guild": args.guild} if args.guild else {})
+        ctx.add_cookies([{"name": "oibot_session", "value": cookie, "domain": host, "path": "/"}])
+        page = ctx.new_page()
+        r = ctx.request.get(url("/api/me/events"))
+        rows = r.json().get("open", []) if r.ok else []
+        if not r.ok:
+            print(f"{name}: /api/me/events answered {r.status}: {r.text()[:200]}")
+        paths = [("/app/events", "")] + [(f"/app/events/{row['key']}", f"-{i + 1}") for i, row in enumerate(rows)]
+        for path, suffix in paths:
+            page.goto(url(path), wait_until="load")
+            page.wait_for_timeout(1800)
+            settle(page)
+            shoot(page, OUT / f"{name}-member-events{suffix}.png", w)
+            if name == "phone" and not suffix:
+                item = page.locator("[data-list-item]")
+                if item.count():
+                    item.first.click()
+                    page.wait_for_timeout(1200)
+                    settle(page)
+                    shoot(page, OUT / f"{name}-member-events-detail.png", w)
+        ctx.close()
+
+
 with sync_playwright() as p:
     b = p.chromium.launch()
+    if args.member_cookie:
+        member_shots(b)
+        b.close()
+        sys.exit(0)
     for name, w in (("desktop", 1360), ("phone", 400)):
         ctx = b.new_context(viewport={"width": w, "height": 900}, device_scale_factor=1, extra_http_headers=HEADERS)
         page = ctx.new_page()

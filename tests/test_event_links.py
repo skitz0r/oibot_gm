@@ -124,4 +124,5 @@ def test_the_login_round_trip_keeps_the_event_address(reg, rs, monkeypatch):
 def test_old_me_links_still_scroll_to_the_row():
     """Sheets posted before this change link /app/me?g=…#run-<key>: the Me page still scrolls to that row."""
     me = (SRC.parents[1] / "frontend" / "src" / "pages" / "Me.tsx").read_text()
-    assert 'id={`run-${s.key}`}' in me and re.search(r'hash\.startsWith\("#run-"\)', me)
+    row = (SRC.parents[1] / "frontend" / "src" / "components" / "MyAnswer.tsx").read_text()  # the row the page draws
+    assert 'id={`run-${s.key}`}' in row and re.search(r'hash\.startsWith\("#run-"\)', me)

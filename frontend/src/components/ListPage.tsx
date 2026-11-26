@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { guardClick } from "./LeaveGuard";
 import css from "../pages/listpage.module.css";
 
-export type ListItem = { id: string; title: string; subtitle?: string; to: string; chip?: string };
+export type ListItem = { id: string; title: string; subtitle?: string; to?: string; chip?: string };
 export type ListGroup = { label: string; items: ListItem[] };
 
 /** A list page (phase 4 — Raids, Events, Schedules; design §7a): the title with its one action, the list (≤ 290 px,
@@ -11,10 +11,11 @@ export type ListGroup = { label: string; items: ListItem[] };
  *  "Back to …" link. Every pick and the Back link go through the leave guard, so a draft is never dropped unasked.
  *  A group's label is printed only when the page has more than one group. `empty` stands in for an empty list; `more`
  *  closes the list (the Events page's Show older). `intro` = one line under the title, in the server's words (the Events
- *  page's time zone). */
-export function ListPage({ title, action, groups, selected, back, children, empty, more, intro }: {
+ *  page's time zone). An item without `to` has no page of its own (the members' Coming up nights): it is drawn as a plain
+ *  row, never a link. `notice` = one sentence above the list (the members' page: a link to an event it doesn't list). */
+export function ListPage({ title, action, groups, selected, back, children, empty, more, intro, notice }: {
   title: string; action?: React.ReactNode; groups: ListGroup[]; selected: string | null; back: string;
-  children?: React.ReactNode; empty?: React.ReactNode; more?: React.ReactNode; intro?: string;
+  children?: React.ReactNode; empty?: React.ReactNode; more?: React.ReactNode; intro?: string; notice?: React.ReactNode;
 }) {
   const none = groups.every((g) => !g.items.length);
   return (
@@ -24,17 +25,23 @@ export function ListPage({ title, action, groups, selected, back, children, empt
         {action}
       </Group>
       {intro && <Text size="sm" c="dimmed" mt={4}>{intro}</Text>}
+      {notice && <div className={css.notice}>{notice}</div>}
       <div className={[css.split, selected !== null ? css.chosen : ""].join(" ")}>
         <nav className={css.list} aria-label={title}>
           {none ? empty : groups.map((g) => (
             <div key={g.label} style={{ display: "contents" }}>
               {groups.length > 1 && g.items.length > 0 && <div className={css.group}>{g.label}</div>}
-              {g.items.map((it) => (
+              {g.items.map((it) => it.to ? (
                 <a key={it.id} href={`/app${it.to}`} data-list-item className={[css.item, it.id === selected ? css.on : ""].join(" ")}
                   aria-current={it.id === selected ? "page" : undefined} onClick={guardClick(it.to)}>
                   <span className={css.itemTitle}>{it.title}</span>
                   {it.subtitle}{it.chip ? ` · ${it.chip}` : ""}
                 </a>
+              ) : (
+                <div key={it.id} className={[css.item, css.still].join(" ")}>
+                  <span className={css.itemTitle}>{it.title}</span>
+                  {it.subtitle}{it.chip ? ` · ${it.chip}` : ""}
+                </div>
               ))}
             </div>
           ))}

@@ -11,6 +11,11 @@
 .item:hover { background: var(--mantine-color-slate-7); }
 .item:focus-visible { outline: 2px solid var(--mantine-color-teal-5); outline-offset: 1px; }
 .item.on { background: var(--mantine-color-slate-7); border-color: var(--mantine-color-teal-6); }
+/* a row with no page of its own (the members' Coming up): plain text, no hover, no pointer */
+.item.still { cursor: default; }
+.item.still:hover { background: transparent; }
+/* one sentence above the list (an event the members' page doesn't list) */
+.notice { margin-top: 12px; padding: 10px 12px; border-radius: 9px; background: var(--mantine-color-slate-7); border: 1px solid var(--mantine-color-slate-5); }
 .itemTitle { display: block; color: var(--mantine-color-text); font-weight: 600; }
 .view { background: var(--mantine-color-slate-7); border: 1px solid var(--mantine-color-slate-5); border-radius: 12px; min-width: 0; }
 .sect { padding: 18px 20px; border-top: 1px solid var(--mantine-color-slate-5); min-width: 0; }

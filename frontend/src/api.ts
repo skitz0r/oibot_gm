@@ -171,6 +171,29 @@ export interface PageWords {
   weight_same: string;
   /** Edit event (the owner's tweaks, B): the seating choice beside first_to_join, and the editor's one-line states */
   by_priority: string; edit_locked: string; edit_over: string;
+  /** the members' Events page (member_event_view.py): a key it doesn't list, an empty list, the ⚑ tooltip, no character yet */
+  event_over_member: string; member_events_empty: string; called_out: string; answer_needs_character: string;
+  /** the Signups tabs (SignupTabs): each tab's label and the sentence its empty list says */
+  signup_tabs: Record<SignupTab, { label: string; empty: string }>;
+}
+/** A Signups tab: Joined, Bench, No thanks, No answer yet (officers), Away (members). */
+export type SignupTab = "in" | "sub" | "out" | "none" | "away";
+/** One member on the members' event page's signup tabs (member_event_view): who plays what, and the ⚑ on No thanks. */
+export interface MemberPerson { display_name: string; character: string; cls: string; spec: string; callout?: boolean }
+/** One seat on a locked roster as members see it; `answer` = the confirmation (only when the part shows marks). */
+export interface MemberSeat { display_name: string; character: string; cls: string; spec: string; role: string; answer?: string | null }
+/** One raid of an event, locked or done, as members see it: its rosters and the joiners the lock left out. */
+export interface MemberPart { key: string; raid_name: string; label: string; rosters: { n: number; groups: MemberSeat[][] }[]; not_rostered: string[]; marks: boolean }
+/** One live event on the members' Events list (GET /api/me/events): `answer` = the viewer's own (rc.answer_word). */
+export interface MemberEventRow { key: string; title: string; subtitle: string; state: string; chip: string; answer: string }
+/** The members' Events list: Open (live events) and Coming up (nights with no sheet yet — plain text, no page). */
+export interface MemberEventList { open: MemberEventRow[]; coming: { title: string; subtitle: string }[]; tz_words: string; empty: string }
+/** One event as a member sees it (GET /api/me/event/{key}): the sheet's public facts, the signups by answer, the locked
+ *  rosters, and the viewer's own answer rows (`answers`, one per live raid), open asks and characters. */
+export interface MemberEventView {
+  key: string; title: string; subtitle: string; state: string; chip: string; test_chip: string | null; details: Fact[];
+  signups: { counts: Record<"in" | "sub" | "out" | "away", number>; rows: Record<"in" | "sub" | "out" | "away", MemberPerson[]> };
+  rosters: MemberPart[]; part_keys: string[]; answers: MySheet[]; asks: MyAsk[]; characters: { label: string; is_main: boolean }[];
 }
 /** The confirmation box (design §7b, consequences.box): printed as it comes, Back then the verb; `verb` null = a refusal
  *  (only Back); `fp` goes back as `seen` with the press. */
