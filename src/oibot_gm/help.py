@@ -476,10 +476,18 @@ def schedule_choice_label(reg: Registry, key: str) -> str:
     return f"{reg.raid_def(rid).get('name', rid)} · " + (f"{title}: " if title else "") + reg.schedule_label(rid, sc)
 
 
-def _char(reg: Registry, c) -> str:
+def role_of(reg: Registry, c, spec: str | None = None) -> str | None:
+    """The role a character's spec plays — its main spec, or `spec` (an off spec) — None for a spec the profile no
+    longer has. The one role reader of the who-line and the answer tools' class list."""
     try:
-        role = reg.profile.spec(c.cls, c.spec).role
+        return reg.profile.spec(c.cls, spec or c.spec).role
     except Exception:  # noqa: BLE001 — a spec the profile no longer has
+        return None
+
+
+def _char(reg: Registry, c) -> str:
+    role = role_of(reg, c)
+    if role is None:
         role = "?"
     return f"{c.label} {c.spec}{'/' + c.offspec if c.offspec else ''} {c.cls} {role}"
 
@@ -992,11 +1000,21 @@ def who_line(reg: Registry, m) -> str | None:
     """One member's line in the who section: their characters as Label Spec Class role (* main) and rank, escaped.
     None for a member with no character it shows (planned characters aren't shown). The answer tools' `member` tool
     prints the same line for a member someone else asks about."""
-    chars = [c for c in m.active() if c.status != "planned"]
+    chars = who_chars(m)
     if not chars:
         return None
-    cs = "; ".join(f"{_char(reg, c)}{'*' if c.is_main else ''} {c.rank}" for c in chars)
+    cs = "; ".join(who_char_words(reg, c) for c in chars)
     return _safe(f"- {m.display_name}: {cs}")
+
+
+def who_chars(m) -> list:
+    """The characters a who-line lists: active ones, planned characters left out."""
+    return [c for c in m.active() if c.status != "planned"]
+
+
+def who_char_words(reg: Registry, c) -> str:
+    """One character in a who-line: Label Spec[/Offspec] Class role, * for a main, then rank (not yet escaped)."""
+    return f"{_char(reg, c)}{'*' if c.is_main else ''} {c.rank}"
 
 
 def _who(ask: Ask) -> list[str]:

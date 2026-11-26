@@ -590,3 +590,65 @@ def test_the_class_list_is_capped(reg, rs):
     assert len(text) <= at.TOOLS["member"].cap + wrapper_len("member")
     assert "— narrow it" in text
     assert text.count("\n- Lumen") <= at.PLAYER_ROWS
+
+
+# ---------------------------------------------------------------- task 8b fix: a true count, the shared who-line, offspecs
+
+def _shown(text):
+    return [ln for ln in text.splitlines() if ln.startswith("- ")]
+
+
+def test_the_class_list_marker_counts_the_members_left_out(reg, rs):
+    """62 Paladins with long display names: the rows the cap leaves out are counted, never the lines a later cut drops."""
+    with reg.store.batch("paladins"):
+        for i in range(62):
+            uid = 700_000_000_000_210_000 + i
+            label = f"Lumen{chr(97 + i % 26)}{chr(97 + i // 26)}"
+            reg.add_character(uid, f"Verylongdisplaynameperson{chr(97 + i % 26)}{chr(97 + i // 26)}", label, "Paladin", "Holy", None, True)
+    text = body(at.run_tool(viewer(reg, rs, WREN), "member", {"cls": "Paladin"}))
+    assert len(text) <= at.TOOLS["member"].cap + wrapper_len("member")
+    found = re.search(r"… and (\d+) more — narrow it", text)
+    assert found, text
+    assert int(found.group(1)) == 62 - len(_shown(text)), (found.group(1), len(_shown(text)))
+    assert text.count("narrow it") == 1
+
+
+def test_the_class_list_shares_the_who_line_and_copies_nothing():
+    import inspect
+
+    src = inspect.getsource(at)
+    assert "planned" not in src.split("def _players", 1)[1].split("\n@_register", 1)[0]
+    assert not hasattr(at, "_role_of"), "the role reader is help.role_of"
+    for name in ("who_chars", "who_char_words", "role_of"):
+        assert f"help_mod.{name}" in src
+
+
+def test_the_healer_list_puts_offspec_healers_after_the_main_spec_ones(reg, rs):
+    askers(reg)
+    reg.add_character(PELLOW, "Pellow", "Dawnmere", "Paladin", "Holy", None, False)
+    reg.add_character(WREN, "Wrenfield", "Ashblade", "Paladin", "Retribution", "Holy", False)
+    reg.add_character(WREN, "Wrenfield", "Shieldrun", "Paladin", "Protection", None, False)
+    text = body(at.run_tool(viewer(reg, rs, WREN, public=True), "member", {"cls": "Paladin", "role": "healer"}))
+    lines = text.splitlines()
+    holy = lines.index("- Pellow: Dawnmere Holy Paladin healer alt")
+    ret = next(i for i, ln in enumerate(lines) if "Ashblade Retribution/Holy Paladin melee" in ln)
+    assert holy < ret and lines[ret - 1] == at.OFFSPEC_HEAD
+    assert "Shieldrun" not in text
+    # a class list alone has no offspec part: every Paladin once, by their main spec
+    every = body(at.run_tool(viewer(reg, rs, WREN), "member", {"cls": "Paladin"}))
+    assert at.OFFSPEC_HEAD not in every and every.count("Ashblade") == 1
+
+
+def test_the_class_list_header_has_one_colon(reg, rs):
+    askers(reg)
+    reg.add_character(PELLOW, "Pellow", "Dawnmere", "Paladin", "Holy", None, False)
+    text = body(at.run_tool(viewer(reg, rs, WREN), "member", {"cls": "Paladin"}))
+    head = text.splitlines()[1]
+    assert head.startswith("Who plays a Paladin (") and head.endswith("):") and ":" not in head.split("(", 1)[0], head
+
+
+def test_a_profile_with_no_classes_offers_no_class_argument():
+    import types
+
+    props = at._member_schema(types.SimpleNamespace(classes={}))["properties"]
+    assert "cls" not in props and props["role"]["enum"] == ["tank", "healer", "melee", "ranged"]

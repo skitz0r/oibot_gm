@@ -673,3 +673,20 @@ def test_the_help_prompt_says_the_older_words_once():
     tree = types.SimpleNamespace(get_commands=lambda: [])
     text = help_mod.system_prompt(tree)
     assert text.count(line) == 1 and "Name an event by its raid and its time" in text
+
+
+def test_who_line_pinned_through_the_shared_character_words(reg):
+    """help.who_line, byte for byte, on a member with a main, an unconfirmed alt with an off spec and a planned
+    character: the answer tools' class list shares its pieces (who_chars, who_char_words, role_of), never a copy."""
+    uid = 700_000_000_000_300_001
+    reg.add_character(uid, "Pinwheel", "Pinmain", "Paladin", "Holy", None, True)
+    _m, alt = reg.add_character(uid, "Pinwheel", "Pinalt", "Paladin", "Retribution", "Holy", False)
+    _m, plan = reg.add_character(uid, "Pinwheel", "Pinplan", "Warrior", "Arms", None, False)
+    m = reg.members[uid]
+    m.characters[0].confirmed_by = "t"
+    alt.confirmed_by = None
+    plan.status = "planned"
+    assert help_mod.who_line(reg, m) == "- Pinwheel: Pinmain Holy Paladin healer* trial; Pinalt Retribution/Holy Paladin melee alt"
+    assert [c.label for c in help_mod.who_chars(m)] == ["Pinmain", "Pinalt"]
+    assert help_mod.who_char_words(reg, alt) == "Pinalt Retribution/Holy Paladin melee alt"
+    assert help_mod.role_of(reg, alt) == "melee" and help_mod.role_of(reg, alt, alt.offspec) == "healer"

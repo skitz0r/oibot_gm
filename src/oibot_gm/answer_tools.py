@@ -384,9 +384,11 @@ ROLE_ARG = "List the characters whose spec plays this role."
 
 
 def _member_schema(profile: GameProfile) -> dict:
-    return _schema({"name": _string(MEMBER_NAME_ARG),
-                    "cls": _choice(class_names(profile), f"{CLASS_ARG} {SHORTHAND}"),
-                    "role": _choice(ROLES, f"{ROLE_ARG} {SHORTHAND}")})
+    """The class argument as an enum of the profile's classes; a game version that lists none offers no class argument
+    (an enum is never empty)."""
+    names = class_names(profile)
+    props = {"cls": _choice(names, f"{CLASS_ARG} {SHORTHAND}")} if names else {}
+    return _schema({"name": _string(MEMBER_NAME_ARG), **props, "role": _choice(ROLES, f"{ROLE_ARG} {SHORTHAND}")})
 
 
 def _exact(values, text: str) -> str | None:
@@ -394,17 +396,40 @@ def _exact(values, text: str) -> str | None:
     return next((x for x in values if x.lower() == t), None)
 
 
-def _role_of(reg, c) -> str | None:
-    try:
-        return reg.profile.spec(c.cls, c.spec).role
-    except Exception:  # noqa: BLE001 — a spec the profile no longer has
-        return None
+PLAYERS_HEAD = "Who plays a {what} (name: character spec class role, * for a main, rank):"
+OFFSPEC_HEAD = "These play it as their off spec, the spec after the slash:"
+
+
+def _fit(head: str, main: list[str], off: list[str], cap: int) -> str:
+    """The list in at most `cap` characters and PLAYER_ROWS rows, main-spec rows first, then OFFSPEC_HEAD and the
+    off-spec rows: whole rows while they fit with the marker's room kept, and the marker counts the ROWS left out, so
+    no later cut ever drops a row (or the marker) and miscounts."""
+    rows = [(False, r) for r in main] + [(True, r) for r in off]
+    total = len(rows)
+
+    def lines(n: int) -> list[str]:
+        out = [head]
+        for i, (is_off, r) in enumerate(rows[:n]):
+            if is_off and (i == 0 or not rows[i - 1][0]):
+                out.append(OFFSPEC_HEAD)
+            out.append(r)
+        return out
+
+    every = lines(total)
+    if total <= PLAYER_ROWS and len("\n".join(every)) <= cap:
+        return "\n".join(every)
+    room = cap - len(_more(total)) - 1  # the marker always fits, whatever the count
+    n = 0
+    while n < min(total, PLAYER_ROWS) and len("\n".join(lines(n + 1))) <= room:
+        n += 1
+    return "\n".join(lines(n) + [_more(total - n)])
 
 
 def _players(v: Viewer, cls_text: str, role_text: str) -> str:
-    """Everyone who plays a class, a role or both, through the who section's reader (help.who_line's character words):
-    the resolver's population (no test puppet, nobody who left), active characters that aren't planned, the public
-    who-line for every asker. A value outside the enum is NO_MATCH, never a guess."""
+    """Everyone who plays a class, a role or both, in the who section's own words (help.who_chars / who_char_words /
+    role_of — never a copy): the resolver's population (no test puppet, nobody who left), the public who-line for every
+    asker. With a role, characters whose main spec plays it come first, then those whose off spec does, under
+    OFFSPEC_HEAD (the who-line already shows Spec/Offspec). A value outside the enum is NO_MATCH, never a guess."""
     reg = v.reg
     cls = _exact(class_names(reg.profile), cls_text) if cls_text else None
     role = _exact(ROLES, role_text) if role_text else None
@@ -412,19 +437,21 @@ def _players(v: Viewer, cls_text: str, role_text: str) -> str:
         return _no_match(cls_text)
     if role_text and role is None:
         return _no_match(role_text)
-    rows = []
+    main: list[str] = []
+    off: list[str] = []
     for m, _chars in sorted(people(reg), key=lambda mc: mc[0].display_name.lower()):
-        for c in m.active():
-            if c.status == "planned" or (cls and c.cls != cls) or (role and _role_of(reg, c) != role):
+        for c in help_mod.who_chars(m):
+            if cls and c.cls != cls:
                 continue
-            rows.append(help_mod._safe(f"- {m.display_name}: {help_mod._char(reg, c)}{'*' if c.is_main else ''} {c.rank}"))
+            row = help_mod._safe(f"- {m.display_name}: {help_mod.who_char_words(reg, c)}")
+            if not role or help_mod.role_of(reg, c) == role:
+                main.append(row)
+            elif c.offspec and help_mod.role_of(reg, c, c.offspec) == role:
+                off.append(row)
     what = " ".join(x for x in (cls, role) if x) + (" spec" if role else "")  # 'a Paladin', 'a healer spec'
-    if not rows:
+    if not main and not off:
         return f"Nobody in the guild plays a {what} yet."
-    out = [f"Who plays a {what}: name: Label Spec Class role (* main) rank", *rows[:PLAYER_ROWS]]
-    if len(rows) > PLAYER_ROWS:
-        out.append(f"… and {len(rows) - PLAYER_ROWS} more — narrow it")
-    return "\n".join(out)
+    return _fit(PLAYERS_HEAD.format(what=what), main, off, TOOLS["member"].cap)
 
 
 @_register("member", MEMBER_DESCRIPTION,
