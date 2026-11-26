@@ -703,7 +703,8 @@ standing signup: each event is answered on its sheet in Discord, or by telling t
   what your characters received.
 - All `/me` commands also work in a DM with the bot.
 - **Or just tell the bot.** DM it or @mention it: "I'll be away Nov 1–3", "back early, clear my absence",
-  "make Xanthe my main", "change Xanthe to Holy", "add my alt Jonny, Mage Frost", "add Jonny as my main",
+  "make Xanthe my main", "change Xanthe to Holy" (or "change me from Shadow to Holy": when only one of your characters
+  fits, the bot names it itself instead of asking which), "add my alt Jonny, Mage Frost", "add Jonny as my main",
   "plan my main as a Holy Priest" (a planned character, no name yet; saying it again replaces the plan and keeps
   its rank and roster placement), "delete my alt Jonny", "I can also tank on Xanthe", "bench me for tonight",
   "I can't make tonight" (a callout like `/raid out`; "… — work trip" adds a note only the officers see), "I confirm for
@@ -2342,6 +2343,8 @@ when is the next raid") counts as speaking to it; talking *about* the bot to oth
   proposed under it: when it reads as something to record (an absence, a signup answer), the bot adds 👀 and posts
   nothing. The writer clicks the 👀 to see the proposed change with Apply and Cancel; with no click the 👀 comes off
   after the hour and nothing was said or changed. An overheard question is answered straight away, as before.
+  After the bot asks you a question, your next message in that channel within five minutes is taken as your answer,
+  with no need to tag the bot again; only that one message, and only yours. A restart forgets the question.
 The bot judges a message with what it knows about the room: its own job there (the signup channel, the officers'
 channel) and the channel's topic and category in Discord — so give a listening channel a topic ("General chat about the
 game", "Raid signups and questions") and the bot reads it in that light.
@@ -2358,7 +2361,7 @@ listening channel stays silent, the Ops page says "Listening needs the host's Ty
 "TypeSafe key: not set" and the ops channel says so once an hour. The bot keeps its last 50 decisions per server in
 memory, and a log of them without the messages' text. Officers read them on the Ops page's **Listening** tab, under **Recent decisions** (the tab also names the channels the bot listens in): when,
 the channel, who wrote, what they wrote, how likely it was for the bot (a bar and a percent) and what the bot did —
-replied, asked with 👀, stayed quiet, would have replied, would have asked, or skipped (over the hourly limit). The list
+replied, asked with 👀, stayed quiet, would have replied, would have asked, took it as the answer (to a question the bot had just asked that person), or skipped (over the hourly limit). The list
 updates as messages come in. `/gm config plain` lists the listening channels too ("• #signups: Replies — listening"), and
 its first line ends "— listening (Replies)" when the channel you are in listens.
 
@@ -2421,7 +2424,10 @@ Only Discord saying they are gone counts: a Discord outage never locks a member 
 
 **A follow-up is understood.** Reply to the bot's message, or write again in the same channel within 20 minutes, and
 "him", "that event" and answers to its questions refer to what you said before — answer "7:30 PM" to "What time should
-the event open?" and the diff carries both your first request and the answer. The bot keeps this only in memory (a
+the event open?" and the diff carries both your first request and the answer. When the bot has just asked you
+something, your next message in that channel within five minutes is the answer even in a channel where it isn't tagged.
+A spec change that names a member but not which character goes to the one character whose class has that spec (and
+that plays the spec named as the old one); only when several fit does the bot ask, and it lists just those. The bot keeps this only in memory (a
 restart forgets it) and only for the last few exchanges, per person and per place: someone else writing in the same
 channel is never read as continuing your conversation. On the site, the Tell the bot box remembers its own last few
 exchanges while the page is open.

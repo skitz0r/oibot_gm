@@ -31,7 +31,9 @@ src/oibot_gm/
   conversation.py      plain-text memory (design §5.51): a ring per (guild, channel|DM, uid) of the last 4 exchanges, IN MEMORY only (a restart
                        forgets); recall = a Discord reply to the bot's message (any age) else the same person + place within 20 min; context_block =
                        ONE fenced <conversation> data block (unfence) → configops.parse / help.answer(conversation=); handle_change, plain_text,
-                       loot_chat remember after replying; the web sends TellTheBot's own exchanges (exchanges_from_client), no server memory
+                       loot_chat remember after replying; the web sends TellTheBot's own exchanges (exchanges_from_client), no server memory;
+                       take_open_question = the bot's OPEN question (the newest exchange has `questions` — the parser's, or the loop's choices
+                       via discord_help.Asked — within a window, Exchange.followed not set): taken once (Task 11, the listening follow-up)
   perms.py             THE Discord permission test (design §5.46): required(kind) (+ Manage Messages for the pinned cards, + threads for roster,
                        + history for news), missing_for(channel, kind) / missing_for(guild), cant_post() = the one sentence; permissions_value() /
                        invite_link() (scripts/move_guild.py imports them; Manage Webhooks in — D39; Manage Roles / Channels OPTIONAL); CLIENT = the

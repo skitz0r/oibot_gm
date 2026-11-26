@@ -303,6 +303,18 @@ def ask_private(bot, reg, interaction) -> bool:
         return False
 
 
+class Asked(str):
+    """help_answer's text when the answer loop ended on a clarifying question: `.questions` = its choices, which the
+    caller keeps in the conversation ring (an open question: the person's next message there is the answer)."""
+
+    questions: list[str]
+
+    def __new__(cls, text: str, questions) -> "Asked":
+        s = super().__new__(cls, text)
+        s.questions = [str(q) for q in questions]
+        return s
+
+
 ACT = "\x00act"  # help_answer's "this was a request to do something" (never shown)
 # what a person reads when the answer tools' reply, with acting off, says it acts and has no words of its own
 ACTS_OFF_EMPTY = "I can't make that change from this message. Name what should change, or use the slash commands or the site."
@@ -530,5 +542,8 @@ class HelpMixin:
             text += "\n-# This needs an officer."
         if public and ans.officer_view:
             note = self.private_note(reg)
-            return text[:1950 - len(note) - 1] + "\n" + note
-        return text[:1950]
+            text = text[:1950 - len(note) - 1] + "\n" + note
+        text = text[:1950]
+        if loop_on and result.ending == "asked" and result.choices:
+            return Asked(text, result.choices)
+        return text

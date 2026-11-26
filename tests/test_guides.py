@@ -415,6 +415,7 @@ def convert_bot(duo, members=None):
     bot.user = types.SimpleNamespace(id=999)
     bot._addressed = lambda m: "<@999>" in (m.content or "")
     bot.event_for = lambda cid: None
+    bot.listen_followup = types.MethodType(OibotGM.listen_followup, bot)  # the real one: no open question here, so it passes on
     return bot, hit, OibotGM
 
 

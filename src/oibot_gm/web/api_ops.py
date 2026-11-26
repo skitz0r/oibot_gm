@@ -298,8 +298,12 @@ def install_ops_api(app: FastAPI, bot, *, who, body, live_officer=None, plain_js
             req = await asyncio.to_thread(configops.parse, provider, v.reg, text, v.name, officer=v.officer, **({"conversation": convo} if convo else {}))
         except Exception as e:  # noqa: BLE001 — provider/schema errors are 502s the caller can retry
             return JSONResponse({"error": f"could not parse the request: {e}"}, status_code=502)
+        configops.narrow_characters(v.reg, req, v.uid)  # a spec change binds the one character it can mean, in code
+        no_fit = [op._no_fit for op in req.ops if op._no_fit]  # none of the member's characters can take it: one sentence
+        req.ops = [op for op in req.ops if not op._no_fit]
         # the same policy check as Discord: the site (and MCP, as the owner) counts as a channel where plain text acts
         allowed, refused = configops.authorize(v.reg, req.ops, v.uid, officer=v.officer, channel=PLAIN_WEB, raids=raids)
+        refused = list(dict.fromkeys(no_fit + refused))
         allowed, refused = mcp_actor_rule(v, allowed, refused)
         req.ops = allowed
         ops = [op.model_dump(exclude_none=True) for op in req.ops]

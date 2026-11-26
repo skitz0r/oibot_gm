@@ -176,6 +176,7 @@ LISTEN_RING = 50  # verdicts kept in memory per guild (listen_recent, the Ops pa
 LISTEN_ASK_S = 3600  # how long a 👀 waits for its writer's click; then the bot takes its 👀 off (a 👀 you can see still works)
 LISTEN_RECENT = 3  # earlier messages kept per listened channel (context for the next decision; no REST call)
 LISTEN_EYES = "👀"
+LISTEN_FOLLOWUP_S = 300  # after the bot asked a person a question in a channel: their next message there within this is the answer
 RECALL_TIMEOUT_S = 2.0  # chat memory's recall before a decision: past this the gate decides with `memory: []` (the thread finishes alone)
 LISTEN_WARN_S = 3600  # "listening is on but there is no key": one ops warn per guild per hour
 LISTEN_LOG = OUT / "listen.jsonl"  # one row per verdict, NO text: {at, guild, channel, author_id, p, mode, did}
@@ -470,6 +471,34 @@ class ListenMixin:
                 remembered = await self._remember(reg, message, text, cid, state["message"].get("replying_to", ""), p_remember)
             self._listen_record(reg, message, text, p, mode, did, remembered=remembered)
         return did
+
+    async def listen_followup(self, message, reg) -> bool:
+        """The answer to the bot's own question (2026-11-25: an officer answered the bot's "which character?" with a bare
+        name and the gate scored it as chat). When the bot's last reply to this person in this channel asked them
+        something (conversation.take_open_question: the ring's newest exchange has questions, younger than
+        LISTEN_FOLLOWUP_S, not taken before), their next message there goes to plain_text as an @mention would — no
+        decision request, no 👀, and no `hold`: it continues an exchange the bot already answered in public. plain_text
+        checks who may ask and act exactly as for an @mention. The question is taken by that one message whatever it says.
+        Never in a channel the bot only watches or ignores; a listened channel logs it (did "followup", no text)."""
+        cid = message.channel.id
+        mode = reg.listen_mode(cid)
+        if mode == "watch" or getattr(message.author, "bot", False) or reg.plain_mode(cid) == "ignore":
+            return False
+        text = mention_names(message, reg, getattr(self, "user", None))
+        if not text:
+            return False
+        # only a question the bot posted under a message here: a /gm change's private question never makes a public reply
+        if conversation.take_open_question(reg, cid, message.author.id, window_s=LISTEN_FOLLOWUP_S, posted=True) is None:
+            return False
+        if mode:  # the next decision in this channel still sees the answer as the chat before it
+            recent = self._listen()["recent"].setdefault(cid, collections.deque(maxlen=LISTEN_RECENT))
+            recent.append({"author": getattr(message.author, "display_name", "") or "", "text": text[:200]})
+        try:
+            await self.plain_text(message, reg, text, cid)
+        finally:
+            if mode:
+                self._listen_record(reg, message, text, None, mode, "followup")
+        return True
 
     async def _remember(self, reg, message, text: str, cid: int, context: str, p: float) -> bool:
         """Keep the message as the writer's words (off the loop: an embedding and a git commit); whether it was kept."""
@@ -1384,7 +1413,8 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
             await message.reply(guide_intro(reg), view=apply_button(guide_view(reg)), allowed_mentions=quiet)
         else:
             sent = await message.reply(answer, view=apply_button(), allowed_mentions=quiet)
-            conversation.remember(reg, channel, uid, text, answer, message_id=getattr(message, "id", None), reply_message_id=getattr(sent, "id", None))
+            conversation.remember(reg, channel, uid, text, answer, getattr(answer, "questions", None), message_id=getattr(message, "id", None),
+                                  reply_message_id=getattr(sent, "id", None))
 
     async def on_message(self, message: discord.Message):
         if await self.news_message(message):  # the news webhook (a bot) is read before the bot filter below
@@ -1409,7 +1439,8 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
         # a loot thread keeps its own chat below)
         if reg and self._addressed(message) and (message.channel.id in (reg.config.ops_channel_id, reg.config.analytics_channel_id) or not self.event_for(message.channel.id)):
             text = mention_names(message, reg, getattr(self, "user", None))  # the bot's own mention goes; anyone else's becomes their name
-            if text:
+            if text:  # an open question is taken by this message too: only the person's NEXT message answers it
+                conversation.take_open_question(reg, message.channel.id, message.author.id, window_s=LISTEN_FOLLOWUP_S)
                 await self.plain_text(message, reg, text, message.channel.id)
             return
         ev = self.event_for(message.channel.id)
@@ -1420,6 +1451,9 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
             parent = getattr(message.channel, "parent_id", None) or ev.cards.get("channel")
             if text and reg.plain_mode(parent) != "ignore":
                 await self.loot_chat(message, ev, text)
+            return
+        # the answer to the bot's own question here: taken as addressed, before (and instead of) the listening gate
+        if reg is not None and not self._addressed(message) and await self.listen_followup(message, reg):
             return
         # listening (design §5.59): a message nobody tagged the bot in, in a channel the owner chose — decided, never twice
         if reg is not None and reg.listen_mode(message.channel.id) and not self._addressed(message):

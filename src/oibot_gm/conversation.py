@@ -5,7 +5,8 @@ In memory only — never the data repo; a restart forgets. One ring per (guild k
 last N exchanges. `recall` returns what a new message continues: a Discord REPLY to one of the bot's plain-text messages
 continues that exchange whatever its age (while the ring still holds it); otherwise the same person in the same place
 within CONTEXT_MINUTES. Another person's exchanges in the same channel are never someone's context (the ring is keyed
-by uid). `context_block` renders them as ONE delimited data block for the parser / the help answer: every piece of text
+by uid). `take_open_question` = the bot's open question in that ring (the listening follow-up, design §5.59).
+`context_block` renders them as ONE delimited data block for the parser / the help answer: every piece of text
 (the person's and the bot's own replies, which can quote member text) goes through llm.provider.unfence, so nothing in
 it can close the block. The web keeps no server memory: the Tell the bot box sends its own last exchanges
 (`exchanges_from_client`)."""
@@ -39,6 +40,7 @@ class Exchange:
     questions: list[str] = field(default_factory=list)
     message_id: int | None = None  # the person's message (None for a slash command or the site)
     reply_message_id: int | None = None  # the bot's reply (what a Discord reply references)
+    followed: bool = False  # the person's next message was taken as the answer to `questions` (take_open_question): once only
 
 
 _rings: OrderedDict[tuple, deque] = OrderedDict()
@@ -83,6 +85,24 @@ def recall(reg, channel_id, uid: int, *, reply_to_message_id: int | None = None,
             if ex.reply_message_id is not None and ex.reply_message_id == reply_to_message_id:
                 return [e for e in ring[: i + 1] if ex.at - e.at <= window]
     return [e for e in ring if now - e.at <= window]
+
+
+def take_open_question(reg, channel_id, uid: int, *, window_s: float, posted: bool = False, now: float | None = None) -> Exchange | None:
+    """The bot's open question to `uid` in `channel_id`, taken: the ring's NEWEST exchange when it ended with questions
+    the bot asked (the parser's, or the loop's choices), is at most `window_s` old and was not taken before — marked
+    taken under the lock, so only one message ever answers it. None otherwise (a newer reply that asked nothing closed
+    it). Every message from that person in that place calls this once, so only their next message counts. `posted`:
+    only a question asked in answer to a Discord message (not a slash command's private reply) counts."""
+    now = time.time() if now is None else now
+    with _lock:
+        ring = _rings.get(_key(reg, channel_id, uid))
+        if not ring:
+            return None
+        ex = ring[-1]
+        if ex.followed or not ex.questions or now - ex.at > window_s or (posted and ex.message_id is None):
+            return None
+        ex.followed = True
+        return ex
 
 
 def forget(reg=None) -> None:

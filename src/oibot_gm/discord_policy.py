@@ -481,6 +481,7 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
             return
     if req.kind == "ignore":
         return
+    configops.narrow_characters(reg, req, author.id)  # a spec change binds the one character it can mean, in code
     if to_help is None:  # an act channel or /gm change: a plain question gets the full /ask answer, not the parser's line
         to_help = not is_msg or reg.plain_mode(channel) == "act"
     from .answer_loop import enabled as answers_on
@@ -502,7 +503,7 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
 
             await send(guide_intro(reg), view=apply_view(reg, author.id, officer=officer, role_ids=role_ids, base=guide_view(reg)), ephemeral=True)
             return
-        keep(await send(answer[:1950], ephemeral=True), answer[:1950])
+        keep(await send(answer[:1950], ephemeral=True), answer[:1950], getattr(answer, "questions", ()))
         return
     if req.kind == "question" and not req.ops and not req.questions and to_help and getattr(bot, "help_answer", None) is not None:
         from .answer_loop import entry_kw  # the answers log's entry point: an act channel, or /gm change

@@ -201,7 +201,9 @@ Members (officers for anyone; a member for their OWN characters, member empty): 
     add: character = the new name, value = "Class Spec [Offspec]", text = main|alt (optional; "as my main" = main);
       a PLANNED character (no name yet) is add with character EMPTY: "plan my main as a Holy Priest" → field=add,
       character empty, value="Priest Holy", text=main ("plan an alt: Mage Frost" → text=alt; re-planning a main replaces it);
-    spec / offspec: the new spec (offspec "none" clears it); name: the real name for a planned character;
+    spec / offspec: the new spec (offspec "none" clears it; spec: text = the spec it changes from, when the request names one);
+      never ask which character when the member's listed characters and the specs the request names leave only one that fits: name it;
+    name: the real name for a planned character;
     rank: trial|raider|core|alt|social; main / retire: no value; delete: no value — removes the character outright
       (roster placements go; "delete"/"remove" ≠ "retire", which keeps its history);
     flex: value = extra roles it can play beyond its spec/offspec, comma list of tank|healer|melee|ranged, or "none"
@@ -242,6 +244,9 @@ class ConfigOp(BaseModel):
     # set by authorize(), never by the model (a private attribute: not in the schema): run_sheet from a non-officer is
     # a read-only copy (D21) — describe() words it so; the apply decides again from the presser's standing (PRIV_LIVE)
     _sheet_copy: bool | None = PrivateAttr(default=None)
+    # set by narrow_characters, never by the model: the one sentence a spec change gets when none of the member's
+    # characters can take it (_character_rows raises it)
+    _no_fit: str | None = PrivateAttr(default=None)
     # Field ORDER is part of the schema the model fills, key by key: `member` and `character` come first so that once the model
     # has named who, `field` and `value` still lie ahead of it — with them before `character`, a named-character op came back
     # with no field at all (2026-10-30: "remove enchanting from Jonster" → a bare character op), every time.
@@ -386,7 +391,7 @@ def current_config_text(reg: Registry, officer: bool = False, raids=None) -> str
     overrides = {rid: reg.raid_override(rid) for rid in over_ids}
     if roles and officer:  # role ids mean nothing to the parser (or the person it answers): the names from the role cache
         cfg["member_roles"] = [reg.role_names.get(int(r), f"role:{r}") for r in roles]
-    members = [f"{m.display_name}<@{m.discord_id}>{' (test)' if m.test else ''}{' DMs off' if m.dm_opt_out else ''} [{', '.join(c.label + ('*' if c.is_main else '') + ':' + c.rank + (' (' + reg.professions_summary(c) + ')' if c.professions else '') for c in m.active())}]"
+    members = [f"{m.display_name}<@{m.discord_id}>{' (test)' if m.test else ''}{' DMs off' if m.dm_opt_out else ''} [{', '.join(c.label + ('*' if c.is_main else '') + ':' + c.rank + ' ' + c.cls + ' ' + c.spec + (' (' + reg.professions_summary(c) + ')' if c.professions else '') for c in m.active())}]"
                + (f" away {', '.join(a.start + ('→' + a.end if a.end != a.start else '') + ' = ' + reg.span_label(a.start, a.end) for a in m.absences[-3:])}" if m.absences else "") for m in reg.members.values()]
 
     def cadence(k, v):  # the stored 'Tue 19:30' slots are a schedule's values; the label beside them is how a person reads them
@@ -419,7 +424,7 @@ def current_config_text(reg: Registry, officer: bool = False, raids=None) -> str
                + data_block("News proposals waiting (id: title, kind, state)", proposals_text(reg))
                + data_block("Unconfirmed characters (confirm character=\"all pending\" confirms every one of these)", pending_text(reg)) if officer else "")
             + data_block("Regulars of each recurring schedule (schedule id = as a person reads it: name (character); op regular changes these)", regulars_text(reg))
-            + data_block("Members (name<@id> [characters*=main:rank (professions on record)] away dates = the same days in words)", members))
+            + data_block("Members (name<@id> [characters*=main:rank class spec (professions on record)] away dates = the same days in words)", members))
 
 
 def regulars_text(reg: Registry) -> list[str]:
@@ -1485,6 +1490,8 @@ def _character_rows(reg: Registry, m, op: ConfigOp) -> tuple[list[dict], str]:
         main = slot == "main"
         return ([{"name": name, "surname": surname.strip() or None, "cls": cls, "spec": spec, "offspec": off, "main": main}],
                 f"{who}: add {label} ({what}, {'main' if main else 'alt'})")
+    if cur is None and op._no_fit:
+        raise RegistryError(op._no_fit)
     if cur is None:
         raise RegistryError(f"{who} has no active character named {label or '?'} (theirs: {', '.join(c.label for c in m.active()) if m else 'none'})")
     if f == "spec":
@@ -1521,6 +1528,78 @@ def _character_rows(reg: Registry, m, op: ConfigOp) -> tuple[list[dict], str]:
     if f in ("cls", "class"):
         raise RegistryError(f"{cur.label}'s class is fixed — retire it and add the new character")
     raise RegistryError(CHARACTER_FIELDS)
+
+
+def _spec_named(reg: Registry, cls: str, word: str | None) -> str | None:
+    """The spec of class `cls` a word names, in the profile's spelling (a spec alias counts), else None."""
+    w = (word or "").strip().casefold()
+    if not w:
+        return None
+    specs = reg.profile.classes.get(cls) or {}
+    alias = {a.casefold(): t for a, t in (reg.profile.spec_aliases or {}).items()}
+    return next((s for s in specs if s.casefold() == w or s.casefold() == alias.get(w, "").casefold()), None)
+
+
+def narrow_characters(reg: Registry, req: ConfigRequest, author_id: int) -> None:
+    """Never ask what the record answers (2026-11-25: "change X from shadow to holy" asked which of X's two characters,
+    one a warrior). A spec change that names a member but not which of their characters: only a character whose class
+    HAS the new spec can take it (the profile's classes), and when the request names the spec it changes from (`text`),
+    only a character holding that spec now. One fits → the op names it; none → the op keeps the one sentence that
+    says why (_character_rows refuses with it); several → the op becomes a question listing only those. A character the
+    op already names (one of the member's) is left alone, and so is everything else. Mutates `req`; who may make the
+    change is still decided by authorize."""
+    keep, asks = [], []
+    for op in req.ops:
+        if op.op != "character" or (op.field or "").strip().lower() != "spec" or not (op.value or "").strip():
+            keep.append(op)
+            continue
+        label = (op.character or "").strip()
+        m = _member(reg, op.member) if (op.member or "").strip() else reg.members.get(author_id)
+        if label and not (op.member or "").strip():  # the parser wrote the member's name where a character goes
+            named = next((x for x in reg.members.values() if x.display_name.casefold() == label.casefold()), None)
+            if named is not None and not (m and any(c.matches(label) for c in m.active())):
+                m, op.member, label = named, label, ""
+        if m is None:
+            keep.append(op)
+            continue
+        chars = m.active()
+        if label and label.casefold() == m.display_name.casefold() and not any(c.matches(label) for c in chars):
+            label = ""  # the member's own name, not a character's
+        pool = [c for c in chars if c.matches(label)] if label else chars
+        if label and len(pool) == 1:
+            keep.append(op)  # already one character: the registry decides whether its class has that spec
+            continue
+        if label and not pool:
+            keep.append(op)  # a name that isn't theirs: _character_rows says so
+            continue
+        own = m.discord_id == author_id
+        whose = "your" if own else f"{m.display_name}'s"
+        to = (op.value or "").strip()
+        fits = [c for c in pool if _spec_named(reg, c.cls, to)]
+        word = _spec_named(reg, fits[0].cls, to) if fits else to[:1].upper() + to[1:]
+        why = f"None of {whose} characters is of a class with a {word} spec."
+        frm = (op.text or "").strip()
+        if fits and frm:
+            held = [c for c in fits if _spec_named(reg, c.cls, frm) == c.spec]
+            if not held:
+                why = f"None of {whose} characters that can play {word} is {frm[:1].upper() + frm[1:]} now."
+            fits = held
+        if len(fits) == 1:
+            c = fits[0]
+            op.character, op.value = c.label, _spec_named(reg, c.cls, to)
+            keep.append(op)
+        elif not fits:
+            op.character = None
+            op._no_fit = why
+            keep.append(op)
+        else:
+            names = [c.label for c in fits]
+            asks.append(f"Which of {whose} characters should play {word}: {', '.join(names[:-1])} or {names[-1]}?")
+    req.ops = keep
+    if asks:
+        req.questions = list(req.questions) + asks
+        if not keep:
+            req.reply = ""
 
 
 def _absence_start(reg: Registry, m, start: str | None, today: str) -> str:
