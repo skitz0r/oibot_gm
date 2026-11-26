@@ -468,17 +468,15 @@ def _minimum_terms(s: _Model, roster_bonus: dict[int, dict[str, int]] | None) ->
     goes to anyone else (the rule set in review, 2026-11-22), the odd player beating even a lead's rostered player
     (LEAD_SEAT_BONUS rides in `bonus`). A preference, never a bound: a hybrid who could fill two minimums fills one,
     a player forced out earns nothing, a minimum the joiners can't meet leaves the rest of the roster as it would be,
-    and a board that fills every seat still solves. A seatable Bench answer's seat counts toward a tank or healer
-    minimum only — never a class, spec, melee or ranged one —, so no such minimum ever brings a Bench answer in (Bench
-    last, 2026-11-25: with no seatable Bench answer every expression is what it was)."""
+    and a board that fills every seat still solves. A Bench answer's seat counts toward every minimum as a joiner's
+    does (BENCH_SEAT_COST is sized so that no minimum brings it in over a joiner; among Bench answers for an empty
+    seat, a minimum chooses)."""
     reward = 2 * _extra_role_cost(s, roster_bonus)
-    out = set(s.opts.force_out)
-    bench = frozenset(p.signup_name for p in s.players if p.status == "bench" and p.signup_name not in out)
     for slot, n in s.minimums.items():
         if n <= 0:
             continue
         for r in _per_roster(s):
-            have = _slot_expr(s, slot, r, skip=frozenset() if slot in ("tank", "healer") else bench)
+            have = _slot_expr(s, slot, r)
             if not have:
                 continue
             filled = s.m.NewIntVar(0, n, f"min_{slot}_{r}")
@@ -535,38 +533,66 @@ def _bench_minimum_slots(s: _Model, p: Player) -> int:
             + any(slot == f"{p.cls}:{sp}" for slot in slots for sp in specs))
 
 
+def role_cover(only_tank: int, only_heal: int, either: int, tanks: int, heals: int) -> tuple[int, int, int]:
+    """The joint capacity check (pure counts): joiners who can fill only a tank seat (a), only a healer seat (b) or
+    either (c), one seat each, against `tanks` (t) and `heals` (h) minimum seats. Returns (M, tank_short, heal_short):
+    M = the largest matching = min(t + h, h + a + c, t + b + c, a + b + c) (Hall's theorem over the two seat kinds:
+    leave out the tank seats, the healer seats, both or neither); tank_short = the most tank seats a largest matching
+    leaves short = t - (M - min(h, b + c)) (it fills as many healer seats as it can), heal_short alike."""
+    a, b, c, t, h = only_tank, only_heal, either, tanks, heals
+    m = min(t + h, h + a + c, t + b + c, a + b + c)
+    return m, t - (m - min(h, b + c)), h - (m - min(t, a + c))
+
+
+@dataclass(frozen=True)
+class RefundRoom:
+    """How many Bench seats the tank / healer exception may refund: `total` over every role and roster, and per role
+    (each no more than `total`)."""
+
+    total: int
+    roles: dict[str, int]
+
+
 def bench_refund_room(profile: GameProfile, players: list[Player], need: dict[str, int], skip=(),
-                      allow_offspec: bool = True) -> dict[str, int]:
-    """THE shared rule of the Bench exception (the solver's cap and raidcycle.first_come_bench_out read it): for each of
-    tank and healer with a minimum over every roster `need[role]` > 0, how many seats of that role a Bench answer may
-    take at most = the minimum minus the joiners HELD to it — status not "bench", not in `skip` (kept off, late),
-    playing the role and with no offspec of another role to switch to (switch_spec). A joiner who can play two needed
-    roles, or is wanted in another spec for another minimum, is not counted: the solve itself decides where they play,
-    and a refunded Bench seat is taken only when it fills more minimum seats than the joiners alone can."""
+                      allow_offspec: bool = True) -> RefundRoom:
+    """THE shared rule of the Bench exception (the solver's cap and raidcycle.first_come_bench_out read it): the tank
+    and healer minimum seats over every roster (`need[role]`) the JOINERS together cannot fill. A joiner — status not
+    "bench", not in `skip` (kept off, late) — can fill the role of their main spec or of the offspec the solve may
+    switch them to (switch_spec), one seat at most; role_cover matches them against the seats. The total is the seats
+    the largest matching leaves empty, split per role by what a largest matching can leave short. A class, spec, melee
+    or ranged minimum never enters it, so it never brings a Bench answer in over a joiner. Sorted counts only: the same
+    players give the same room."""
     out = set(skip)
-    room = {}
-    for role in ("tank", "healer"):
-        n = int(need.get(role, 0))
-        if n <= 0:
+    t, h = max(0, int(need.get("tank", 0))), max(0, int(need.get("healer", 0)))
+    counts = {"tank": 0, "healer": 0, "either": 0}
+    for p in players:
+        if p.status == "bench" or p.signup_name in out:
             continue
-        held = sum(1 for p in players if p.status != "bench" and p.signup_name not in out and p.role == role
-                   and switch_spec(profile, p, allow_offspec) is None)
-        room[role] = max(0, n - held)
-    return room
+        off = switch_spec(profile, p, allow_offspec)
+        can = {p.role} | ({off.role} if off is not None else set())
+        fits = ("tank" in can and t > 0, "healer" in can and h > 0)
+        if all(fits):
+            counts["either"] += 1
+        elif fits[0]:
+            counts["tank"] += 1
+        elif fits[1]:
+            counts["healer"] += 1
+    m, short_t, short_h = role_cover(counts["tank"], counts["healer"], counts["either"], t, h)
+    total = t + h - m
+    roles = {role: min(total, short) for role, n, short in (("tank", t, short_t), ("healer", h, short_h)) if n > 0}
+    return RefundRoom(total, roles)
 
 
 def _bench_terms(s: _Model, roster_bonus: dict[int, dict[str, int]] | None) -> None:
     """Bench last: each seatable Bench answer (status "bench", not in force_out) costs BENCH_SEAT_COST when seated
     (the block above says why it can't be out-bid). The one exception (the designer's, the owner told): a tank or
-    healer minimum the joiners cannot meet. Per roster `refund[role, r]` Bench seats of the role, no more than the
-    seats the joiners rostered there leave short of the minimum, and over every roster no more than
-    bench_refund_room (the joiners held to the role); each refunded seat gets back all of BENCH_SEAT_COST but one
-    EXTRA_ROLE_COST. So a refunded Bench seat still costs more than any joiner's seat, and the solve takes it only
-    where it fills a minimum seat the joiners can't fill however they are arranged (a hybrid counts once: the only tank
-    who could heal tanks, a healer wanted for a spec minimum plays it): its minimum's reward (2×) less that one
-    EXTRA_ROLE_COST is more than the displaced joiner's seat earns, and a joiner able to fill the same seat earns the
-    same reward without the cost. With no seatable Bench answer it adds nothing, so the model (and its kept answer) is
-    exactly what it was."""
+    healer minimum the joiners cannot meet. bench_refund_room matches the joiners against those minimum seats before
+    the model is built; only the seats that matching leaves empty may be refunded (`room.total` over every role and
+    roster, `room.roles[role]` per role — with a total of 0 no refund exists at all). Per roster `refund[role, r]` is
+    also held to the seats the joiners rostered there leave short of the minimum. Each refunded seat gets back all of
+    BENCH_SEAT_COST but one EXTRA_ROLE_COST. A class, spec, melee or ranged minimum never makes room, so it never
+    brings a Bench answer in over a joiner. With no seatable Bench answer it adds nothing, so the model (and its kept
+    answer) is exactly what it was."""
     out = set(s.opts.force_out)
     bench = [p for p in s.players if p.status == "bench" and p.signup_name not in out]
     if not bench:
@@ -576,11 +602,14 @@ def _bench_terms(s: _Model, roster_bonus: dict[int, dict[str, int]] | None) -> N
     cost = factor * extra
     for p in bench:
         s.terms.append(-cost * s.x[p.signup_name])
-    names = {p.signup_name for p in bench}
-    joiners = {p.signup_name for p in s.players if p.status != "bench" and p.signup_name not in out}
     need = {role: int(s.minimums.get(role, 0)) * s.rosters for role in ("tank", "healer")}
     room = bench_refund_room(s.profile, s.players, need, skip=out, allow_offspec=s.opts.allow_offspec)
-    for role, short in room.items():
+    if room.total <= 0:
+        return
+    names = {p.signup_name for p in bench}
+    joiners = {p.signup_name for p in s.players if p.status != "bench" and p.signup_name not in out}
+    every: list = []
+    for role, short in room.roles.items():
         if not short:
             continue
         n = need[role] // s.rosters
@@ -596,6 +625,9 @@ def _bench_terms(s: _Model, roster_bonus: dict[int, dict[str, int]] | None) -> N
             refunds.append(refund)
         if refunds:
             s.m.Add(sum(refunds) <= short)
+            every += refunds
+    if len(every) > 1:
+        s.m.Add(sum(every) <= room.total)
 
 
 def _preference_terms(s: _Model) -> None:

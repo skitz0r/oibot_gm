@@ -4283,20 +4283,23 @@ def first_come_bench_out(profile, players: list[Player], seats: int, role_min: d
     the joiners leave empty (the joiners not `late` nor `kept_off` against `seats`) goes to the next Bench answer; a
     Bench answer who can play (main or offspec) a tank / healer seat the solver may refund — solver.bench_refund_room,
     THE rule the solve's own cap reads, over `role_min` (every roster) and the same joiners — is kept for the solve to
-    decide; one placed by hand (`fixed`) is kept. Returns the Bench answers to force out."""
+    decide; one placed by hand (`fixed`) is kept. The room is the JOINT cap: only the tank / healer seats the joiners
+    together cannot fill (a hybrid counts once), never a class or spec minimum. Returns the Bench answers to force out."""
     skip = late | kept_off
     joiners = [p for p in players if p.status == "signed" and p.signup_name not in skip]
     free = seats - len(joiners)
     room = solver.bench_refund_room(profile, players, role_min, skip=skip)
+    total, roles = room.total, dict(room.roles)
     bench = sorted((p for p in players if p.status == "bench" and p.signup_name not in kept_off), key=lambda p: p.pos)
     keep: set[str] = set()
     for p in bench:
         off = solver.switch_spec(profile, p)
-        plays = [r for r in room if room[r] > 0 and (p.role == r or (off is not None and off.role == r))]
+        plays = [r for r in roles if total > 0 and roles[r] > 0 and (p.role == r or (off is not None and off.role == r))]
         if p.signup_name in fixed:
             pass
         elif plays:
-            room[plays[0]] -= 1
+            roles[plays[0]] -= 1
+            total -= 1
         elif free <= 0:
             continue
         keep.add(p.signup_name)

@@ -247,23 +247,59 @@ def test_a_later_raid_fills_from_the_bench_too(reg, rs):
     assert len(rc.event_parts(rs, lead)) == 2
 
 
-def test_a_first_to_join_event_keeps_a_benched_healer_the_joiners_cannot_spare(reg, rs):
-    """The shared rule (solver.bench_refund_room): a first-to-join event keeps a benched healer for the solve whenever
-    the joiners held to the role leave a healer seat short — here a Restoration Druid joined, but fills the Druid:Feral
-    minimum, so the third healer seat is the bench's."""
+def test_a_first_to_join_event_benches_the_healer_when_a_joined_druid_can_heal(reg, rs):
+    """The shared rule (solver.bench_refund_room): a Restoration Druid joined, so the joiners together can meet the
+    healer minimum; a Druid:Feral minimum never brings the benched healer in. Every joiner plays."""
     reg.set_minimums(RID, {"healer": {"min": 3}, "Druid:Feral": {"min": 1}}, "t")
     ev = one_off(reg, rs)
     assert rc.run_first_come(reg, ev)
     druid = people(reg, 1, ("Druid", "Restoration"), off="Feral")[0]
-    joiners = people(reg, 2, TANK) + people(reg, 2, HEAL) + [druid] + people(reg, 5, DPS)
+    joiners = people(reg, 1, TANK) + people(reg, 2, HEAL) + [druid] + people(reg, 6, DPS)
     join(reg, rs, ev, joiners)
     healer = people(reg, 1, HEAL)[0]
     join(reg, rs, ev, [healer], "sub")
     rc.propose(reg, rs, ev, save=False)
+    assert {p.signup_name for p in ev.all_rosters[0].selected} == names(joiners)
+
+
+def test_a_first_to_join_event_seats_the_earlier_bench_answer_when_a_spare_tank_can_heal(reg, rs):
+    """The first-to-join twin of H1: a Warrior and a Protection Paladin who can heal, two healers, five damage dealers
+    (one seat empty); a benched Mage answered before a benched Priest. The joiners together meet both minimums, so the
+    paladin heals and the earlier answer takes the empty seat."""
+    reg.set_minimums(RID, {"tank": {"min": 1}, "healer": {"min": 3}}, "t")
+    ev = one_off(reg, rs)
+    assert rc.run_first_come(reg, ev)
+    paladin = people(reg, 1, ("Paladin", "Protection"), off="Holy")[0]
+    joiners = people(reg, 1, TANK) + [paladin] + people(reg, 2, HEAL) + people(reg, 5, DPS)
+    join(reg, rs, ev, joiners)
+    mage, priest = people(reg, 1, DPS)[0], people(reg, 1, HEAL)[0]
+    join(reg, rs, ev, [mage, priest], "sub")
+    for i, m in enumerate((mage, priest)):
+        sg = ev.signups[str(m.discord_id)]
+        sg.updated_at = sg.benched_at = f"2026-11-25T10:0{i + 1}:00+00:00"
+    rc.propose(reg, rs, ev, save=False)
     r = ev.all_rosters[0]
-    got = {p.signup_name for p in r.selected}
-    assert healer.display_name in got and druid.display_name in got and len(got) == 10
-    assert r.spec_switches == {druid.display_name: "Feral"}
+    assert {p.signup_name for p in r.selected} == names(joiners) | {mage.display_name}
+    assert r.spec_switches == {paladin.display_name: "Holy"}
+
+
+def _p(i: int, cls: str, spec: str, role: str, status: str = "signed", off=None):
+    from oibot_gm.models import Player
+    return Player(signup_name=f"q{i}", pos=i, status=status, cls=cls, spec=spec, role=role, offspec=off)
+
+
+def test_first_come_bench_out_keeps_a_benched_healer_only_while_the_joiners_together_are_short(profile):
+    """first_come_bench_out reads the joint cap (solver.bench_refund_room): a full roster of joiners whose spare tank
+    can heal forces the benched healer out; with the paladin the only tank, the healer is kept for the solve."""
+    need = {"tank": 1, "healer": 3}
+    paladin = _p(1, "Paladin", "Protection", "tank", off="Holy")
+    priests = [_p(2, "Priest", "Holy", "healer"), _p(3, "Priest", "Holy", "healer")]
+    mages = [_p(10 + i, "Mage", "Fire", "ranged") for i in range(6)]
+    healer = _p(30, "Priest", "Holy", "healer", "bench")
+    full = [_p(0, "Warrior", "Protection", "tank"), paladin, *priests, *mages, healer]
+    assert rc.first_come_bench_out(profile, full, 10, need, set(), set(), set()) == {"q30"}
+    only = [paladin, *priests, *mages, _p(16, "Mage", "Fire", "ranged"), healer]
+    assert rc.first_come_bench_out(profile, only, 10, need, set(), set(), set()) == set()
 
 
 def _bench_queue(reg, rs):
