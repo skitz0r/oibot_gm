@@ -191,10 +191,10 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        lineup_draft_json (nothing written), seats_words, tz_words, character_rows. The routes run these in a thread
   member_event_view.py the members' Events page read model (2026-11-25 §2), PURE: what the Discord signup sheet shows everyone and nothing
                        more, built from the sheet's own readers (by_status, raid_views.split_away / OUT_MARK / run_times, all_rosters' groups,
-                       rc.confirmations marks only while locked and rc.run_confirms, Not rostered = rosters[0].benched ∩ the joiners) — never
+                       rc.confirmations marks on the first raid alone (the only one with a sheet), only while locked and rc.run_confirms, Not rostered = rosters[0].benched ∩ the joiners) — never
                        from event_json. visible(reg, e, viewer) (a first raid, not dropped, no rehearsal but the viewer's own: its run dict's
                        test_by); member_event_list(reg, rs, now, viewer) → {open [{key, title, subtitle (the raids), state, chip, answer
-                       (rc.answer_word)}] (live only, soonest first; no History), coming [{title, subtitle}] (event_view.coming_nights),
+                       (rc.answer_word)}] (live only, soonest first; no History), coming [{title, subtitle ('Barrow Deeps · Raid nights': the schedule's raids, then its name)}] (event_view.coming_nights),
                        tz_words, empty}; member_event_json(reg, rs, ev, viewer) → {key (first raid's), title, subtitle, state, chip, test_chip,
                        details (Lineup, Priority, Locks, Confirm by when confirmations, Signup sheet), signups {counts, rows {in, sub, out, away:
                        [{display_name, character, cls, spec, callout}]}}, rosters [{key, raid_name, label, rosters [{n, groups [[{display_name,

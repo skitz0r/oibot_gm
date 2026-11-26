@@ -9,7 +9,7 @@ import types
 from datetime import timedelta
 
 import pytest
-from conftest import GUILD2, OWNER, join, lock_with_board, open_test_run
+from conftest import GUILD2, OWNER, join, lock_with_board, open_test_run, weekly
 from fastapi.testclient import TestClient
 from test_member_inbox_web import OFFICER, SECRET, TOKEN, WebNightBot, as_user, person
 from test_web_multiguild import DEMO_ONLY, bot, client_for, env  # noqa: F401 — the two-guild fixtures
@@ -96,6 +96,7 @@ def leak_fixture(reg, rs) -> types.SimpleNamespace:
     fury = add(reg, 6, "Furyxyz", "Warrior", "Fury", "Protection")  # short tank: a role-switch row on the open event
     pinned_in, pinned_out = add(reg, 7, "Keepin", "Hunter", "Marksmanship"), add(reg, 8, "Keepout", "Rogue", "Combat")
     benchy = add(reg, 9, "Benchy", "Paladin", "Holy")
+    fillonly = add(reg, 20, "Fillonlyxyz", "Shaman", "Restoration")  # on neither event: only a fill ask names them
     fillers = [add(reg, 10 + i, f"Seat{chr(97 + i)}", *cs) for i, cs in enumerate(
         [("Warrior", "Protection"), ("Warrior", "Protection"), ("Priest", "Holy"), ("Mage", "Fire"), ("Rogue", "Combat"),
          ("Hunter", "Marksmanship"), ("Warlock", "Affliction")])]
@@ -118,6 +119,8 @@ def leak_fixture(reg, rs) -> types.SimpleNamespace:
     locked = rs.events[locked.key]
     locked.fill_asks.append(rc.FillAsk(discord_id=target.discord_id, display_name=target.display_name, kind="sub", role="healer",
                                        character=target.main.label, spec="Restoration", reason="short 1 healer", why="why-XYZ"))
+    locked.fill_asks.append(rc.FillAsk(discord_id=fillonly.discord_id, display_name=fillonly.display_name, kind="sub", role="healer",
+                                       character=fillonly.main.label, spec="Restoration", reason="short 1 healer", why="why-XYZ"))
     locked.log.append("log-XYZ")
     rs.save(locked, "t: a fill ask and a log line")
 
@@ -137,12 +140,13 @@ def leak_fixture(reg, rs) -> types.SimpleNamespace:
     # every fact exists
     assert rc.pool_unanswered(reg, opened) and any(m.discord_id == silent.discord_id for m, _c in rc.pool_unanswered(reg, opened))
     assert locked.callouts[-1].note == "note-XYZ" and locked.signups[str(caller.discord_id)].source == "callout"
-    assert any(a.pending for a in locked.fill_asks)
+    assert sum(a.pending for a in locked.fill_asks) == 2
+    assert str(fillonly.discord_id) not in locked.signups and str(fillonly.discord_id) not in opened.signups
     assert opened.layout and opened.placed_by and opened.auto_placed and opened.pins
     assert rc.event_switches(reg, rs, opened)["rows"]
     assert reg.members[away.discord_id].absent_on(day)
     return types.SimpleNamespace(locked=locked, opened=opened, later=later, viewer=viewer, plain=plain, silent=silent, away=away,
-                                 caller=caller, target=target, fury=fury, benchy=benchy, seated=seated)
+                                 caller=caller, target=target, fury=fury, benchy=benchy, seated=seated, fillonly=fillonly)
 
 
 @pytest.fixture
@@ -206,6 +210,12 @@ def test_member_routes_leave_out_fill_asks(lf):
     assert j["asks"] == [], "the ask is the target's alone"
     mine = get(lf, f"/api/me/event/{lf.locked.key}", lf.target.discord_id).json()["asks"]
     assert [a["kind"] for a in mine] == ["fill"], "the target sees their own ask"
+    # a target on neither event: their NAME is nowhere in anyone else's answer
+    for uid in (lf.viewer.discord_id, lf.plain.discord_id, lf.target.discord_id, lf.silent.discord_id, OFFICER):
+        for j in both(lf, uid):
+            assert lf.fillonly.display_name not in dump(j) and lf.fillonly.main.label not in dump(j)
+    theirs = get(lf, f"/api/me/event/{lf.locked.key}", lf.fillonly.discord_id).json()
+    assert [a["kind"] for a in theirs["asks"]] == ["fill"], "the target on neither event still sees their own ask"
 
 
 def test_member_routes_leave_out_the_officers_board(lf):
@@ -213,6 +223,10 @@ def test_member_routes_leave_out_the_officers_board(lf):
         assert not {"layout", "placed_by", "auto_placed", "mine", "undo_box", "autofill", "placed_as"} & keys_of(j)
     j = get(lf, f"/api/me/event/{lf.opened.key}").json()
     assert j["rosters"] == [], "before the lock there is no board for members"
+    officer_name = person(OFFICER).display_name  # the placing officer as the server knows them
+    for uid in (lf.viewer.discord_id, lf.plain.discord_id, lf.silent.discord_id):
+        for j in both(lf, uid):
+            assert str(OFFICER) not in dump(j) and officer_name not in dump(j), "who placed whom stays the officers'"
 
 
 def test_member_routes_leave_out_the_activity_log(lf):
@@ -220,9 +234,20 @@ def test_member_routes_leave_out_the_activity_log(lf):
         assert "activity" not in keys_of(j) and "log" not in keys_of(j) and "log-XYZ" not in dump(j)
 
 
-def test_member_routes_leave_out_role_switches(lf):
+def test_member_routes_leave_out_role_switches(lf, reg, rs):
+    sw = rc.event_switches(reg, rs, rs.events[lf.opened.key])
+    fury = next(r for r in sw["rows"] if r["display_name"] == lf.fury.display_name)
+    assert fury["spec"] == "Protection" and fury["from"] == "Fury"
+    words = [fury["box"]["title"], *fury["box"]["sentences"]]
+    unanswered = [r["display_name"] for r in sw["rows"] if not r["answered"]]
+    assert unanswered
     for j in both(lf):
         assert not {"switches", "short", "revs"} & keys_of(j)
+        assert not any(w in dump(j) for w in words), "the switch row's words"
+    o = get(lf, f"/api/me/event/{lf.opened.key}").json()
+    people = [p for rows in o["signups"]["rows"].values() for p in rows]
+    assert [(p["character"], p["spec"]) for p in people if p["display_name"] == lf.fury.display_name] == [(lf.fury.main.label, "Fury")]
+    assert not set(unanswered) & {p["display_name"] for p in people}, "a switch row's unanswered names stay off the event"
 
 
 def test_member_routes_leave_out_priority_scores(lf):
@@ -317,10 +342,17 @@ def test_an_officer_gets_the_member_shape_from_the_member_routes(lf):
         lf.c.cookies.clear()
         owner = lf.c.get(f"/api/me/event/{key}", headers=BEARER).json()
         shape = lambda j: keys_of({k: v for k, v in j.items() if k != "characters"})  # noqa: E731 — the officers hold no character here
+        own = lambda j: {k: v for k, v in j.items() if k not in ("answers", "characters", "asks")}  # noqa: E731 — the viewer's own
         for j in (officer, owner):
             assert shape(j) == shape(member) and isinstance(j["characters"], list)
+            assert own(j) == own(member), "an officer sees the same VALUES as a member"
             assert not {"boxes", "actions", "parts", "people", "edit", "timing"} & keys_of(j)
             assert lf.silent.display_name not in dump({k: v for k, v in j.items() if k not in ("answers", "characters")})
+    lists = [get(lf, "/api/me/events", uid).json() for uid in (lf.silent.discord_id, OFFICER)]
+    lf.c.cookies.clear()
+    lists.append(lf.c.get("/api/me/events", headers=BEARER).json())
+    strip = lambda j: {**j, "open": [{k: v for k, v in r.items() if k != "answer"} for r in j["open"]]}  # noqa: E731 — the viewer's own answer
+    assert strip(lists[1]) == strip(lists[0]) and strip(lists[2]) == strip(lists[0])
 
 
 # ---------------------------------------------------------------- the sheet's own facts
@@ -375,3 +407,74 @@ def test_api_me_rows_are_unchanged_by_the_move(lf, reg, rs):
     built = json.loads(json.dumps([me_sheet_row(reg, rs, ev, m, m.discord_id) for ev in rs.live()]))
     assert me["sheets"] == built and len(built) == 3
 
+
+
+# ---------------------------------------------------------------- the fix round: later raids, coming-up names, regulars
+
+def test_a_later_raid_shows_its_roster_without_confirmation_marks(lf, reg, rs):
+    """Only the first raid has a public Discord sheet, so only its seats carry a confirmation mark. A later raid's roster
+    (groups and Not rostered) is shown; a Can't make it and a waiting ask planted on its seats are not."""
+    first, later = rs.events[lf.opened.key], rs.events[lf.later.key]
+    names = [s.display_name for s in first.by_status("in")]
+    for p in (first, later):
+        reg.config.team(p.team)["confirm"] = True
+        lock_with_board(reg, rs, rs.events[p.key], names)
+    later = rs.events[later.key]
+    # the later raid: a "no" (Can't make it) and a waiting ask; the first raid: a "no" from someone else
+    reg.add_placement_ask(lf.plain.discord_id, later.team, lf.plain.main.label, "t")
+    reg.close_placement_ask(lf.plain.discord_id, later.team, "no", "t")
+    keepin = next(m for m in reg.members.values() if m.display_name == "Keepin")
+    reg.add_placement_ask(keepin.discord_id, later.team, keepin.main.label, "t")
+    reg.add_placement_ask(lf.fury.discord_id, first.team, lf.fury.main.label, "t")
+    reg.close_placement_ask(lf.fury.discord_id, first.team, "no", "t")
+    later_conf = {c["display_name"]: c["answer"] for c in rc.confirmations(reg, later)}
+    assert later_conf[lf.plain.display_name] == "no" and keepin.display_name in later_conf and later_conf[keepin.display_name] is None
+    for uid in (lf.viewer.discord_id, lf.plain.discord_id, keepin.discord_id, lf.silent.discord_id, OFFICER):
+        j = get(lf, f"/api/me/event/{lf.opened.key}", uid).json()
+        head, tail = j["rosters"]
+        assert head["key"] == first.key and head["marks"] is True
+        seats = {s["display_name"]: s for r in head["rosters"] for g in r["groups"] for s in g}
+        assert seats[lf.fury.display_name]["answer"] == "no", "the first raid's marks stay"
+        assert tail["key"] == later.key and tail["marks"] is False
+        tseats = [s for r in tail["rosters"] for g in r["groups"] for s in g]
+        assert sorted(s["display_name"] for s in tseats) == sorted(names), "the later raid's roster is shown"
+        assert all("answer" not in s for s in tseats), "no answer on a later raid's seat"
+        assert "not_rostered" in tail
+
+
+def scheduled_fixture(reg, rs) -> types.SimpleNamespace:
+    """The leak fixture plus a schedule named by default (conftest.weekly: "Raid nights") with a regular who never answers,
+    its event opened, and a two-raid schedule — built before the app so every member is admitted."""
+    f = leak_fixture(reg, rs)
+    start = start_in(reg, 5)
+    sid = weekly(reg, RID, start.strftime("%a %H:%M"), sid="nights")
+    regular = add(reg, 30, "Regularxyz", "Paladin", "Protection")
+    reg.regular_add(regular.discord_id, sid, "t")
+    ev = rc.open_run(reg, rs, RID, start, by="t", schedule=sid)
+    later_day = start_in(reg, 6).strftime("%a 18:30")
+    reg.set_schedule("pair", {"kind": "weekly", "slots": later_day, "name": "Double night"}, "t", raid=HYJAL)
+    reg.set_schedule("pair", {"lineup": [{"raid": HYJAL, "rosters": 1}, {"raid": RID, "rosters": 1, "starts": 180}]}, "t")
+    assert any(m.discord_id == regular.discord_id for m, _c in rc.pool_unanswered(reg, ev)), "the regular is unanswered"
+    f.sched, f.sid, f.regular = ev, sid, regular
+    return f
+
+
+def test_a_coming_up_row_names_its_raids(reg, rs, monkeypatch):
+    f = scheduled_fixture(reg, rs)
+    c = member_client(reg, rs, monkeypatch)
+    j = c.get("/api/me/events", headers=as_user(c, f.viewer.discord_id)).json()
+    subtitles = {r["subtitle"] for r in j["coming"]}
+    assert "Barrow Deeps · Raid nights" in subtitles, subtitles
+    assert "Hyjal Summit, then Barrow Deeps · Double night" in subtitles, subtitles
+    assert "Raid nights" not in subtitles
+
+
+def test_an_unanswered_regular_is_absent_by_name(reg, rs, monkeypatch):
+    f = scheduled_fixture(reg, rs)
+    c = member_client(reg, rs, monkeypatch)
+    for uid in (f.viewer.discord_id, f.plain.discord_id, OFFICER):
+        h = as_user(c, uid)
+        for path in (f"/api/me/event/{f.sched.key}", "/api/me/events"):
+            r = c.get(path, headers=h)
+            assert r.status_code == 200, r.text
+            assert f.regular.display_name not in dump(r.json()), path

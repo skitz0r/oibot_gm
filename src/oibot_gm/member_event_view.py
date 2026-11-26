@@ -1,7 +1,7 @@
 """The members' Events page read model (design 2026-11-25 §2): what the Discord signup sheet (raid_views.sheet_message)
 already shows everyone, and nothing more. Built from the readers the sheet reads — each raid's signups by answer, the
-Away split (raid_views.split_away), the locked rosters' groups, the confirmation marks (rc.confirmations, only while
-locked and only when the event asks for confirmations) and the joiners the lock left off — never by stripping
+Away split (raid_views.split_away), the locked rosters' groups, the confirmation marks (rc.confirmations, on the
+first raid alone — the only one with a sheet —, only while locked and only when the event asks for confirmations) and the joiners the lock left off — never by stripping
 event_view.event_json, so no officer-only fact (who has not answered, absence reasons, callout notes, pins, fill asks,
 the officers' board before the lock, role switches, the activity log, priority scores) can reach it by accident. Pure:
 nothing here writes or solves. The routes (web/api_member_events.py) run these in a thread and add the viewer's own
@@ -14,7 +14,7 @@ from . import event_view
 from . import raidcycle as rc
 from .constants import PAGE_WORDS
 from .raid_views import OUT_MARK, run_times, split_away
-from .registry import Registry
+from .registry import Registry, schedule_name
 
 
 class NotListed(LookupError):
@@ -49,7 +49,8 @@ def member_event_list(reg: Registry, rs: "rc.RaidStore", now: datetime, viewer: 
     """{open: [MemberRow], coming: [{title, subtitle}], tz_words, empty}. MemberRow = {key (the first raid's), title (its
     start), subtitle (the raids it plays), state, chip, answer (the viewer's own, rc.answer_word)}; live events only (open
     and locked), soonest first — no History. Coming up = event_view.coming_nights (each active schedule's next nights
-    with no event), plain text: its start and its schedule's name."""
+    with no event), plain text: its start, and its raids and its schedule's name as Registry.series_label words them
+    ('Hyjal Summit, then Barrow Deeps · Raid nights')."""
     events = [e for e in rs.events.values() if not e.dropped]
     live_ids = {rc.event_id(e) for e in events if e.state not in event_view.CLOSED}
     live = sorted((e for e in events if visible(reg, e, viewer) and rc.event_id(e) in live_ids), key=lambda e: e.start)
@@ -60,7 +61,7 @@ def member_event_list(reg: Registry, rs: "rc.RaidStore", now: datetime, viewer: 
         rows.append({"key": first.key, "title": reg.local12(first.start),
                      "subtitle": event_view._raids_words(reg, event_view._lineup(reg, rs, first, parts)),
                      "state": state, "chip": rc.RUN_STATE_WORDS[state], "answer": _answer(reg, first, viewer)})
-    coming = [{"title": reg.local12(t), "subtitle": s.get("name") or reg.series_label(s["id"])}
+    coming = [{"title": reg.local12(t), "subtitle": f"{event_view._raids_words(reg, s['lineup'])} · {schedule_name(s)}"}
               for s, t, _occ in event_view.coming_nights(reg, rs, now)]
     return {"open": rows, "coming": coming, "tz_words": event_view.tz_words(reg), "empty": PAGE_WORDS["member_events_empty"]}
 
@@ -78,13 +79,14 @@ def _signups(reg: Registry, first: "rc.RaidEvent") -> dict:
     return {"counts": {k: len(v) for k, v in rows.items()}, "rows": rows}
 
 
-def _part(reg: Registry, p: "rc.RaidEvent") -> dict:
+def _part(reg: Registry, p: "rc.RaidEvent", first: bool) -> dict:
     """One locked (or finished) raid of the event as the locked sheet draws it: each roster's groups, one member per
-    line, the confirmation marks only while locked and only when the event asks for them, and Not rostered = the
-    joiners the lock left off (rosters[0].benched ∩ the joiners). Never the officers' board."""
+    line, and Not rostered = the joiners the lock left off (rosters[0].benched ∩ the joiners). The confirmation marks
+    only on the FIRST raid (the only one with a public Discord sheet), only while locked and only when the event asks
+    for them; a later raid's seats carry no answer. Never the officers' board."""
     name = reg.raid_def(p.instance).get("name", p.instance) if p.instance in reg.profile.raids else str(p.instance)
     rosters = p.all_rosters
-    marks = bool(rosters) and p.state == "locked" and rc.run_confirms(reg, p)
+    marks = first and bool(rosters) and p.state == "locked" and rc.run_confirms(reg, p)
     conf = {c["display_name"]: c["answer"] for c in rc.confirmations(reg, p)} if marks else {}
     out = []
     for i, r in enumerate(rosters):
@@ -111,7 +113,7 @@ def _part(reg: Registry, p: "rc.RaidEvent") -> dict:
 def member_event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: int) -> dict:
     """MemberEvent: {key (the first raid's), title, subtitle, state, chip, test_chip, details [Fact], signups {counts
     {in, sub, out, away}, rows {in, sub, out, away: [MemberPerson]}}, rosters [MemberPart] (one per locked or finished
-    raid; [] before the lock), part_keys (every raid of the event, the first first)}. Details are the sheet's public
+    raid, marks on the first raid's alone; [] before the lock), part_keys (every raid of the event, the first first)}. Details are the sheet's public
     facts: Lineup, Priority, Locks, Confirm by (only when the event asks for confirmations), Signup sheet. Any raid's key
     answers as its event. NotListed for what `visible` refuses, and for a finished or cancelled event."""
     first = rc.first_part(rs, ev)
@@ -134,5 +136,5 @@ def member_event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", vie
             "state": state, "chip": rc.RUN_STATE_WORDS[state],
             "test_chip": PAGE_WORDS["test_run"] if rc.rehearsal_run(reg, first) else None,
             "details": details, "signups": _signups(reg, first),
-            "rosters": [_part(reg, p) for p in parts if p.state in ("locked", "done")],
+            "rosters": [_part(reg, p, p.key == first.key) for p in parts if p.state in ("locked", "done")],
             "part_keys": [p.key for p in parts]}
