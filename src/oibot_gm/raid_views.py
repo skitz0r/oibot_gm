@@ -143,7 +143,7 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
     thumb = raid_thumb_url(reg, ev.instance)
     if thumb:
         e.set_thumbnail(url=thumb)
-    e.url = event_url(reg, ev)  # the title opens the event (a member is sent on to their own row on the Me page)
+    e.url = event_url(reg, ev)  # the title opens the event (an officer's page, or the members' event view)
 
     def member(character: str, cls: str, spec: str, mark: str | None = None, icons: bool = True) -> str:
         return ((mark + " ") if mark else "") + ((ico("spec", f"{cls}:{spec}") + " ") if icons else "") + character

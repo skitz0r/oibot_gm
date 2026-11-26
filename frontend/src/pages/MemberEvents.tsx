@@ -67,7 +67,9 @@ export function MemberEventsPage({ meta }: { meta: Meta }) {
   const shown = over ? null : ev && (ev.key === pick || ev.part_keys.includes(pick || "")) ? ev : null;
   return (
     <ListPage title="Events" selected={over ? null : shown?.key || pick} back="/events" groups={groups} intro={list.tz_words}
-      notice={over ? <Text size="sm">{over}</Text> : undefined}
+      notice={over ? <Text size="sm">{over}</Text>
+        /* nothing open yet, nights coming: the list would show only Coming up and say nothing about the sheet */
+        : list.open.length === 0 && list.coming.length > 0 ? <Text size="sm" c="dimmed">{list.empty}</Text> : undefined}
       empty={<Text size="sm" c="dimmed">{list.empty}</Text>}>
       {pick && !over && (shown ? <MemberEvent ev={shown} meta={meta} ask={ask} onDone={load} /> : <Text c="dimmed">Loading…</Text>)}
       {confirmDialog}

@@ -6150,8 +6150,8 @@ Remind and End print `lock_box`, `cancel_box`, `remind_box` and `LootMixin.end_b
 channel line with no reason, *Cancel event with a note* opens the form). `/raid set` prints
 `consequences.member_action_box` (the row ⋮ menu's box on the site too) and picks the spec for Join / Bench: the role
 switch, refused once the member holds a seat of another role on the locked roster (`rc.seated_switch_refusal`). Every
-Discord link to an event is `raid_views.event_url` (`/app/events/<key>`; a member who is not an officer lands on their
-Me row).
+Discord link to an event is `raid_views.event_url` (`/app/events/<key>`; a member who is not an officer gets the members'
+event view there since 2026-11-25).
 
 *Parity.* `configops.PARITY_PENDING` is empty: `run_reschedule` is `flow:raid_reschedule` (and `/raid edit`),
 `run_lineup` is `flow:raid_lineup`, and the role switch is `flow:raid_set` (`RUN_SWITCH_DISCORD_PENDING` is gone). The
