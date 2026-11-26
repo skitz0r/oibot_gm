@@ -1816,10 +1816,13 @@ def op_run_key(reg: Registry, op: ConfigOp, raids=None) -> str | None:
 
 
 def _joined_name(ev, m) -> str:
-    """The display name a member has on this sheet; RegistryError unless they answered Join."""
+    """The display name a member has on this sheet; RegistryError unless the board may hold it (rc.board_names)."""
+    from . import raidcycle as rc
+
     sg = ev.signups.get(str(m.discord_id))
-    if sg is None or sg.status != "in":
-        raise RegistryError(f"{m.display_name} hasn't joined this event (only joiners go on the board)")
+    if sg is None or sg.display_name not in rc.board_names(ev):
+        bench = sg is not None and sg.status == "sub"
+        raise RegistryError((rc.BENCH_LOCKED if bench else rc.NOT_ON_SHEET).format(name=sg.display_name if bench else m.display_name))
     return sg.display_name
 
 
@@ -2923,10 +2926,12 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         return f"{label}: auto-fill the board — the bot builds the groups, placing the {len(ev.by_status('in'))} joined around the {placed} already placed (nothing is locked or sent)"
     if op.op == "run_board":
         layout = _layout(op.value)
-        names = {s.display_name for s in ev.signups.values() if s.status == "in"}
+        from . import raidcycle as rc
+
+        names = rc.board_names(ev)
         unknown = [n for g in layout for n in g if n not in names]
         if unknown:
-            raise RegistryError(f"not joined on this sheet: {', '.join(unknown)}")
+            raise RegistryError(rc.NOT_ON_SHEET_MANY.format(names=", ".join(unknown)))
         groups = " | ".join(", ".join(g) for g in layout) or "(empty)"
         if ev.state == "open":
             return f"{label}: board → {groups} (the layout the lock will use; unplaced joiners are bench)"
@@ -3170,10 +3175,12 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         if ev.state != "open":
             raise RegistryError(f"run_board on a locked event {NEEDS_BOT}")
         layout = _layout(op.value)
-        names = {s.display_name for s in ev.signups.values() if s.status == "in"}
+        from . import raidcycle as rc
+
+        names = rc.board_names(ev)
         unknown = [n for g in layout for n in g if n not in names]
         if unknown:
-            raise RegistryError(f"not joined on this sheet: {', '.join(unknown)}")
+            raise RegistryError(rc.NOT_ON_SHEET_MANY.format(names=", ".join(unknown)))
         ev.layout = layout if any(layout) else None
         ev.log.append(f"{by}: board set")
         rs.save(ev, f"board (by {by})")
@@ -3669,10 +3676,12 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         return f"{run_words(reg, ev)}: asked " + (", ".join(f"{a.display_name} ({a.kind})" for a in sent) or "nobody (DMs off)") + (" — a yes changes their signup; the lock builds the roster" if prelock else rc.held_back_words(plan))
     if op.op == "run_board":  # the whole board (RaidMixin.save_board, the site's and MCP's write): refused when it changed
         layout = _layout(op.value)
-        names = {s.display_name for s in ev.signups.values() if s.status == "in"}
+        from . import raidcycle as rc
+
+        names = rc.board_names(ev)
         unknown = [n for g in layout for n in g if n not in names]
         if unknown:
-            raise RegistryError(f"not joined on this sheet: {', '.join(unknown)}")
+            raise RegistryError(rc.NOT_ON_SHEET_MANY.format(names=", ".join(unknown)))
         was_open = ev.state == "open"
         line = await bot.save_board(reg, rs, ev, layout, rev=rev, by=by, via=via)
         return line if was_open else f"{run_words(reg, ev)}: {line}"  # before lock the line names the run itself

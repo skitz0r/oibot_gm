@@ -4680,10 +4680,31 @@ def record_moves(ev: RaidEvent, name: str, at_before: dict, groups: list[list[st
     ev.auto_placed = [n for n in ev.auto_placed if n not in changed]  # moved by a person: a hand placement now
 
 
+NOT_ON_SHEET = "{name} hasn't answered Join or Bench on this event"  # apply_move's and plain text's run_move refusal
+NOT_ON_SHEET_MANY = "These names haven't answered Join or Bench on this event: {names}"  # plain text's run_board refusal
+BENCH_LOCKED = "{name} answered Bench, so ask them with Fill seats to put them on the roster."  # a Bench answer off a locked roster
+
+
+def board_names(ev: RaidEvent) -> set[str]:
+    """THE names a run's board may hold (design §3 of 2026-11-25-member-events-and-bench): while open, everyone who
+    answered Join or Bench (a Bench name an officer or Auto-fill places is a hand / auto placement the lock keeps);
+    once locked, everyone who answered Join plus every rostered name (a Bench answer the lock rostered stays on the
+    roster through an officer's drag). prune_board, apply_move, autofill and RaidMixin._write_board read it."""
+    if ev.state == "open":
+        return {s.display_name for s in ev.signups.values() if s.status in ("in", "sub")}
+    out = {s.display_name for s in ev.signups.values() if s.status == "in"}
+    for p in ev.seated():
+        out.add(p.signup_name)
+        uid = player_uid(ev, p)
+        if uid is not None and (sg := ev.signups.get(str(uid))) is not None:
+            out.add(sg.display_name)  # a nick changed since the lock: the seat answers to both names
+    return out
+
+
 def prune_board(ev: RaidEvent) -> list[str]:
     """The officers' board stays true to the answers and pins (the owner's tweaks C, fix round): BEFORE the lock, a
-    placed name whose answer is no longer Join (Bench, No thanks, Can't make it, an absence, a left member, a retired
-    character), who is pinned out (⋮ Keep off the roster), or whose character or spec for the night changed since it was
+    placed name whose answer is neither Join nor Bench (board_names: No thanks, Can't make it, an absence, a left
+    member, a retired character), who is pinned out (⋮ Keep off the roster), or whose character or spec for the night changed since it was
     placed (`placed_as`) leaves the layout, auto_placed, placed_by and placed_as — as a drag to Not placed does — so the
     lock's placement never outranks it (lock_forces: a placed name is kept on). Run by every RaidStore.save of an open
     run (each raid of an event on its own: a later raid follows the first raid's answers through sync_parts' save).
@@ -4699,7 +4720,7 @@ def prune_board(ev: RaidEvent) -> list[str]:
         for n in g:
             sg = signup_by_name(ev, n)
             what = f"{sg.character}|{sg.spec}" if sg is not None else ""
-            if sg is None or sg.status != "in" or str(sg.discord_id) in out or ev.placed_as.get(n, what) != what:
+            if sg is None or sg.status not in ("in", "sub") or str(sg.discord_id) in out or ev.placed_as.get(n, what) != what:
                 gone.append(n)
                 continue
             keep[n] = what
@@ -4778,9 +4799,11 @@ def apply_move(reg: Registry, ev: RaidEvent, name: str, to: tuple[int, int] | No
     """One drag applied to the CURRENT board (so concurrent officers merge instead of overwriting each other):
     `to` = (flat group index, position) or None for the bank. Dropping on someone swaps (they take the mover's old
     place, or go to the bank when the mover came from it). Raises ValueError when the group is full or the name
-    is not a joiner. Returns the new flat layout; the caller saves it the way a whole-board write would be."""
-    if signup_by_name(ev, name) is None or signup_by_name(ev, name).status != "in":
-        raise ValueError(f"{name} hasn't joined this event")
+    is not one the board may hold (board_names: NOT_ON_SHEET; a Bench answer off a locked roster: BENCH_LOCKED).
+    Returns the new flat layout; the caller saves it the way a whole-board write would be."""
+    if name not in board_names(ev):
+        sg = signup_by_name(ev, name)
+        raise ValueError((BENCH_LOCKED if sg is not None and sg.status == "sub" else NOT_ON_SHEET).format(name=name))
     layout = board_layout(reg, ev)
     gsize = int(reg.profile.comp_rules["group_size"])
     origin = next(((gi, g.index(name)) for gi, g in enumerate(layout) if name in g), None)
@@ -4818,7 +4841,7 @@ def board_move_kind(reg: Registry, ev: RaidEvent, name: str, to: tuple[int, int]
     own rules: ('move', None, where) to another group while rostered, ('swap', other, where) dropped on someone while
     rostered, ('roster', None, where) from Not rostered into a free place, ('substitute', other, where) from Not rostered
     onto someone, ('release', None, None) back to Not rostered; (None, None, None) when nothing would change. ValueError
-    as apply_move raises it (not joined, a full group). PURE."""
+    as apply_move raises it (not on the board's names, a full group). PURE."""
     apply_move(reg, ev, name, to)  # its refusals, nothing kept
     layout = board_layout(reg, ev)
     origin = next((gi for gi, g in enumerate(layout) if name in g), None)
@@ -4856,13 +4879,18 @@ def board_rosters(reg: Registry, ev: RaidEvent, layout: list[list[str]], size: i
 
 def board_complete(reg: Registry, rs, p: RaidEvent) -> bool:
     """An open raid whose board leaves its lock nothing to decide: everyone who joined and is not kept off
-    (lock_forces) is placed. Its lock then rosters exactly the board (every placed name is fixed), so a later raid's
-    Auto-fill counts the board instead of solving it (event_board_preview's `complete_boards`)."""
+    (lock_forces) is placed, and no Bench answer who is not kept off waits for a seat the board leaves open (placed
+    fewer than run_size × run_rosters). Its lock then rosters exactly the board (every placed name is fixed), so a later
+    raid's Auto-fill counts the board instead of solving it (event_board_preview's `complete_boards`)."""
     joined = {s.display_name for s in p.by_status("in")}
     if p.state != "open" or not joined:
         return False
     placed = {n for g in (p.layout or []) for n in g}
-    return joined - set(lock_forces(reg, rs, p).kept_off) <= placed
+    kept_off = set(lock_forces(reg, rs, p).kept_off)
+    if not joined - kept_off <= placed:
+        return False
+    bench = {s.display_name for s in p.by_status("sub")} - kept_off - placed
+    return not bench or len(placed) >= run_size(reg, p) * run_rosters(reg, p)
 
 
 def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: list[RaidEvent] | None = None, stop=None,
@@ -4995,10 +5023,9 @@ def autofill(reg: Registry, rs: RaidStore, ev: RaidEvent, earlier: dict[int, int
     solved += [[] for _ in range(n - len(solved))]
     hand += [[] for _ in range(n - len(hand))]
     by_hand = {x for g in hand for x in g}
-    # the board holds joiners only: a Bench answer the solve seats is the lock's to decide (prune_board would take it
-    # straight off again, and every press would write the same board anew)
-    joined = {s.display_name for s in ev.by_status("in")}
-    layout = [h + [x for x in g if x not in by_hand and x in joined] for h, g in zip(hand, solved)]
+    # the board shows what the lock would roster now, a Bench answer it seats included (board_names)
+    allowed = board_names(ev)
+    layout = [h + [x for x in g if x not in by_hand and x in allowed] for h, g in zip(hand, solved)]
     return layout, sorted({x for g in layout for x in g} - by_hand)
 
 

@@ -162,7 +162,7 @@ def test_save_board_and_move_share_the_lock_and_the_rev(reg, rs):
     assert names[0] not in [n for g in ev.layout for n in g]
     run(bot.board_move(reg, rs, ev, names[0], (1, 0), by="Officer"))
     assert ev.layout[1][0] == names[0]
-    with pytest.raises(ValueError, match="hasn't joined"):
+    with pytest.raises(ValueError, match="hasn't answered Join or Bench"):
         run(bot.board_move(reg, rs, ev, "Nobody", None, by="Officer"))
     assert "cleared" in run(bot.save_board(reg, rs, ev, [], by="Officer")) and ev.layout is None
 

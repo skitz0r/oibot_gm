@@ -171,7 +171,7 @@ def test_a_hand_placed_bench_answer_keeps_its_group(reg, rs):
     join(reg, rs, ev, joiners)
     placed = people(reg, 1, DPS)[0]
     join(reg, rs, ev, [placed], "sub")
-    ev.layout = [[], [placed.display_name]]  # in memory only: prune_board keeps a Bench name on a saved board from Task 5
+    ev.layout = [[], [placed.display_name]]  # in memory (the saved board: test_a_saved_hand_placed_bench_answer_keeps_its_group_at_the_lock)
     rc.propose(reg, rs, ev, save=False)
     r = ev.all_rosters[0]
     assert placed.display_name in r.groups[1]
@@ -381,3 +381,198 @@ def test_a_benched_player_with_the_lead_seat_bonus_never_takes_a_joiners_seat_on
     _players, rosters, _n = rc._solve_run(reg, rs, fev, whatif=False, earlier={star.discord_id: 2})
     got = {p.signup_name for r in rosters for p in r.selected}
     assert got == names(joiners)
+
+
+# ---------------------------------------------------------------- the board keeps Bench names (task 5)
+
+def test_board_names_are_join_and_bench_while_open_and_join_plus_the_roster_once_locked(reg, rs):
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    out = people(reg, 1, DPS)[0]
+    join(reg, rs, ev, [out], "out")
+    assert rc.board_names(ev) == names(joiners) | names([core, raider, trial])
+    rc.propose(reg, rs, ev, save=False)
+    ev.state = "locked"
+    assert rc.board_names(ev) == names(joiners) | {core.display_name, raider.display_name}
+
+
+def test_a_bench_name_can_be_placed_and_survives_a_save(reg, rs):
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    layout = rc.apply_move(reg, ev, trial.display_name, (1, 0))
+    assert trial.display_name in layout[1]
+    ev.layout = layout
+    rs.save(ev, "board (test)")
+    assert trial.display_name in rs.events[ev.key].layout[1]
+    assert "off the board" not in "\n".join(ev.log)
+
+
+def test_a_saved_hand_placed_bench_answer_keeps_its_group_at_the_lock(reg, rs):
+    ev = schedule_event(reg, rs)
+    joiners = base_eight(reg) + people(reg, 2, DPS)
+    join(reg, rs, ev, joiners)
+    placed = people(reg, 1, DPS)[0]
+    join(reg, rs, ev, [placed], "sub")
+    ev.layout = [[], [placed.display_name]]
+    rs.save(ev, "board (test)")
+    assert ev.layout == [[], [placed.display_name]]
+    rc.propose(reg, rs, ev, save=False)
+    r = ev.all_rosters[0]
+    assert placed.display_name in r.groups[1]
+    assert len(r.selected) == 10
+
+
+def test_a_bench_answer_placed_by_hand_in_a_second_rosters_group_makes_that_roster_count(reg, rs):
+    """The hand placement is the officer's decision: eight joiners make one roster, a Bench answer placed in the
+    second roster's first group makes two (rc._roster_count reads the board's highest used group)."""
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    k = rc.groups_per_roster(reg, rc.run_size(reg, ev))
+    ev.layout = [[] for _ in range(k)] + [[trial.display_name]]
+    rs.save(ev, "board (test)")
+    assert trial.display_name in ev.layout[k]
+    rc.propose(reg, rs, ev, save=False)
+    assert len(ev.all_rosters) == 2
+    assert trial.display_name in ev.all_rosters[1].groups[0]
+
+
+def test_a_placed_bench_name_whose_answer_becomes_no_thanks_leaves_the_board(reg, rs):
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    ev.layout = rc.apply_move(reg, ev, trial.display_name, (0, 0))
+    rs.save(ev, "board (test)")
+    assert trial.display_name in ev.layout[0]
+    rc.set_signup(reg, rs, ev, trial, None, "out", source="test")
+    ev = rs.events[ev.key]
+    assert trial.display_name not in {n for g in ev.layout or [] for n in g}
+    assert f"off the board: {trial.display_name}" in ev.log
+    rc.propose(reg, rs, ev, save=False)
+    assert trial.display_name not in {p.signup_name for p in ev.seated()}
+
+
+def test_a_placed_bench_name_whose_answer_becomes_join_stays(reg, rs):
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    ev.layout = rc.apply_move(reg, ev, trial.display_name, (0, 0))
+    rs.save(ev, "board (test)")
+    rc.set_signup(reg, rs, ev, trial, None, "in", source="test")
+    assert trial.display_name in rs.events[ev.key].layout[0]
+
+
+def test_a_placed_join_name_whose_answer_becomes_bench_stays(reg, rs):
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    who = joiners[-1]
+    ev.layout = rc.apply_move(reg, ev, who.display_name, (1, 0))
+    rs.save(ev, "board (test)")
+    rc.set_signup(reg, rs, ev, who, None, "sub", source="test")
+    assert who.display_name in rs.events[ev.key].layout[1]
+
+
+def test_a_name_with_no_join_or_bench_is_refused_on_the_board(reg, rs):
+    ev, *_ = case_one(reg, rs)
+    out = people(reg, 1, DPS)[0]
+    join(reg, rs, ev, [out], "out")
+    with pytest.raises(ValueError) as e:
+        rc.apply_move(reg, ev, out.display_name, (0, 0))
+    assert str(e.value) == rc.NOT_ON_SHEET.format(name=out.display_name)
+    with pytest.raises(ValueError):
+        rc.apply_move(reg, ev, "Nobody here", (0, 0))
+
+
+def test_a_bench_answer_off_a_locked_roster_is_refused_on_the_board_in_its_own_words(reg, rs):
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    rc.propose(reg, rs, ev, save=False)
+    ev.state = "locked"
+    with pytest.raises(ValueError) as e:
+        rc.apply_move(reg, ev, trial.display_name, (0, 0))
+    assert str(e.value) == rc.BENCH_LOCKED.format(name=trial.display_name)
+    rc.apply_move(reg, ev, core.display_name, None)  # a rostered Bench answer moves like anyone rostered
+
+
+def test_auto_fill_places_the_bench_answers_the_lock_would_seat(reg, rs):
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    layout, auto = rc.autofill(reg, rs, ev)
+    placed = {n for g in layout for n in g}
+    assert placed == names(joiners) | {core.display_name, raider.display_name}
+    assert set(auto) == placed
+    # a second press replaces the auto placements and keeps a hand-placed Bench name
+    ev.layout = [[trial.display_name]] + [list(g) for g in layout[1:]]
+    ev.auto_placed = sorted(placed - {trial.display_name} - set(layout[0]))
+    rs.save(ev, "board (test)")
+    layout2, auto2 = rc.autofill(reg, rs, ev)
+    assert trial.display_name in layout2[0] and trial.display_name not in auto2
+    assert len({n for g in layout2 for n in g}) == 10
+
+
+def test_preview_lock_lock_and_auto_fill_land_on_one_roster_with_bench(reg, rs):
+    import asyncio
+    from contextlib import asynccontextmanager
+
+    from oibot_gm.discord_raid import RaidMixin
+
+    class Bare:
+        lock_preview = RaidMixin.lock_preview
+
+        @asynccontextmanager
+        async def solving(self, reg, key):
+            yield
+
+    ev, *_ = case_one(reg, rs)
+    layout, _auto = rc.autofill(reg, rs, ev)
+    shown = asyncio.run(Bare().lock_preview(reg, rs, ev, by="t"))
+    rc.propose(reg, rs, ev, save=False)
+    filled = {n for g in layout for n in g}
+    assert filled == {p.signup_name for r in shown for p in r.selected} == {p.signup_name for p in ev.seated()}
+
+
+def test_a_board_with_an_open_seat_and_a_bench_answer_is_not_complete(reg, rs):
+    ev = schedule_event(reg, rs)
+    joiners = base_eight(reg)
+    join(reg, rs, ev, joiners)
+    bench = people(reg, 2, DPS)
+    join(reg, rs, ev, bench, "sub")
+    ns = sorted(names(joiners))
+    ev.layout = [ns[:5], ns[5:]]
+    rs.save(ev, "board (test)")
+    assert not rc.board_complete(reg, rs, ev)
+    ev.layout = [ns[:5], ns[5:] + sorted(names(bench))]
+    rs.save(ev, "board (test)")
+    assert rc.board_complete(reg, rs, ev)
+
+
+def test_a_board_with_every_seat_placed_is_complete_with_bench_answers_left(reg, rs):
+    ev = schedule_event(reg, rs)
+    joiners = base_eight(reg) + people(reg, 2, DPS)
+    join(reg, rs, ev, joiners)
+    join(reg, rs, ev, people(reg, 1, DPS), "sub")
+    ns = sorted(names(joiners))
+    ev.layout = [ns[:5], ns[5:]]
+    rs.save(ev, "board (test)")
+    assert rc.board_complete(reg, rs, ev)
+
+
+def test_a_locked_board_edit_keeps_a_rostered_bench_answer(reg, rs):
+    import asyncio
+
+    from test_raid_night import NightBot
+
+    bot = NightBot(reg, rs)
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    asyncio.run(bot.lock_run(reg, rs, ev, by="Jon"))
+    ev = rs.events[ev.key]
+    assert ev.state == "locked"
+    before = {p.signup_name for p in ev.seated()}
+    assert {core.display_name, raider.display_name} <= before
+    groups = [list(g) for g in reversed(rc.board_layout(reg, ev))]  # the roster's groups swapped
+    asyncio.run(bot._write_board(reg, rs, ev, groups, "Jon"))
+    ev = rs.events[ev.key]
+    assert {p.signup_name for p in ev.seated()} == before
+    assert core.display_name in {n for g in ev.all_rosters[0].groups for n in g}
+
+
+def test_plain_texts_whole_board_takes_a_bench_name_and_refuses_no_thanks(reg, rs):
+    from oibot_gm import configops
+    from oibot_gm.configops import ConfigOp
+
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    out = people(reg, 1, DPS)[0]
+    join(reg, rs, ev, [out], "out")
+    ok = configops.describe(reg, ConfigOp(op="run_board", target=ev.key, value=trial.display_name))
+    assert "haven't answered" not in ok and trial.display_name in ok
+    assert rc.NOT_ON_SHEET_MANY.format(names=out.display_name) in configops.describe(
+        reg, ConfigOp(op="run_board", target=ev.key, value=out.display_name))

@@ -48,7 +48,7 @@ def test_full_group_and_unknown_name_refused(reg, rs, run):
     ev.layout = [n[:size]]
     with pytest.raises(ValueError, match="full"):
         rc.apply_move(reg, ev, n[size], (0, size))
-    with pytest.raises(ValueError, match="joined"):
+    with pytest.raises(ValueError, match="answered Join or Bench"):
         rc.apply_move(reg, ev, "Nobody", (0, 0))
 
 

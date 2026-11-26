@@ -61,7 +61,7 @@ def test_run_move_describes_and_moves_through_board_move(reg, rs):
         with pytest.raises(RegistryError, match=why.split("“")[0]):
             apply(reg, bot, bad)
     other = reg.test_members()[8]
-    assert "hasn't joined this event" in configops.describe(reg, ConfigOp(op="run_move", target=ev.key, member=other.display_name, value="g1"))
+    assert "hasn't answered Join or Bench on this event" in configops.describe(reg, ConfigOp(op="run_move", target=ev.key, member=other.display_name, value="g1"))
     with pytest.raises(RegistryError, match="needs the bot"):
         configops.apply(reg, ConfigOp(op="run_move", target=ev.key, member=names[0], value="g1"), "Officer", True, raids=rs)
 

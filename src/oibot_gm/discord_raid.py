@@ -1185,7 +1185,7 @@ class RaidMixin:
         Before lock the groups are the layout the lock will use; after lock they ARE the roster (someone brought in
         from the bench is asked to confirm, someone taken out is freed and the fill engine asked). `auto` (Auto-fill
         groups' write, event_board.AutoFill): the names it placed, recorded as ev.auto_placed."""
-        names = {s.display_name for s in ev.signups.values() if s.status == "in"}
+        names = rc.board_names(ev)  # Join and Bench while open; Join and the rostered once locked
         groups = [[n for n in g if n in names] for g in groups]
         if ev.state == "open":
             ev.layout = groups if any(groups) else None

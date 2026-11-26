@@ -1515,6 +1515,11 @@ def final_review_boxes(reg, rs, lk, add):
                            ("put on the roster", bench, (1, 99)), ("put in someone's seat", bench, (1, 0)),
                            ("a full group", bench, (0, 99)), ("where they already are", a, (0, 0))):
         add("board_move_box", case, cq.board_move_box(reg, ev, name, to))
+    sub, out = reg.test_members()[10], reg.test_members()[11]
+    join(reg, rs, ev, [sub], "sub")
+    join(reg, rs, ev, [out], "out")
+    add("board_move_box", "a Bench answer off the locked roster", cq.board_move_box(reg, ev, sub.display_name, (1, 99)))
+    add("board_move_box", "someone who said No thanks", cq.board_move_box(reg, ev, out.display_name, (1, 99)))
     add("board_move_box", "before the lock", cq.board_move_box(reg, open_, next(iter(open_.by_status("in")), SimpleNamespace(display_name="Nobody")).display_name, (0, 99)))
 
 

@@ -160,7 +160,7 @@ def test_describe_run_ops(reg, rs):
     assert "suggestions before lock (nothing sent)" in fill or "nothing to suggest" in fill
     board = d(op="run_board", target=ev.key, value=f"{ms[0].display_name}, {ms[1].display_name} | {ms[2].display_name}")
     assert "board →" in board and "layout the lock will use" in board
-    assert "not joined on this sheet: Nobody" in d(op="run_board", target=ev.key, value="Nobody")
+    assert "haven't answered Join or Bench on this event: Nobody" in d(op="run_board", target=ev.key, value="Nobody")
     assert "There is no live event by that name." in d(op="run_lock", target="bd-0101-0000"), "the target is never echoed: it may be a key"
     o = d(op="run_open", target="barrow_deeps", value="2030-01-08 19:30")
     assert o.startswith("open Barrow Deeps Tue 8 Jan 7:30 PM now:") and "no signup channel" in o
@@ -255,7 +255,7 @@ def test_run_strategy_and_board_open(reg, rs):
     layout = f"{ms[0].display_name}, {ms[1].display_name} | {ms[2].display_name}"
     assert configops.apply(reg, ConfigOp(op="run_board", target=ev.key, value=layout), "officer", is_owner=False, raids=rs) == f"Barrow Deeps {reg.local12(ev.start)}: board = {layout}"
     assert rs.events[ev.key].layout == [[ms[0].display_name, ms[1].display_name], [ms[2].display_name]]
-    with pytest.raises(RegistryError, match="not joined on this sheet: Nobody"):
+    with pytest.raises(RegistryError, match="haven't answered Join or Bench on this event: Nobody"):
         configops.apply(reg, ConfigOp(op="run_board", target=ev.key, value="Nobody"), "officer", is_owner=False, raids=rs)
     bot = FakeBot(rs)  # before lock the board is store-only (RaidMixin.save_board): no Discord side effect
     assert run(configops.apply_async(reg, ConfigOp(op="run_board", target=ev.key, value=""), "Officer", False, bot=bot)).endswith("board cleared (the lock uses it)")
