@@ -1,9 +1,11 @@
 """The lookups the answer loop offers the model (answering questions with lookup tools, design §6, §7): the Viewer, the
-tool registry and its caps, and the members' tools — find, recipe, crafters, price, member, event, schedule.
+tool registry and its caps, the members' tools — find, recipe, crafters, price, member, event, schedule — and the
+officer-aware ones — loot, attendance, manual, section.
 
 Every tool is a READ and a thin wrapper over a reader the site or the help snapshot already uses (answer_names.resolve,
 professions.who_can_make / crafters_of / answer_lines, prices.price_answer / cost_line, help.member_lines / run_lines /
-who_line, schedule_view.schedule_sections): nothing here writes, sends or searches on its own. Who asks is fixed in
+who_line, schedule_view.schedule_sections, loot_ops.log_rows / member_awards, help._loot, Registry.attendance_text,
+help.manual_read, help.SECTIONS' builders): nothing here writes, sends or searches on its own. Who asks is fixed in
 code — the Viewer, built once with help.guild_state's rule — and is never read from a tool's arguments. Every result is
 cut to its cap on whole lines (`cut`), neutralised (`llm.provider.unfence`) and wrapped in one data block (`run_tool`).
 Times are guild words (Registry.local12), never a Discord stamp.
@@ -16,6 +18,7 @@ recipe, a manual part, a section — a handler returns it as `One`) ends "… an
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable
 
@@ -37,6 +40,7 @@ BIG_RESULT_CAP = 4_000   # one manual part, one snapshot section or one event
 FIND_RECIPES = 5         # recipes the `recipe` lookup shows for one name
 CHARACTER_RECIPES = 40   # a character's recipe names the `crafters` lookup lists before a count
 RECIPE_CRAFTERS = 8      # crafters one recipe's line names, highest skill first, before "and N more"
+LOOT_ROWS = 15           # awards the `loot` lookup shows, newest first
 ARG_MAX = 200            # every string argument, cut in code as the schema says
 
 OFFICERS_ONLY = "Only officers can see this."
@@ -46,6 +50,7 @@ NAME_ONE = "Name one of these."
 PROFESSION_OR_CHARACTER = "Name a profession or a character, one of the two."
 NO_SCHEDULES = "No raid has a schedule yet. Officers add one on the Schedules page."
 FENCES = ("data", "question", "conversation", "memory", "member-text")
+NO_RECORD = "The asker has no record in this guild yet. They add a character with /register or on the Me page."
 UNKNOWN_SOURCE = "unknown"  # the wrapper's source for a lookup name that isn't one of TOOLS: never the model's own words
 
 
@@ -334,7 +339,7 @@ def _member(v: Viewer, args: dict) -> str:
     if name.lower() in SELF_WORDS:
         m = reg.members.get(v.user_id)
         if m is None or m.test:
-            return "The asker has no record in this guild yet. They add a character with /register or on the Me page."
+            return NO_RECORD
         found = [m]
     else:
         found = _member_named(reg, name)
@@ -453,3 +458,124 @@ def _schedule(v: Viewer, args: dict) -> str:
                 tail = ""
             out.append(f"  {head}" + (f" — {tail}" if tail else ""))
     return "\n".join(out)
+
+
+# ---------------------------------------------------------------- loot
+
+
+def _loot_line(r: dict) -> str:
+    """One award as the Loot log shows it to every member: day · item · character · boss · MS|OS — never a tier, a
+    weight, the bot's pick, who recorded it or a reason (design §12, the owner's decision)."""
+    boss = r.get("boss") if r.get("boss") and r.get("boss") != "?" else None
+    return " · ".join(str(x) for x in (r["date_label"], r["item"], r["character"], boss, "OS" if r["offspec"] else "MS") if x)
+
+
+@_register("loot", "Awards from the guild's loot log, newest first: day, item, character, boss and main or off spec. Give a "
+                   "member or character, part of an item's name, or both; with neither, the asker's own awards. For an "
+                   "officer asking in private, also the council's precedents and reasons.",
+           _schema({"member": _string("A member's or a character's name, or 'me'."),
+                    "item": _string("An item's name, or part of it.")}))
+def _loot(v: Viewer, args: dict) -> str:
+    from . import loot_ops
+    from .lootctx import RegistryLootContext
+
+    reg = v.reg
+    ctx = RegistryLootContext(reg, reg.store, None)  # a fresh read in this worker thread, as help._loot does
+    who, item = _arg(args, "member"), _arg(args, "item")
+    if not who and not item and not v.officer:  # the asker's own awards, as My loot lists them
+        me = reg.members.get(v.user_id)
+        if me is None or me.test:
+            return NO_RECORD
+        memo: dict = {}
+        rows = [loot_ops.log_row(reg, a, memo, False, False, ctx, v.user_id) for a in loot_ops.member_awards(reg, ctx, me, LOOT_ROWS)]
+        if not rows:
+            return "The asker has no award in the loot log yet."
+        return "\n".join(["The asker's own awards, newest first:"] + [_loot_line(r) for r in rows])
+    uid = None
+    if who:
+        if who.lower() in SELF_WORDS:
+            uid = v.user_id
+        else:
+            found = _member_named(reg, who)
+            if not found:
+                return _no_match(who)
+            if len(found) > 1:
+                return "\n".join([m.display_name for m in found] + [NAME_ONE])
+            uid = found[0].discord_id
+    rows = loot_ops.log_rows(reg, ctx, member_uid=uid, item=item or None, officer=False, scores=False, viewer_uid=v.user_id)
+    out = ["Awards from the loot log, newest first:"] + [_loot_line(r) for r in rows[:LOOT_ROWS]] if rows else \
+        ["No award in the loot log matches that."]
+    if len(rows) > LOOT_ROWS:
+        out.append(f"And {len(rows) - LOOT_ROWS} more awards match.")
+    if v.officer:  # an officer in private: the council's view too (precedents with their reasons, the ledger's last rows)
+        out += help_mod._loot(v.ask())
+    return "\n".join(out)
+
+
+# ---------------------------------------------------------------- attendance
+
+
+@_register("attendance", "A member's attendance: how many of the guild's events they played in the window. The asker's "
+                         "own for anyone; another member's only for an officer.",
+           _schema({"member": _string("A member's or a character's name, or 'me'. Leave it out for the asker.")}))
+def _attendance(v: Viewer, args: dict) -> str:
+    reg = v.reg
+    who = _arg(args, "member")
+    found = [reg.members.get(v.user_id)] if not who or who.lower() in SELF_WORDS else _member_named(reg, who)
+    found = [m for m in found if m is not None]
+    own = len(found) == 1 and found[0].discord_id == v.user_id
+    if not own and not v.officer:  # decided before saying whether the name matched anyone
+        return OFFICERS_ONLY
+    if not found:
+        return NO_RECORD if not who or who.lower() in SELF_WORDS else _no_match(who)
+    if len(found) > 1:
+        return "\n".join([m.display_name for m in found] + [NAME_ONE])
+    m = found[0]
+    return f"{m.display_name}'s attendance: {reg.attendance_text(m)}."
+
+
+# ---------------------------------------------------------------- manual
+
+
+NO_MANUAL = "The manual has no part on this."
+MEMBER_READS = ("This reply is for a member: a part marked for officers or the owner says what they do, not what this "
+                "member can do.")
+_PART_HEAD = re.compile(r"^### \S+ \(§(\S+) ", re.M)
+
+
+@_register("manual", "Parts of the bot's manual: give part ids from the contents list, words to look for, or both. A part "
+                     "whose section is marked for officers or the owner says so in its heading.",
+           _schema({"ids": {"type": "array", "items": {"type": "string", "maxLength": ARG_MAX}, "maxItems": help_mod.READ_PARTS,
+                            "description": "Part or section ids from the contents list, such as '4.3' or '4'."},
+                    "query": _string("Words to look for in the manual.")}),
+           cap=BIG_RESULT_CAP)
+def _manual(v: Viewer, args: dict) -> str:
+    raw = args.get("ids")
+    ids = [str(x).strip()[:ARG_MAX] for x in raw if isinstance(x, (str, int)) and not isinstance(x, bool)] if isinstance(raw, list) else []
+    text = help_mod.manual_read(ids[:help_mod.READ_PARTS], question=_arg(args, "query") or v.question)
+    if not text.strip():
+        return NO_MANUAL
+    if not v.officer:  # the parts stay marked as today (help.section_tier in their headings); never shown as the member's to use
+        tiers = {s["id"]: s["tier"] for s in help_mod.manual_sections()}
+        if any(tiers.get(sid) for sid in _PART_HEAD.findall(text)):
+            text = MEMBER_READS + "\n" + text
+    return One(text)
+
+
+# ---------------------------------------------------------------- section
+
+
+@_register("section", "One of the bot's ready-made summaries, as the asker may see it: " + ", ".join(help_mod.SECTIONS) + ". "
+                      "Some are for officers only.",
+           _schema({"key": {"type": "string", "enum": list(help_mod.SECTIONS), "maxLength": ARG_MAX, "description": "Which summary."}},
+                   ("key",)),
+           cap=BIG_RESULT_CAP)
+def _section(v: Viewer, args: dict) -> str:
+    key = _arg(args, "key")
+    if key not in help_mod.SECTIONS:
+        return _no_match(key)
+    _pattern, build, cap, officers = help_mod.SECTIONS[key]
+    if officers and not v.officer:  # each section keeps its own flag; an officer where members read is a member here
+        return OFFICERS_ONLY
+    lines = help_mod._clip(build(v.ask()), min(cap, BIG_RESULT_CAP))
+    return One("\n".join(lines)) if lines else "This summary has nothing to show yet."

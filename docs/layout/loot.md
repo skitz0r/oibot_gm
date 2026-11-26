@@ -50,7 +50,10 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
   loot_ops.py          the `loot` / `wishlist` / `tier` plain-text ops (configops' loot branch → LootMixin verbs / Registry wishlist + tier verbs),
                        SCHEMA (into SCHEMA_TEXT), needs_actor (D8), loot_revs (batch_rev on a confirm-all diff), loot_log_state, member_awards, loot_block;
                        phase 4 (§5.48): the `loot_weights` op's words (weight_rows / weight_part / WEIGHT_GROUPS) + apply_weights, received_map
-                       (the Me page's and /me wishlist's "received" marks), last_council (what re-score reads)
+                       (the Me page's and /me wishlist's "received" marks), last_council (what re-score reads);
+                       THE award log's rows: log_rows(reg, ctx, member_uid=, item=, limit=, officer=, scores=, viewer_uid=) over log_row /
+                       award_is_members (moved out of web/api_loot.py: GET /api/loot/log and /api/me/loot call them; the answer loop's
+                       `loot` lookup reads the members' fields only — scores, picks and reasons need officer AND scores)
   feed.py              companion listener: aiohttp WebSocket on the tailnet (OIBOT_FEED_TOKEN/BIND; OIBOT_FEED_TOKEN_<KEY> binds a companion to one guild), hello+token;
                        dedupe is per loot SESSION (seen_idem), an `error` reply is not an ack; presence(guild) live | quiet | disconnected; status(guild) one line;
                        ts = epoch seconds (ts_kind); refuse_event = a clock-only KILL refused + warn_once → on_warn (ops_warner: "companion too old", once);

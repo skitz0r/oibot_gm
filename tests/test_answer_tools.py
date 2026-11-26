@@ -111,8 +111,9 @@ def test_every_tool_result_is_capped(reg, rs, monkeypatch):
     real_event(reg, rs)
     calls = {"find": {"text": "ironfeather leather"}, "recipe": {"name": "Ironfeather Breastplate"},
              "crafters": {"profession": "Leatherworking"}, "price": {"name": "ironfeather"},
-             "member": {"name": "Wrenfield"}, "event": {"which": "next"}, "schedule": {}}
-    assert set(calls) == set(at.TOOLS), "every tool of this task is tried"
+             "member": {"name": "Wrenfield"}, "event": {"which": "next"}, "schedule": {},
+             "loot": {}, "attendance": {}, "manual": {"query": "how do I sign up"}, "section": {"key": "who"}}
+    assert set(calls) == set(at.TOOLS), "every tool is tried"
     marked = set()
     for name, args in calls.items():
         tool = at.TOOLS[name]
