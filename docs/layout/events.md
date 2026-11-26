@@ -31,7 +31,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        unchanged), _refuse_conflicts → Conflict(reason KEPT_ON | KEPT_BOTH | GROUP_FULL | GROUP_ROLES, names, group, roster, have,
                        seats) before searching (str() keeps "no roster found: <reason>"); Stop (CpSolver.stop_search on every attached solver) /
                        Stopped = THE way the Events board's pictures give way to a lock (only they pass one); SolveOptions.kept_off is informational
-                       (explain's Closest to a seat skips it)), explain.py (advisories), coverage.py (slot-aware)
+                       (explain's Closest to a seat skips it)), explain.py (advisories; "Closest to a seat" lists who joined before any Bench
+                       answer and tries them first — never the what-if's numbers, which carry the bench's cost; "In from the bench" + its
+                       details line: rostered only for a seat nobody who joined could take), coverage.py (slot-aware)
   raidcycle.py         signup-driven cycle (design.md §5.20): raid SCHEDULES (§5.27: Registry.schedules/schedule_def; weekly slots · day N of each
                        lockout · pickup templates; every schedule has a guild-unique id, there is no `default` one) + timing (schedule_def: slots, the
                        schedule's own SCHEDULE_TIMING, weights) → occurrences/upcoming/schedule_starts/open_run(schedule=) (ephemeral run dict per raid
@@ -41,7 +43,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        expire_confirmations, fill engine (after lock only: benched joiners + Bench first → pool → offspec → alt swaps, paired with a backfill
                        when the vacated role would go short; asks expire after fill_ask_hours). `nudge`/`nudge_hours_before`/`autofill`/`open_dm`
                        are the run dict's, seeded from its schedule at open (a run's own via reschedule). No LLM. Run states open | locked | done | cancelled; the member-facing word is "rostered", never "seated".
-                       THE run vocabulary (design §5.56 phase 2): RUN_STATE_WORDS, NO_CONFIRMATIONS, FIRST_COME, BANK_WORDS (Not placed / Not rostered),
+                       THE run vocabulary (design §5.56 phase 2): RUN_STATE_WORDS, NO_CONFIRMATIONS, FIRST_COME, SHEET_ANSWERS (the open sheet's
+                       footer: Bench = call me if a seat would stay empty), bench_promise(reg, signup) (the Bench receipt's tail: rostered only
+                       for a seat that would stay empty — or a tank / healer short, for one who plays it — and among the first asked), BANK_WORDS (Not placed / Not rostered),
                        LEFTOVERS, PIN_WORDS, NOT_ANSWERED_WORDS, ASK_HOW (how an ask reaches someone), ASK_ANSWER_WORDS, fill_state_text (sentences),
                        answer_word (the Me badge), balance_words (a split compared in words) — /api/meta carries them; the site keeps no copy
                        ONE planner (rc.role_plan; fill engine extended to before lock): ranked moves with alternates and a still-short line; nothing is
@@ -152,7 +156,13 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        answers past the seats the joiners leave, in answer order (Player.pos — a Bench answer's place is when its Bench began:
                        Signup.benched_at, kept by carry_joined like joined_at, absent on older files = updated_at; Signup.order_at), keeping a
                        hand-placed one and one able to play a tank / healer seat the joiners together leave short (solver.bench_refund_room's
-                       total and roles, in answer order); _solve_run's later-raid branch no longer reuses the groups per
+                       total and roles, in answer order); bench_prediction(reg, rs, ev) → BenchSeats(total, placed, joiners, seats; rest,
+                       displaced, rostered) = how many Bench answers the lock rosters, WITHOUT a solve (the lock box's count; bench_seats =
+                       its total): lock_forces, _roster_count, merged_role_min and on a first-to-join event first_come_out +
+                       first_come_bench_out as _solve_run takes them, then the kept-on Bench answers + min(the queue, max(the seats the
+                       joiners leave empty, the tank / healer seats solver.bench_refund_room leaves the joiners short matched by
+                       solver.role_cover against the queue)); `displaced` = joiners who sit out because of them, `rostered` = the lock's
+                       headcount over the rosters it builds; _solve_run's later-raid branch no longer reuses the groups per
                        roster as the part number (a hand place past a later raid's first groups reaches the solve); SOLVER_WORDS + conflict_sentence →
                        solver_error_text (a timeout checked before infeasible; never an exception's words; a stored sentence reads as itself).
                        Role switches: event_switches(reg, rs, first, viewer=) → {short [{raid, roles, why}], rows, revs} composed from each live raid's

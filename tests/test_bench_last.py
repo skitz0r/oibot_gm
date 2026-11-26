@@ -687,3 +687,205 @@ def test_the_parsers_board_lists_unplaced_bench_answers(reg, rs):
     head, bench = text.split(" · Bench: ")
     assert set(bench.split(", ")) == {raider.display_name, trial.display_name}, text
     assert set(head.split(" · not placed: ")[1].split(", ")) == names(joiners[1:]), text
+
+
+# ---------------------------------------------------------------- the lock's words (task 6)
+
+def _case_full(reg, rs):
+    ev = schedule_event(reg, rs)
+    join(reg, rs, ev, base_eight(reg) + people(reg, 4, DPS))
+    join(reg, rs, ev, people(reg, 1, HEAL, "core") + people(reg, 1, DPS, "core"), "sub")
+    return ev
+
+
+def _case_healer(reg, rs):
+    reg.set_minimums(RID, {"healer": {"min": 2}}, "t")
+    ev = schedule_event(reg, rs)
+    join(reg, rs, ev, people(reg, 12, DPS))
+    join(reg, rs, ev, people(reg, 1, HEAL), "sub")
+    return ev
+
+
+def _case_strong(reg, rs):
+    sid = weekly(reg)
+    reg.set_minimums(RID, {"Paladin": {"min": 1}}, "t")
+    ev = rc.open_run(reg, rs, RID, first_slot(reg, RID), by="t", schedule=sid)
+    join(reg, rs, ev, people(reg, 2, TANK) + people(reg, 2, HEAL) + people(reg, 7, DPS))
+    join(reg, rs, ev, people(reg, 1, ("Paladin", "Retribution"), "core"), "sub")
+    return ev
+
+
+def _case_no_roster_added(reg, rs):
+    ev = one_off(reg, rs)
+    join(reg, rs, ev, base_eight(reg) + people(reg, 2, DPS))
+    join(reg, rs, ev, people(reg, 4, TANK) + people(reg, 4, HEAL) + people(reg, 2, DPS), "sub")
+    return ev
+
+
+def _case_first_to_join(reg, rs):
+    ev = one_off(reg, rs)
+    join(reg, rs, ev, people(reg, 2, TANK) + people(reg, 2, HEAL) + people(reg, 3, DPS))
+    join(reg, rs, ev, people(reg, 5, DPS), "sub")
+    return ev
+
+
+def _case_kept_off(reg, rs):
+    ev = schedule_event(reg, rs)
+    join(reg, rs, ev, base_eight(reg))
+    off, other = people(reg, 2, DPS)
+    join(reg, rs, ev, [off, other], "sub")
+    ev.pins[str(off.discord_id)] = "out"
+    return ev
+
+
+def _case_placed_bench(reg, rs):
+    """Ten joiners and a Bench answer placed by hand: the board's Bench answer is rostered, a joiner sits out."""
+    ev = schedule_event(reg, rs)
+    join(reg, rs, ev, base_eight(reg) + people(reg, 2, DPS))
+    placed = people(reg, 1, DPS)[0]
+    join(reg, rs, ev, [placed] + people(reg, 1, DPS), "sub")
+    ev.layout = [[], [placed.display_name]]
+    return ev
+
+
+def _case_spare_tank_heals(reg, rs):
+    """The joiners together meet both minimums (a Protection Paladin who can heal): the benched Priest stays off, the
+    benched Mage takes the one empty seat."""
+    reg.set_minimums(RID, {"tank": {"min": 1}, "healer": {"min": 3}}, "t")
+    ev = schedule_event(reg, rs)
+    join(reg, rs, ev, people(reg, 1, TANK) + people(reg, 1, ("Paladin", "Protection"), off="Holy") + people(reg, 2, HEAL)
+         + people(reg, 5, DPS))
+    join(reg, rs, ev, people(reg, 1, DPS) + people(reg, 1, HEAL), "sub")
+    return ev
+
+
+def _case_only_tank_heals(reg, rs):
+    """The only tank is a Paladin who can heal and ten joiners fill the seats: the joiners together are a healer short,
+    so a benched Priest takes a joiner's seat (the tank / healer exception)."""
+    reg.set_minimums(RID, {"tank": {"min": 1}, "healer": {"min": 3}}, "t")
+    ev = schedule_event(reg, rs)
+    join(reg, rs, ev, people(reg, 1, ("Paladin", "Protection"), off="Holy") + people(reg, 2, HEAL) + people(reg, 7, DPS))
+    join(reg, rs, ev, people(reg, 1, HEAL), "sub")
+    return ev
+
+
+BOX_CASES = {"case 1": lambda reg, rs: case_one(reg, rs)[0], "case 2": _case_full, "case 3": _case_healer,
+             "case 5": _case_strong, "case 7": _case_no_roster_added, "first to join": _case_first_to_join,
+             "kept off": _case_kept_off, "placed by hand": _case_placed_bench, "spare tank heals": _case_spare_tank_heals,
+             "only tank heals": _case_only_tank_heals}
+BOX_WANT = {"case 1": 2, "case 2": 0, "case 3": 1, "case 5": 0, "case 7": 0, "first to join": 3, "kept off": 1,
+            "placed by hand": 1, "spare tank heals": 1, "only tank heals": 1}
+
+
+@pytest.mark.parametrize("case", sorted(BOX_CASES))
+def test_the_bench_count_the_box_predicts_is_what_the_lock_rosters(reg, rs, case):
+    ev = BOX_CASES[case](reg, rs)
+    predicted = rc.bench_seats(reg, rs, ev)
+    rc.propose(reg, rs, ev, save=False)
+    rostered = [p for r in ev.all_rosters for p in r.selected if p.status == "bench"]
+    assert predicted == len(rostered) == BOX_WANT[case], (case, predicted, [p.signup_name for p in rostered])
+
+
+def test_the_lock_box_says_how_many_come_from_the_bench(reg, rs):
+    from oibot_gm import consequences as cq
+
+    ev, joiners, *_ = case_one(reg, rs)
+    assert rc.run_confirms(reg, ev)
+    b = cq.lock_box(reg, ev, rs)
+    assert b["sentences"][0].endswith("from those who joined and 2 from the bench."), b
+    assert b["sentences"][1].startswith("The 10 rostered get"), b
+    ev.layout = [[joiners[0].display_name]]
+    b = cq.lock_box(reg, ev, rs)
+    assert b["sentences"][0] == "Everyone on the board keeps their place, and the lock fills the rest, 2 from the bench.", b
+
+
+def test_the_lock_box_says_one_from_the_bench_in_a_word(reg, rs):
+    from oibot_gm import consequences as cq
+
+    ev = _case_kept_off(reg, rs)  # 8 joined, two on the Bench, one of them kept off
+    assert cq.lock_box(reg, ev, rs)["sentences"][0].endswith("from those who joined and one from the bench."), ev.key
+    ev = _case_healer(reg, rs)  # 12 joined, no healer: the benched healer takes a joiner's seat
+    assert cq.lock_box(reg, ev, rs)["sentences"][0].endswith("with one from the bench, so one person who joined sits out.")
+
+
+def test_a_full_roster_of_joiners_keeps_todays_lock_box(reg, rs):
+    from oibot_gm import consequences as cq
+
+    ev = _case_full(reg, rs)
+    head = cq.lock_box(reg, ev, rs)["sentences"][0]
+    assert "bench" not in head and head.endswith("from those who joined."), head
+
+
+def test_the_bench_receipt_says_when_the_lock_rosters_them(reg, rs):
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    text = rc.answer_receipt(reg, ev, core)
+    assert "only if a seat would stay empty" in text and "first asked" in text
+    assert "short a" not in text  # a damage dealer: the tank / healer exception isn't theirs
+    healer = people(reg, 1, HEAL)[0]
+    join(reg, rs, ev, [healer], "sub")
+    assert "short a healer nobody who joined can cover" in rc.answer_receipt(reg, ev, healer)
+
+
+def test_closest_to_a_seat_lists_a_joiner_before_a_bench_answer(reg, rs):
+    ev = schedule_event(reg, rs)
+    joiners = base_eight(reg) + people(reg, 3, DPS, "trial")  # 11 joined: one left out
+    join(reg, rs, ev, joiners)
+    star = people(reg, 1, DPS, "core")[0]
+    join(reg, rs, ev, [star], "sub")
+    rc.propose(reg, rs, ev, save=False)
+    line = next(a for a in ev.all_rosters[0].advisories if "Closest to a seat" in a)
+    out = [n.strip() for n in line.split("·", 1)[1].split(",")]
+    assert out[-1] == star.display_name and len(out) == 2, line
+    assert not any(ch.isdigit() for ch in line), line
+
+
+def _seated_all(reg, rs, ev) -> set[str]:
+    rc.propose(reg, rs, ev, save=False)
+    return {p.signup_name for r in ev.all_rosters for p in r.selected}
+
+
+def test_the_lock_box_says_a_hand_placed_bench_answer_leaves_a_joiner_out(reg, rs):
+    from oibot_gm import consequences as cq
+
+    ev = schedule_event(reg, rs)
+    joiners = base_eight(reg) + people(reg, 2, DPS)
+    join(reg, rs, ev, joiners)
+    placed = people(reg, 1, DPS)[0]
+    join(reg, rs, ev, [placed], "sub")
+    ev.layout = [[placed.display_name]]
+    b = cq.lock_box(reg, ev, rs)
+    assert b["sentences"][0] == "Everyone on the board keeps their place, and one person who joined sits out.", b
+    assert b["sentences"][1].startswith("The 10 rostered get"), b
+    got = _seated_all(reg, rs, ev)
+    assert placed.display_name in got and len(got & names(joiners)) == 9
+
+
+def test_the_lock_box_says_the_bench_fills_open_seats_when_every_joiner_is_placed(reg, rs):
+    from oibot_gm import consequences as cq
+
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    ns = sorted(names(joiners))
+    ev.layout = [ns[:5], ns[5:]]
+    b = cq.lock_box(reg, ev, rs)
+    assert b["sentences"][0] == "Everyone on the board keeps their place, and the lock fills the rest, 2 from the bench.", b
+
+
+def test_the_lock_box_says_a_healer_from_the_bench_makes_a_joiner_sit_out(reg, rs):
+    from oibot_gm import consequences as cq
+
+    ev = _case_only_tank_heals(reg, rs)
+    head = cq.lock_box(reg, ev, rs)["sentences"][0]
+    assert head == "The lock builds the roster for Barrow Deeps with one from the bench, so one person who joined sits out.", head
+
+
+def test_the_lock_box_counts_the_second_roster_a_hand_placed_bench_answer_makes(reg, rs):
+    from oibot_gm import consequences as cq
+
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    k = rc.groups_per_roster(reg, rc.run_size(reg, ev))
+    ev.layout = [[] for _ in range(k)] + [[trial.display_name]]
+    pred = rc.bench_prediction(reg, rs, ev)
+    got = _seated_all(reg, rs, ev)
+    assert len(ev.all_rosters) == 2 and pred.seats == 20
+    assert pred.rostered == len(got) == 11, (pred, sorted(got))
+    assert cq.lock_box(reg, ev, rs)["sentences"][1].startswith("The 11 rostered get")

@@ -67,7 +67,11 @@ def annotate(profile: GameProfile, players: list[Player], raid_id: str, result: 
 
     whatif_map: dict[str, int] = {}
     kept_off = set(opts.kept_off if opts is not None else ())  # kept off by a pin, a drag or the policy: never "closest"
-    candidates = (sorted((p for p in result.benched if p.signup_name not in kept_off), key=lambda p: (RANK_ORDER.get(p.rank, 9), p.pos))[:max(0, whatif_limit)]
+    # a joiner left out always comes before a Bench answer (the Bench is last at the lock: forcing one in costs the
+    # solve far more than any joiner, a number no person reads), so the joiners are tried first and listed first
+    bench = {p.signup_name for p in players if p.status == "bench"}
+    candidates = (sorted((p for p in result.benched if p.signup_name not in kept_off),
+                         key=lambda p: (p.signup_name in bench, RANK_ORDER.get(p.rank, 9), p.pos))[:max(0, whatif_limit)]
                   if whatif else [])
     for p in candidates:
         try:
@@ -82,12 +86,15 @@ def annotate(profile: GameProfile, players: list[Player], raid_id: str, result: 
     if promoted:
         adv.append("🟢 In from the bench · "
                    + ", ".join(f"{p.signup_name} ({p.spec}, came {p.attended} of {p.attendance_total})" for p in promoted[:3]))
+        details.append("In from the bench: rostered only for a seat nobody who joined could take, an empty seat or a tank "
+                       "or healer minimum those who joined could not meet.")
     if whatif_map:
-        ranked = sorted(whatif_map.items(), key=lambda kv: -kv[1])[:4]
+        ranked = sorted(whatif_map.items(), key=lambda kv: (kv[0] in bench, -kv[1]))[:4]
         # who left out comes closest to a seat, closest first — the order alone (the group-building numbers stay in
         # bench_whatif for code; a person reads names, design §5.56 phase 2)
         adv.append("🟢 Closest to a seat · " + ", ".join(n for n, _d in ranked))
-        details.append("Closest to a seat: who left out would cost the roster least if brought in instead, closest first.")
+        details.append("Closest to a seat: who was left out would cost the roster least if brought in instead, closest "
+                       "first, everyone who joined before anyone on the bench.")
 
     result.advisories = adv
     result.details = details

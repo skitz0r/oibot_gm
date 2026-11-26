@@ -93,8 +93,10 @@ understands; it answers in the words below.
   rostered name are the Discord card's: ✅ confirmed · ⏳ waiting · ❌ can't make it · ⌛ no answer in time.
 - **An event's state** — one word on every surface: *open for signup*, *locked — the roster stands*, *finished* (it ended)
   or *cancelled*.
-- **Bench** — the sheet answer "call me if you need me": you aren't on the roster, but when a place frees up you are
-  among the first asked.
+- **Bench** — the sheet answer "call me if a seat would stay empty": the lock rosters you only when a seat would
+  otherwise stay empty, or when the event is short a tank or healer that nobody who joined can cover and you play that
+  role. A seat is never taken from someone who joined for any other reason. When a place frees up later, you are among
+  the first asked.
 - **The board** — an event's groups on the Events page, the one name for them (never "builder" or "bank"): before the lock
   it is the layout the lock will use (officers drag names into groups; the lock places everyone else), after the lock it
   *is* the roster. On the Events page it shows what officers placed; they shape it by dragging names (or a name's
@@ -216,8 +218,8 @@ understands; it answers in the words below.
 - **#register (registration channel)** — read-only; the pinned card has four buttons: *Apply to join*
   (newcomers start here), *Register / plan my main*, *Add an alt*, *My status*. Anyone can press them. The card
   says when applications are closed and shows the recruitment note; the bot edits it in place when those change.
-- **Signup channel** — one sheet per event. An **open** sheet has **Join / Bench / No thanks** buttons (Bench =
-  call me if you need me). The sheet's title is a link to that event on the site: officers land on its event page,
+- **Signup channel** — one sheet per event. An **open** sheet has **Join / Bench / No thanks** buttons (its
+  footer: *Join = I'm coming · Bench = call me if a seat would stay empty*). The sheet's title is a link to that event on the site: officers land on its event page,
   everyone else on the same event on their **Events** page (§2a), with their own Join / Bench / No thanks, so you can
   answer on the site from Discord. Once the event has finished or was cancelled the page says so above the events
   still open; your loot and attendance are on the Me page. The sheet is a card: raid emblem, date and countdown, joined count and role counts,
@@ -1045,7 +1047,7 @@ who could cover it — and **sends nothing until an officer presses Ask**. It ne
 Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps opens 48 h before):
 
 1. **Sheet opens** — `signup_lead_hours` [120 h] before the slot the bot posts the sheet in the signup
-   channel: **Join** (I'm coming), **Bench** (call me if you need me), **No thanks** (⚑ after a name = called
+   channel: **Join** (I'm coming), **Bench** (call me if a seat would stay empty), **No thanks** (⚑ after a name = called
    out after answering). With more than one character you pick which one. Anyone with a registered absence that day
    is listed under **Away** instead (names only, the first 15 then "+N"; reasons stay with officers): they aren't
    nudged or asked to fill, and pressing Join or Bench anyway takes them out of Away. A Join on a day you're away
@@ -1124,7 +1126,8 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    person whose answer leaves Join and Bench (No thanks, Can't make it, an absence, leaving the server, a retired
    character) or who changes the character or spec they come as comes off the board at once too — Auto-fill or the
    lock places them again if they still play; a placed name moving between Join and Bench keeps its place. **Auto-fill groups**, under the *Not placed* heading,
-   places everyone still there the way the lock would right now — the lock's own placement, with every name you placed
+   places everyone still there the way the lock would right now (and the Bench answers the lock would roster: only where
+   a seat would stay empty or a tank or healer is short) — the lock's own placement, with every name you placed
    by hand kept where it is and every *kept off* honoured — and writes it into the groups; it asks nothing first (it
    changes only the board). While it works the button shows *Filling the groups the way the lock would. The board
    updates when it is done.* (about 12 seconds a raid; a lock being built goes first and stops it, *A lock started
@@ -1315,11 +1318,19 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    anything). A test event opened in the same minute as one
    you just cleared starts a minute later.
 4. **Lock** — `lock_hours_before` [24 h] before the slot (or *Lock now* / `/raid lock`): everyone officers
-   placed on the board keeps their place, and the lock places those still under *Not placed* in the open seats. Lock
-   now asks first and its confirm says which, names every roster and says who is told: *"The lock builds the roster for
-   Hyjal Summit and both Barrow Deeps rosters from those who joined."* with nobody placed, *"Everyone on the board keeps
-   their place, and the lock fills the open seats from Not placed."* with some, *"The board becomes the roster for
-   Hyjal Summit and both Barrow Deeps rosters."* when every seat is placed or nobody is left under Not placed, then
+   placed on the board keeps their place, and the lock places those still under *Not placed* in the open seats, then
+   the bench. The order is everyone who joined, then the Bench answers in the event's own order (by priority, or by
+   when they answered on a first-to-join event): a Bench answer takes a seat only where it would otherwise stay empty,
+   or where the event is short a tank or healer that nobody who joined can cover. The number of rosters comes from those
+   who joined; the bench never adds one. A Bench answer the lock rosters gets the Confirm ask like anyone rostered. Lock
+   now asks first and its confirm says which, names every roster, says how many come from the bench and who is told:
+   *"The lock builds the roster for Hyjal Summit and both Barrow Deeps rosters from those who joined."* with nobody
+   placed (*"… from those who joined and 2 from the bench."* when two seats would stay empty; *"… with one from the
+   bench, so one person who joined sits out."* when a benched healer covers a healer minimum), *"Everyone on the board
+   keeps their place, and the lock fills the open seats from Not placed."* with some (*"… and the lock fills the rest,
+   2 from the bench."*; *"… and one person who joined sits out."* when a Bench answer you placed by hand takes a
+   joiner's seat), *"The board becomes the roster for Hyjal Summit and both Barrow Deeps rosters."* when every seat is
+   placed or nobody is left to place, then
    *"The 20 rostered get the Confirm or Can't make it DM. They have
    until Tue 15 Dec 12:30 PM to answer."* — on a one-off *"Nobody is asked to confirm. You can still move people after
    the lock."* On the site every such confirm is one box: a title naming the action (*Lock Tue 15 Dec 6:30 PM?*), at

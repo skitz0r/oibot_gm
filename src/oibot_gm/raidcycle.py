@@ -7,7 +7,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, NamedTuple, Optional
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -33,6 +33,7 @@ RUN_STATE_WORDS = {"open": "open for signup", "locked": "locked — the roster s
 NO_CONFIRMATIONS = "nobody is asked to confirm"
 # how an ad hoc run seats people (D4)
 FIRST_COME = "first come, first rostered"
+SHEET_ANSWERS = "Join = I'm coming · Bench = call me if a seat would stay empty"  # the open sheet's footer (raid_views.sheet_message)
 # the board's list of joiners who hold no seat: before the lock nobody is placed yet, after it they aren't rostered
 BANK_WORDS = {"open": "Not placed", "locked": "Not rostered"}
 # who the bot waits on before the lock (rc.expected_from) — the officers' box on the site and the health card
@@ -4318,6 +4319,94 @@ def _roster_count(reg: Registry, ev: RaidEvent, players: list[Player], layout_gr
                -(-used // k) if used else 1)
 
 
+class BenchSeats(NamedTuple):
+    """bench_prediction's answer: `total` Bench answers the lock rosters, `placed` of them already on the board (kept
+    on: a board place, an in pin, never_bench) — `rest` come from the bench's queue; `joiners` = the Join answers the
+    lock may roster (not kept off, not late on a first-to-join event) and `seats` = run size × the rosters the lock
+    builds (_roster_count: a board place in a second roster's group makes two)."""
+
+    total: int = 0
+    placed: int = 0
+    joiners: int = 0
+    seats: int = 0
+
+    @property
+    def rest(self) -> int:
+        return self.total - self.placed
+
+    @property
+    def displaced(self) -> int:
+        """Joiners left off BECAUSE of the Bench answers rostered (a hand place, a tank / healer short): the joiners the
+        seats leave out with them, less those left out without them."""
+        return max(0, self.joiners + self.total - self.seats) - max(0, self.joiners - self.seats)
+
+    @property
+    def rostered(self) -> int:
+        """How many the lock rosters: the joiners and the Bench answers it takes, up to the seats."""
+        return min(self.seats, self.joiners + self.total)
+
+
+def bench_seats(reg: Registry, rs, ev: RaidEvent) -> int:
+    """How many Bench answers the lock rosters (bench_prediction's total)."""
+    return bench_prediction(reg, rs, ev).total
+
+
+def bench_prediction(reg: Registry, rs, ev: RaidEvent) -> BenchSeats:
+    """How many Bench answers the lock rosters, predicted WITHOUT a solve (the lock box reads it; boxes never solve).
+    The lock's own inputs (lock_forces, _roster_count, merged_role_min, and on a first-to-join event first_come_out and
+    first_come_bench_out) and the solve's own shared rule for the tank / healer exception (solver.bench_refund_room +
+    solver.role_cover), so it agrees with the lock: a Bench answer kept on (a board place) is rostered; the others fill
+    the seats the joiners leave empty, or the tank / healer minimum seats the joiners together cannot fill when they can
+    play that role (main or offspec) — whichever is more, never more than there are. A Bench answer kept off never
+    counts, nor one Auto-fill placed as a board place (lock_forces decides it again). Pure and cheap: no solve, no
+    write; one players_for, lock_forces and policy read."""
+    from .policy import PolicyStore
+
+    players = players_for(reg, ev)
+    raid_id = ev.instance if ev.instance in reg.profile.raids else next(iter(reg.profile.raids))
+    size = run_size(reg, ev)
+    forces = lock_forces(reg, rs, ev, players)
+    n_rosters = _roster_count(reg, ev, players, max(forces.placed.values(), default=-1) + 1)  # _solve_run's `used`
+    seats = size * n_rosters
+    cc = PolicyStore(rs.store if rs is not None else reg.store, rs.key if rs is not None else reg.key).comp_constraints()
+    need = {r: n * n_rosters for r, n in merged_role_min(reg.role_bounds(raid_id, size), cc["role_min"]).items() if r in EXTRA_ROLES}
+    off, kept = set(forces.kept_off), set(forces.kept_on)
+    gone = set(off)
+    if run_first_come(reg, ev):  # the same two steps _solve_run takes before the solve
+        late = first_come_out([p for p in players if p.signup_name not in off], seats, need, kept)
+        late |= first_come_bench_out(reg.profile, players, seats, need, kept, late, off)
+        gone |= late - kept
+    joiners = [p for p in players if p.status == "signed" and p.signup_name not in gone]
+    bench = sorted((p for p in players if p.status == "bench" and p.signup_name not in gone), key=lambda p: p.pos)
+    if not bench:
+        return BenchSeats(joiners=len(joiners), seats=seats)
+    placed = [p for p in bench if p.signup_name in kept]
+    queue = [p for p in bench if p.signup_name not in kept]
+    room = solver.bench_refund_room(reg.profile, players, need, skip=gone)  # the solve's own room (its skip = force_out)
+    total, roles = room.total, dict(room.roles)
+
+    def plays(p) -> list[str]:
+        sw = solver.switch_spec(reg.profile, p)
+        return [r for r in roles if roles[r] > 0 and (p.role == r or (sw is not None and sw.role == r))]
+
+    for p in placed:  # a placed Bench answer playing a short role takes that room first
+        if total > 0 and (short_roles := plays(p)):
+            roles[short_roles[0]] -= 1
+            total -= 1
+    counts = {"tank": 0, "healer": 0, "either": 0}
+    for p in queue:
+        can = set(plays(p))
+        if can >= {"tank", "healer"}:
+            counts["either"] += 1
+        elif can:
+            counts[next(iter(can))] += 1
+    short = min(max(0, total), solver.role_cover(counts["tank"], counts["healer"], counts["either"],
+                                                  roles.get("tank", 0), roles.get("healer", 0))[0])
+    empty = max(0, seats - len(joiners) - len(placed))
+    rest = min(len(queue), max(empty, short))
+    return BenchSeats(total=min(seats, len(placed) + rest), placed=len(placed), joiners=len(joiners), seats=seats)
+
+
 def merged_role_min(rb: dict, policy: dict[str, int] | None) -> dict[str, int]:
     """The lock's role minimums: the raid's tank/healer minimums (role_bounds — a 0 the raid set is kept, so the game's
     own doesn't come back in the solver) with the comp policy's role_min laid over them PER ROLE — a policy line about
@@ -6203,6 +6292,22 @@ def _ordinal(n: int) -> str:
     return f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
 
 
+def bench_promise(reg: Registry, s: Signup) -> str:
+    """What a Bench answer means for this person (the receipt's tail, design §3 of 2026-11-25): the lock rosters them
+    only for a seat that would stay empty — or, when they can play tank or healer (main or offspec), for that minimum
+    when nobody who joined can cover it (solver.bench_refund_room's rule) — and they are among the first asked if a
+    seat opens later (the fill engine asks the bench first)."""
+    roles = {s.role}
+    if s.offspec:
+        try:
+            roles.add(reg.profile.spec(s.cls, s.offspec).role)
+        except KeyError:
+            pass
+    can = [r for r in EXTRA_ROLES if r in roles]
+    short = f" or the event is short a {' or '.join(can)} nobody who joined can cover" if can else ""
+    return f"the lock rosters you only if a seat would stay empty{short}, and you're among the first asked if one opens."
+
+
 def answer_receipt(reg: Registry, ev: RaidEvent, m: Member) -> str:
     """THE receipt for an answer (design §2.7: it renders STATE, not the action) — the sheet button's ephemeral reply, the
     Me page's toast: what they are now on this run, as which character, and what happens next. On an ad hoc run the
@@ -6244,7 +6349,7 @@ def _answer_state(reg: Registry, ev: RaidEvent, m: Member) -> str:
             return (f"You're **joined** as {as_} for {run} · {len(ins)}/{seats} so far."
                     + (f" Join counts for 1 of {n} rosters — which one is decided at lock." if n > 1 else " The roster is decided at lock."))
         if s.status == "sub":
-            return f"You're on the **Bench** as {as_} for {run} — not coming unless needed; the officers ask you if a seat opens."
+            return f"You're on the **Bench** as {as_} for {run} — {bench_promise(reg, s)}"
         away = " (you're marked away that day)" if s.source == "absence" else ""
         return f"You're **No thanks** for {run}{away}."
     seat = ev.seat_of(m)

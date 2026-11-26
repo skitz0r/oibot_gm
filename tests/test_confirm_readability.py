@@ -846,6 +846,48 @@ def box_cases(reg, rs, runs, ms, dump):
         assert b["verb"] is None and b["sentences"] == [rc.SOLVER_WORDS["all_off"]], b
         add("lock_box", "everyone who joined kept off", b)
     ev.pins, ev.layout = pins, layout
+    # Bench answers the lock rosters (2026-11-25 §3): the head counts them, the DM sentence counts them in
+    ms = [reg.members[REAL + i] for i in range(len(PEOPLE))]
+    def fresh_run():  # a schedule's night nothing else in this harness has opened (open_run gives back an opened one)
+        for n in range(5, 9):
+            e = recurring_run(reg, rs, n)
+            if e.state == "open" and not e.signups:
+                return e
+        raise AssertionError("no free night left for the Bench cases")
+
+    b1 = fresh_run()
+    join(reg, rs, b1, ms[:8])
+    join(reg, rs, b1, ms[8:11], "sub")
+    b = cq.lock_box(reg, b1, rs)
+    assert b["sentences"][0].endswith("and 2 from the bench."), b
+    add("lock_box", "open recurring, empty board, two from the bench", b)
+    b1.layout = [[ms[0].display_name]]
+    b = cq.lock_box(reg, b1, rs)
+    assert b["sentences"][0] == "Everyone on the board keeps their place, and the lock fills the rest, 2 from the bench.", b
+    add("lock_box", "open recurring, one placed, two from the bench", b)
+    b1.layout = None
+    ms[9].dm_opt_out = True  # which two of the three Bench answers the lock takes is the solve's: their DMs are unknown
+    b = cq.lock_box(reg, b1, rs)
+    assert "or see it on the site with DMs off" in b["sentences"][1], b
+    add("lock_box", "open recurring, two from the bench, one Bench answer with DMs off", b)
+    ms[9].dm_opt_out = False
+    b3 = fresh_run()  # no healer joined: the benched Priest takes a seat for the healer minimum
+    join(reg, rs, b3, ms[:2] + ms[5:12] + [reg.members[OFFICER_ID]])
+    join(reg, rs, b3, ms[2:3], "sub")
+    b = cq.lock_box(reg, b3, rs)
+    assert b["sentences"][0].endswith("with one from the bench, so one person who joined sits out."), b
+    add("lock_box", "open recurring, a healer from the bench takes a joiner's seat", b)
+    b3.layout = [[ms[2].display_name]]  # the same Bench answer placed by hand
+    b = cq.lock_box(reg, b3, rs)
+    assert b["sentences"][0] == "Everyone on the board keeps their place, and one person who joined sits out.", b
+    add("lock_box", "open recurring, a Bench answer placed by hand on a full event", b)
+    b3.layout = None
+    k = rc.groups_per_roster(reg, rc.run_size(reg, b1))
+    b1.layout = [[] for _ in range(k)] + [[ms[8].display_name]]  # a Bench answer placed in a second roster's group
+    b = cq.lock_box(reg, b1, rs)
+    assert "the 11 rostered get" in b["sentences"][1], b
+    add("lock_box", "open recurring, a Bench answer placed in a second roster", b)
+    b1.layout = None
     b = cq.cancel_box(reg, four, rs)
     assert b["sentences"][0] == "All 4 raids of this event are cancelled.", b
     add("cancel_box", "four raids", b)

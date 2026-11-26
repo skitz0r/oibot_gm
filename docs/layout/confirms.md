@@ -36,8 +36,12 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        THE confirmation box (§5.67 phase 4, spec §7b): box(title, sentences, verb, *, danger, diff, rev) → {title, sentences, verb,
                        danger, diff, fp} (fp = sha1 of title + diff + sentences + rev, 12 hex; verb None = a refusal, Back alone; red only when it can't
                        be undone); refusal_box / refusal_kind (the kind a built refusal carries — rc.Refusal past | clash — or the constant it equals,
-                       never words inside it) / refusal_box_for → REFUSAL_TITLES; the twenty boxes: lock_box (1–2; counts joiners minus rc.lock_forces'
-                       kept_off, lock_refusal = everyone kept off), reschedule_box (3; `edit=True` = Edit event's box, the owner's tweaks B:
+                       never words inside it) / refusal_box_for → REFUSAL_TITLES; the twenty boxes: lock_box (1–2; the head from _board_state (a Bench answer
+                       waiting counts while seats are open) and rc.bench_prediction: "… from those who joined and 2 from the bench." /
+                       "… with one from the bench, so one person who joined sits out." / "… fills the rest, 2 from the bench." / "… and
+                       one person who joined sits out." — raids that differ get the sentence without numbers; the DM count = the
+                       prediction's rostered, Bench answers included; DMs off among those the solve picks → "…, or see it on the site with
+                       DMs off."; lock_refusal = everyone kept off), reschedule_box (3; `edit=True` = Edit event's box, the owner's tweaks B:
                        "Change <event>?" + Save + event_edit_lines = 'label: old → new' in PAGE_WORDS schedule_fields / priority / split words,
                        event_value_words; TIMING_NAMES carries confirmation, seating, priority, split) + reschedule_pick_box, lineup_box (4) + lineup_diff_lines,
                        cancel_box (5, red), switch_box (6–7: locked=, swap=, own=), answer_box (8, inbox.action_lines) = a thin call of

@@ -1258,3 +1258,25 @@ def test_a_failure_stored_in_old_words_is_the_same_failure_and_posts_no_new_line
     ev.lock_error = rc.SOLVER_WORDS["changing"]  # another failure before: this one is new, and says so once
     asyncio.run(bot.lock_run(reg, rs, ev, by="scheduler"))
     assert len([u for u in bot.updates if "failed" in u]) == 1
+
+
+# ---------------------------------------------------------------- a Bench answer the lock rosters (2026-11-25 §3)
+
+def test_a_bench_answer_the_lock_rosters_gets_the_confirm_ask(reg, rs):
+    """Case 1 of test_bench_last (8 joined, 3 on the Bench, 10 seats): the lock rosters the two Bench answers the
+    event's priority puts first, and they get the Confirm ask like anyone rostered; the third Bench answer and nobody
+    else gets a DM."""
+    from test_bench_last import case_one
+
+    bot = NightBot(reg, rs)
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    assert rc.run_confirms(reg, ev)
+    run(bot.lock_run(reg, rs, ev, by="Jon"))
+    ev = rs.events[ev.key]
+    rostered = {m.discord_id for m in [*joiners, core, raider]}
+    assert {p.signup_name for p in ev.seated()} == {m.display_name for m in [*joiners, core, raider]}
+    assert set(bot.dms) == rostered, "the rostered get the ask; the Bench answer left off gets nothing"
+    for m in (core, raider):
+        assert len(bot.dms[m.discord_id]) == 1
+        ask = next(a for a in reg.members[m.discord_id].placement_asks if a["roster"] == ev.team)
+        assert ask.get("answer") is None

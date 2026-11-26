@@ -182,7 +182,7 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
         failed = (f"Lock failed {reg.local12(ev.lock_tried_at, '%a %I:%M %p')} — the sheet stays open, retrying · " if ev.lock_error and ev.lock_tried_at
                   else "Lock failed — the sheet stays open, retrying · " if ev.lock_error else "")
         pins = rc.pin_counts(ev)  # numbers only (who is officer data): 'Pinned: 2 · Kept off: 1'
-        e.set_footer(text=failed + ("test event · " if test else "") + (rc.FIRST_COME.capitalize() + " · " if adhoc else "") + "Join = I'm coming · Bench = call me if you need me"
+        e.set_footer(text=failed + ("test event · " if test else "") + (rc.FIRST_COME.capitalize() + " · " if adhoc else "") + rc.SHEET_ANSWERS
                      + (f" · {pins}" if pins else ""))
         return e, sheet_view(reg, ev.key)
     # locked | done: the roster(s) as the board shows them, a group per column
