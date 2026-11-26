@@ -108,6 +108,24 @@ def take_open_question(reg, channel_id, uid: int, *, window_s: float, posted: bo
         return ex
 
 
+def take_answered(reg, channel_id, uid: int, *, window_s: float, reply_to_message_id: int | None = None,
+                  now: float | None = None) -> Exchange | None:
+    """The question an ADDRESSED message (an @mention, a DM, a reply to the bot's message) answers, taken. A Discord
+    reply to one of the bot's messages answers the exchange that message belongs to, whatever its age (while the ring
+    holds it) — the open question is closed too; otherwise take_open_question's newest open question within `window_s`.
+    None when it answers nothing the bot asked. The caller routes by the exchange's `asked_by`."""
+    opened = take_open_question(reg, channel_id, uid, window_s=window_s, now=now)  # this message is the person's next one
+    if reply_to_message_id is None:
+        return opened
+    with _lock:
+        ring = list(_rings.get(_key(reg, channel_id, uid)) or ())
+    hit = next((ex for ex in ring if ex.reply_message_id is not None and ex.reply_message_id == reply_to_message_id), None)
+    if hit is None or not hit.questions:
+        return None
+    hit.followed = True
+    return hit
+
+
 def forget(reg=None) -> None:
     """Drop every ring (of one guild when `reg` is given) — tests, and a guild that leaves."""
     with _lock:

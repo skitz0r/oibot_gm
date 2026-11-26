@@ -600,3 +600,79 @@ def test_the_site_box_binds_the_priest_and_refuses_in_one_sentence(reg, rs, monk
         ConfigOp(op="character", member="Ashgrove", field="spec", value="Restoration")]))
     d = post("make ashgrove resto")
     assert d["ops"] == [] and d["refused"] == ["None of Ashgrove's characters is of a class with a Restoration spec."]
+
+
+# ---------------------------------------------------------------- an ADDRESSED answer goes back to whoever asked
+
+def bot_reply_ref(bot, uid=OWNER, cid=LISTEN_CH):
+    """A Discord reply to the bot's last reply to `uid` here (resolved, as the gateway hands it over)."""
+    mid = conversation.recall(bot.greg, cid, uid)[-1].reply_message_id
+    resolved = Msg(id=mid, content="Which?", author=types.SimpleNamespace(id=BOT_ID, display_name="bot", bot=True))
+    return types.SimpleNamespace(message_id=mid, resolved=resolved)
+
+
+def card_shown(said):
+    content, kw = said[-1]
+    return kw.get("embed") is not None and "Duskmere: spec Shadow → Holy" in kw["embed"].description
+
+
+@pytest.mark.parametrize("on", [False, True])
+def test_an_at_mention_answer_to_the_parsers_question_reaches_the_parser(live, monkeypatch, on):
+    """An @mention that answers the parser's question goes to the parser — no help verdict (the honest help answer would
+    not call a bare name a request to act) — and the change card is shown, with the switch off and on."""
+    if on:
+        monkeypatch.setenv(answer_switch.SWITCH_ENV, "on")
+        # with the switch on the parser keeps its own question only on a change verdict, and an overheard change is
+        # held behind 👀 — so the first message tags the bot
+        live.verdicts[0] = ConfigRequest(kind="change", reply="Ashgrove has two characters.", questions=[QUESTION])
+        said, _ = say(live, OWNER, f"<@{BOT_ID}> bot can you update ashgrove from shadow to holy", mentions=[live.user])
+        assert len(said) == 1 and QUESTION in said[0][0]
+    else:
+        first_question(live)
+    assert conversation.recall(live.greg, LISTEN_CH, OWNER)[-1].asked_by == conversation.PARSER
+    helped = list(live.helped)
+    said, dec = say(live, OWNER, f"<@{BOT_ID}> Duskmere", mentions=[live.user])
+    assert dec.calls == 0 and live.helped == helped and live.parsed[1][0] == "Duskmere" and QUESTION in live.parsed[1][1]
+    assert card_shown(said)
+
+
+def test_a_reply_to_the_bots_question_reaches_the_parser(live):
+    first_question(live)
+    said, _ = say(live, OWNER, "Duskmere", reference=bot_reply_ref(live))
+    assert live.helped == ["bot can you update ashgrove from shadow to holy"] and live.parsed[1][0] == "Duskmere"
+    assert card_shown(said)
+
+
+def test_a_reply_to_an_older_parser_question_reaches_the_parser(live, monkeypatch):
+    """A Discord reply names the exchange it answers, whatever its age: past the five minutes it still reaches the parser."""
+    first_question(live)
+    ref = bot_reply_ref(live)
+    t = conversation.time.time()
+    monkeypatch.setattr(conversation.time, "time", lambda: t + db.LISTEN_FOLLOWUP_S + 60)
+    said, _ = say(live, OWNER, "Duskmere", reference=ref)
+    assert live.parsed[1][0] == "Duskmere" and card_shown(said)
+
+
+def test_an_at_mention_with_no_open_question_goes_the_old_way(live):
+    said, _ = say(live, OWNER, f"<@{BOT_ID}> Duskmere", mentions=[live.user])
+    assert live.helped == ["Duskmere"] and live.parsed == [], "the help answer first, as ever"
+    assert len(said) == 1 and said[0][1].get("embed") is None
+
+
+def test_an_addressed_answer_to_the_loops_question_goes_to_the_loop(live, monkeypatch):
+    monkeypatch.setenv(answer_switch.SWITCH_ENV, "on")
+    first_question(live)
+    assert conversation.recall(live.greg, LISTEN_CH, OWNER)[-1].asked_by == conversation.LOOP
+    say(live, OWNER, f"<@{BOT_ID}> Duskmere", mentions=[live.user])
+    assert live.helped[-1] == "Duskmere" and len(live.parsed) == 1
+    say(live, OWNER, "Ironvale", reference=bot_reply_ref(live))
+    assert live.helped[-1] == "Ironvale" and len(live.parsed) == 1
+
+
+def test_take_answered_finds_the_replied_exchange_at_any_age(reg):
+    conversation.remember(reg, LISTEN_CH, OWNER, "a", "Which?", ["Which?"], reply_message_id=11, at=1000.0, asked_by=conversation.PARSER)
+    conversation.remember(reg, LISTEN_CH, OWNER, "b", "Done.", reply_message_id=12, at=1010.0)
+    ex = conversation.take_answered(reg, LISTEN_CH, OWNER, window_s=300, reply_to_message_id=11, now=99_999.0)
+    assert ex is not None and ex.request == "a" and ex.asked_by == conversation.PARSER
+    assert conversation.take_answered(reg, LISTEN_CH, OWNER, window_s=300, reply_to_message_id=12, now=99_999.0) is None
+    assert conversation.take_answered(reg, LISTEN_CH, OWNER, window_s=300, now=99_999.0) is None

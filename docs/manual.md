@@ -2425,8 +2425,9 @@ Only Discord saying they are gone counts: a Discord outage never locks a member 
 **A follow-up is understood.** Reply to the bot's message, or write again in the same channel within 20 minutes, and
 "him", "that event" and answers to its questions refer to what you said before — answer "7:30 PM" to "What time should
 the event open?" and the diff carries both your first request and the answer. When the bot has just asked you
-something, your next message in that channel within five minutes is the answer even without tagging the bot. It goes
-back to whatever asked: an answer to a question about a change becomes that change, and anything else you say after
+something, your next message in that channel within five minutes is the answer even without tagging the bot. A reply
+to the bot's question is its answer however long ago it was asked. The answer goes back to whatever asked, tagged or
+not: an answer to a question about a change becomes that change, and anything else you say after
 such a question is read by the bot and, if it isn't for the bot, left alone. After a question the bot asked while
 answering you, it replies once to whatever you say next. A message that mentions someone else or replies to someone
 else's message is never taken as the answer; it only ends the wait, and so does a sticker or a picture on its own.

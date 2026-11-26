@@ -302,6 +302,16 @@ def mention_names(message, reg, bot_user=None) -> str:
     return re.sub(r"[ \t]{2,}", " ", text).strip()
 
 
+def answers_parser(reg, message, channel) -> bool:
+    """Whether an ADDRESSED message (an @mention, a DM, a reply to the bot's message) answers the change parser's
+    own question — then plain_text(to_parser=True) hands it to the parser, never through the help answer's act
+    verdict. A reply to the bot's message: the exchange that message belongs to, at any age; else the person's open
+    question here within LISTEN_FOLLOWUP_S. Either is taken (conversation.take_answered)."""
+    ex = conversation.take_answered(reg, channel, message.author.id, window_s=LISTEN_FOLLOWUP_S,
+                                    reply_to_message_id=conversation.reply_to_id(message))
+    return ex is not None and ex.asked_by == conversation.PARSER
+
+
 class ListenMixin:
     """Listening (design §5.59): in a channel the owner chose (PlainPolicy.listen), a message nobody tagged the bot in is
     judged by the decision service — "is this for the bot?" as a probability — and code decides: a sure one in a *reply*
@@ -503,7 +513,7 @@ class ListenMixin:
             recent = self._listen()["recent"].setdefault(cid, collections.deque(maxlen=LISTEN_RECENT))
             recent.append({"author": getattr(message.author, "display_name", "") or "", "text": text[:200]})
         try:  # a listened channel's answers log names it as listening, as the gate's own replies do
-            await self.plain_text(message, reg, text, cid, to_parser=ex.asked_by == conversation.PARSER,
+            await self.plain_text(message, reg, text, cid, **({"to_parser": True} if ex.asked_by == conversation.PARSER else {}),
                                   **(answer_loop.entry_kw(reg.key, "listen") if mode else {}))
         finally:
             if mode:
@@ -1447,17 +1457,18 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
             reg = await self.dm_guild(message)
             if reg is not None:
                 text = mention_names(message, reg, getattr(self, "user", None))
-                if text:
-                    await self.plain_text(message, reg, text, None)
+                if text:  # the answer to the parser's own question goes back to the parser (answered_by_parser)
+                    await self.plain_text(message, reg, text, None, **({"to_parser": True} if answers_parser(reg, message, None) else {}))
             return
         reg = self.registries.for_guild(message.guild.id)
         # an @mention: routed by intent and by the channel's plain-text mode (the ops and analytics channels act by default;
         # a loot thread keeps its own chat below)
         if reg and self._addressed(message) and (message.channel.id in (reg.config.ops_channel_id, reg.config.analytics_channel_id) or not self.event_for(message.channel.id)):
             text = mention_names(message, reg, getattr(self, "user", None))  # the bot's own mention goes; anyone else's becomes their name
-            if text:  # an open question is taken by this message too: only the person's NEXT message answers it
-                conversation.take_open_question(reg, message.channel.id, message.author.id, window_s=LISTEN_FOLLOWUP_S)
-                await self.plain_text(message, reg, text, message.channel.id)
+            if text:  # an open question is taken by this message too: only the person's NEXT message answers it; the
+                # parser's question goes back to the parser, a Discord reply to the bot's message answers that message's
+                await self.plain_text(message, reg, text, message.channel.id,
+                                      **({"to_parser": True} if answers_parser(reg, message, message.channel.id) else {}))
             return
         ev = self.event_for(message.channel.id)
         if ev is not None and reg is not None and ev.guild == reg.key and message.channel.id == ev.raid_thread_id:
