@@ -232,7 +232,7 @@ def test_the_run_vocabulary_has_no_copy_in_the_frontend():
     from oibot_gm.raid_buttons import RUN_WORDS
 
     # the Rosters page's place is the Events page's (phase 4, Task 10): the page, its sections, the lineup editor
-    files = [SRC / "pages" / "Events.tsx", SRC / "pages" / "LineupPage.tsx", SRC / "pages" / "Me.tsx", SRC / "components" / "RaidCard.tsx",
+    files = [SRC / "pages" / "Events.tsx", SRC / "pages" / "LineupPage.tsx", SRC / "pages" / "Me.tsx", SRC / "components" / "MyAnswer.tsx", SRC / "components" / "RaidCard.tsx",
              *sorted((SRC / "components" / "schedules").glob("*.tsx")), SRC / "pages" / "Schedules.tsx", *sorted((SRC / "components" / "events").glob("*.tsx")), *sorted((SRC / "components" / "board").glob("*.tsx"))]
     words = ([w for k, w in RUN_WORDS.items() if k not in ("ask", "loot", "lock", "locked", "reopen")]  # short verbs other screens share
              + [w for w in rc.RUN_STATE_WORDS.values() if " " in w] + ["finished"]
@@ -253,7 +253,7 @@ def test_the_run_vocabulary_has_no_copy_in_the_frontend():
     card = (SRC / "components" / "board" / "SheetCard.tsx").read_text()
     for field in ("meta.run_states", "markOf(meta", "run_labels", "run_words", "ask_kinds", "ask_answers"):
         assert field in card or field in (SRC / "components" / "board" / "shared.tsx").read_text(), field
-    assert "s.badge" in (SRC / "pages" / "Me.tsx").read_text(), "Me's badge is the server's words (rc.answer_word)"
+    assert "s.badge" in (SRC / "components" / "MyAnswer.tsx").read_text(), "Me's badge is the server's words (rc.answer_word)"
     assert "r.words" in (SRC / "components" / "schedules" / "RegularsSection.tsx").read_text() and "<LevelChip" in (SRC / "components" / "raids" / "ReadinessView.tsx").read_text()
     more = (SRC / "components" / "events" / "EventMore.tsx").read_text()
     assert "meta.run_labels" in more, "the event's More menu names each verb as Discord's buttons do"
@@ -592,7 +592,8 @@ def test_me_page_sheet_rows_take_the_sheet_title_deep_link():
     """A member following an event link lands on /app/me#run-<key> (App.tsx EventRoute; sheets posted before phase 5
     linked there directly): the Me page gives each sheet row that id and scrolls to the hash once the record has loaded."""
     me = (SRC / "pages" / "Me.tsx").read_text()
-    assert 'id={`run-${s.key}`}' in me and "scrollMarginTop: 72" in me  # the row lands below the phone header, not under it
+    row = (SRC / "components" / "MyAnswer.tsx").read_text()  # the row (MyAnswer) the page draws per sheet
+    assert 'id={`run-${s.key}`}' in row and "scrollMarginTop: 72" in row  # the row lands below the phone header, not under it
     assert 'window.location.hash.startsWith("#run-")' in me and "scrollIntoView" in me
     assert "window.history.replaceState" in me  # once: the hash goes, so the poll's reload never jumps back
     assert "flash === s.key" in me  # the row is lit for a moment so the eye lands on it
@@ -620,7 +621,7 @@ def test_follow_on_surfaces_exist():
     # phase 4, Task 7: the ad hoc Open's Then field became the New event page's lineup builder (later raids as `lineup`)
     lineup = _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
     assert "lineup: later" in lineup and "<LineupBuilder" in lineup
-    me = (SRC / "pages" / "Me.tsx").read_text()
+    me = (SRC / "components" / "MyAnswer.tsx").read_text()  # the Me page's answer row
     assert "s.may_leave" in me and "s.may_stay" in me and "/stay`" in me and "s.leave_consequence" in me
     card = (SRC / "components" / "board" / "SheetCard.tsx").read_text()
     assert "e.follow" in card and "e.lead" in card
@@ -1195,8 +1196,9 @@ def test_the_events_page_asks_with_the_servers_box_and_lives():
     assert "useConfirmBox(" in some and "preview: true" in some and "seen: fp" in some and "useConfirm(" not in some
     assert "spec" in some and 'label="Character"' in some and 'label="Answer"' in some and 'label="Member"' in some
     sign = _code_only((SRC / "components" / "events" / "SignupsSection.tsx").read_text())
-    assert all(w in sign for w in ('"Joined"', '"Bench"', '"No thanks"', '"No answer yet"')) and "<MemberMenu" in sign and "<SomeoneElse" in sign
-    assert 'useState<Row>("in")' in sign and "<Tabs.Tab" in sign and 'kind="spec"' in sign and 'kind="class"' in sign, "tabs, Joined first, grouped by class"
+    tabs = _code_only((SRC / "components" / "events" / "SignupTabs.tsx").read_text())  # the tabs body, shared with the members' page
+    assert "<MemberMenu" in sign and "<SomeoneElse" in sign and 'tabs={["in", "sub", "out", "none"]}' in sign
+    assert "useState<SignupTab>(tabs[0])" in tabs and "<Tabs.Tab" in tabs and 'kind="spec"' in tabs and 'kind="class"' in tabs, "tabs, Joined first, grouped by class"
     act = _code_only((SRC / "components" / "events" / "ActivitySection.tsx").read_text())
     assert "Activity · " in act and "aria-expanded" in act
 
@@ -1264,7 +1266,8 @@ def test_the_events_page_fix_round_one():
     assert "if (n !== seq.current) return;" in page and "useAnyBoxOpen()" in page and "held && lastLive.current" in page
     confirm = _code_only((SRC / "components" / "ConfirmBox.tsx").read_text())
     assert "setChanged(fresh.verb !== null)" in confirm and "setChanged(true); } else close(true)" not in confirm
-    assert "{t.empty}" in sign and "disabled" not in sign, "an empty tab says so in a sentence, never a greyed tab"
+    tabs = _code_only((SRC / "components" / "events" / "SignupTabs.tsx").read_text())  # the tabs body moved there
+    assert "{words[t].empty}" in tabs and "disabled" not in sign + tabs, "an empty tab says so in a sentence, never a greyed tab"
     assert "const first = await preview(now);\n      setBusy(false);" in menu, "the button behind an open box is not busy"
 
 
@@ -1608,3 +1611,33 @@ def test_me_page_says_when_the_event_link_matches_no_row():
     src = (SRC / "pages" / "Me.tsx").read_text()
     assert "meta.page_words.me_event_over" in src and "meta.page_words.me_event_over_tail" in src
     assert "finished or was cancelled" in PAGE_WORDS["me_event_over"] and "finished or was cancelled" not in src
+
+
+def test_one_answer_component_serves_me_and_the_member_event_page():
+    """The Me page's answer row (Join / Bench / No thanks, the character pick, Can't make it, Leaving after, I'm staying)
+    is ONE component, MyAnswer, that the Me page uses and the members' event page will: the routes live there alone."""
+    comp = _code_only((SRC / "components" / "MyAnswer.tsx").read_text())
+    assert "/api/me/run/" in comp and "export function MyAnswer(" in comp
+    assert "characters" in comp and "link" in comp and "`/events/${encodeURIComponent(s.key)}`" in comp
+    me = _code_only((SRC / "pages" / "Me.tsx").read_text())
+    assert 'from "../components/MyAnswer"' in me and "<MyAnswer " in me
+    assert "function SheetRow" not in me and "/api/me/run/" not in me
+
+
+def test_signup_tabs_are_shared_and_worded_by_the_server():
+    """The Signups tabs grouped by class are one component, SignupTabs; their labels and empty sentences come from
+    meta.page_words.signup_tabs, never typed in either file."""
+    sign = _code_only((SRC / "components" / "events" / "SignupsSection.tsx").read_text())
+    tabs = _code_only((SRC / "components" / "events" / "SignupTabs.tsx").read_text())
+    assert 'from "./SignupTabs"' in sign and "<SignupTabs " in sign
+    for f in (sign, tabs):
+        assert '"No answer yet"' not in f and '"Nobody has joined yet."' not in f and '"Joined"' not in f
+    assert "page_words.signup_tabs" in tabs and "page_words.called_out" in tabs
+
+
+def test_the_member_roster_has_no_officer_controls():
+    """The members' read-only roster: the board's group layout, one member per line, no menu, drag, pin or write."""
+    roster = _code_only((SRC / "components" / "events" / "MemberRoster.tsx").read_text())
+    for w in ("MemberMenu", "draggable", "PinMark", "onBoard", "api.post"):
+        assert w not in roster, w
+    assert "<SeatLine" in roster and "<RoleCounts" in roster and "run_words.bank.locked" in roster and "part.marks" in roster

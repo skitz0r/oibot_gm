@@ -544,6 +544,15 @@ def test_meta_carries_the_page_words(officer_client):
     assert rc.confirmation_words(False) == PAGE_WORDS["not_asked"] and rc.confirmation_words(True) == PAGE_WORDS["asked_at_lock"]
 
 
+def test_meta_carries_the_signup_tab_words(officer_client):
+    """The Signups tabs' labels and empty sentences are the server's (PAGE_WORDS["signup_tabs"]): the officers' Events page
+    and the members' event page read the same words, none typed in a page."""
+    m = officer_client.get("/api/meta").json()
+    assert m["page_words"]["signup_tabs"] == PAGE_WORDS["signup_tabs"]
+    assert list(PAGE_WORDS["signup_tabs"]) == ["in", "sub", "out", "none", "away"]
+    assert all(set(t) == {"label", "empty"} for t in PAGE_WORDS["signup_tabs"].values())
+
+
 # ---------------------------------------------------------------- New event (Task 7): the lineup builder's open
 
 def wall(reg, t) -> str:

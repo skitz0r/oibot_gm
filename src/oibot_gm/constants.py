@@ -195,6 +195,13 @@ PAGE_WORDS = {
     "member_events_empty": "No event is open for signup. An event shows here once its sheet opens in Discord.",
     "called_out": "Called out after answering",
     "answer_needs_character": "Register a character on the Me page to answer.",
+    # the Signups tabs (components/events/SignupTabs.tsx: the officers' Events page and the members' event page), each
+    # tab's label and the sentence an empty tab says; "none" is the officers' alone, "away" the members' alone
+    "signup_tabs": {"in": {"label": "Joined", "empty": "Nobody has joined yet."},
+                    "sub": {"label": "Bench", "empty": "Nobody is on the bench."},
+                    "out": {"label": "No thanks", "empty": "Nobody said No thanks."},
+                    "none": {"label": "No answer yet", "empty": "Everyone has answered."},
+                    "away": {"label": "Away", "empty": "Nobody is away that day."}},
 }
 
 
