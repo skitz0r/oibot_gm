@@ -28,6 +28,8 @@ src/oibot_gm/
                        and Raids pages ONCE (the read models print them, /api/meta.page_words carries them, no page file holds one; `schedule_fields` /
                        `raid_fields` / `split` / `priority` = the settings' names the editors AND the Save box's diff lines share; `kinds` = a schedule's
                        Repeats choice and `what_this_makes` = the lineup pages' section title — the site and Discord's wizards read both;
+                       `schedule_label` = the Details row naming an event's schedule ("Schedule", its value a link or `one_off` "N/A" —
+                       event_view's event and coming-up Details, HistoryView, New event's What this makes);
                        field_help(setting, label) = a view's Details row's (?) {key, text, about} from `schedule_field_help` / `help_about`, the
                        editors' own sentence — event_view / schedule_view `_fact(…, hint=)`); switch_words(setting, on) = a switch's value
                        ONCE for a Details row and a Save box's diff line alike (Lock Confirmation Yes / No, Automated Fill Requests On / Off,

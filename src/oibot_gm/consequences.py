@@ -297,15 +297,15 @@ def _lock_head(reg: Registry, ev: rc.RaidEvent, rs=None) -> str:
 
 # the lock box's head when a Bench answer's place on the board is decided again at the lock (lock_forces in
 # raidcycle): one Auto-fill or a whole-board write placed, or a placed joiner who then answered Bench
-AUTO_AGAIN = "The lock decides again each Bench answer's place unless an officer dragged them there as a Bench answer."
+AUTO_AGAIN = "The lock decides again where each Bench answer goes, unless an officer dragged them there as a Bench answer."
 
 
 def _short_first(roles: tuple) -> str:
     """The lock box's head when the Bench exception may fire (rc.bench_short_roles): a benched tank or healer comes
     before a joiner only for a minimum those who joined together cannot fill."""
     if len(roles) > 1:
-        return f"A {' or '.join(roles)} on the bench is rostered ahead of those who joined if they cannot meet those minimums."
-    return f"A {roles[0]} on the bench is rostered ahead of those who joined if they cannot meet the {roles[0]} minimum."
+        return f"If those who joined cannot meet the {' or '.join(roles)} minimum, a benched one is rostered ahead of them."
+    return f"If those who joined cannot meet the {roles[0]} minimum, a {roles[0]} on the bench is rostered ahead of them."
 
 
 def _lock(reg: Registry, ev: rc.RaidEvent, rs=None) -> list[str]:

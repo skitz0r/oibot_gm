@@ -93,7 +93,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        start in REAL time (UTC, a clocks-change night); complete_parts = an open cut off between parts finished once (open_run and
                        the scheduler's minute; never a sheet, never a dict); sync_parts (sync_follow its alias) = every later part's answers are part
                        0's; bench_again(ev, old, new) = a placed joiner who answers Bench stays on the board but goes into auto_placed
-                       (decided again at the lock; set_signup and sync_parts call it, Bench → Join leaves the name as it is); leave_follow / stay_for_follow; `_solve_run` adds LEAD_SEAT_BONUS once per earlier raid a player was rostered on;
+                       (decided again at the lock; set_signup and sync_parts call it; Bench → Join takes an officer's own drag (placed_by) back out of auto_placed,
+                       any other place stays as it is); board_write_auto(ev, groups) = a whole-board write's Bench names to record as
+                       auto_placed (discord_raid.save_board and configops' run_board without the bot share it); leave_follow / stay_for_follow; `_solve_run` adds LEAD_SEAT_BONUS once per earlier raid a player was rostered on;
                        `conflicts` exempts same_event; free_seat on part 0 frees the seat on every locked later part; held_later(rs, ev, who) = the
                        later places a Can't frees; a cancel on any part takes every live raid (cancel_effects(…, rs) / cancel_tells_channel);
                        LATER_PART_LOCK. run_strategy(reg, ev) = THE split-strategy chain (run → roster → raid → balanced) the lock and Preview lock share.

@@ -907,7 +907,7 @@ def box_cases(reg, rs, runs, ms, dump):
     join(reg, rs, b3, ms[:2] + ms[5:12] + [reg.members[OFFICER_ID]])
     join(reg, rs, b3, ms[2:3], "sub")
     bench_case("open recurring, a benched healer the joiners lack", b3,
-               "A healer on the bench is rostered ahead of those who joined if they cannot meet the healer minimum.")
+               "If those who joined cannot meet the healer minimum, a healer on the bench is rostered ahead of them.")
     b3.layout = [[ms[2].display_name]]  # the same Bench answer placed by hand
     bench_case("open recurring, a Bench answer placed by hand on a full event", b3,
                "A Bench answer an officer placed or pinned is rostered ahead of people who joined.")
@@ -928,7 +928,7 @@ def box_cases(reg, rs, runs, ms, dump):
     join(reg, rs, b4, ms[5:12] + [reg.members[OFFICER_ID]])
     join(reg, rs, b4, [ms[0], ms[2]], "sub")
     bench_case("open recurring, a benched tank and healer the joiners lack", b4,
-               "A tank or healer on the bench is rostered ahead of those who joined if they cannot meet those minimums.")
+               "If those who joined cannot meet the tank or healer minimum, a benched one is rostered ahead of them.")
     start = (reg.now_local() + timedelta(days=20)).replace(hour=18, minute=30, second=0, microsecond=0)
     pair = rc.open_run(reg, rs, "hyjal_summit_forever", start, by="t", schedule=rc.ADHOC_SCHEDULE,
                        lineup=[{"raid": RID, "rosters": 1}])

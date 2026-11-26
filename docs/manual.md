@@ -1139,7 +1139,7 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    person whose answer leaves Join and Bench (No thanks, Can't make it, an absence, leaving the server, a retired
    character) or who changes the character or spec they come as comes off the board at once too — Auto-fill or the
    lock places them again if they still play; a placed name moving between Join and Bench stays on the board, but a placed joiner who answers Bench is decided
-   again at the lock, like a Bench place Auto-fill made. **Auto-fill groups**, under the *Not placed* heading,
+   again at the lock, like a Bench place Auto-fill made; if they join again, a place an officer dragged them to is theirs again. **Auto-fill groups**, under the *Not placed* heading,
    places everyone still there the way the lock would right now (and the Bench answers the lock would roster: only where
    a seat would stay empty or a tank or healer is short) — the lock's own placement, with every name you placed
    by hand kept where it is and every *kept off* honoured — and writes it into the groups; it asks nothing first (it
@@ -1353,10 +1353,10 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    every seat of every roster the lock builds is placed, or nobody is left to place, and everyone pinned on is on the
    board. Where it applies the first sentence
    says instead: *"A Bench answer an officer placed or pinned is rostered ahead of people who joined."* when as many
-   joined as there are seats; *"A healer on the bench is rostered ahead of those who joined if they cannot meet the
-   healer minimum."* when those who joined together can't meet the healer minimum, a healer is on the bench and a seat
-   is left for them; *"The lock decides again each Bench answer's place unless an officer dragged them there as a Bench
-   answer."* when Auto-fill or a whole board put a Bench answer in a group, or a placed joiner answered Bench. Then who is told: *"Everyone rostered gets the Confirm or
+   joined as there are seats; *"If those who joined cannot meet the healer minimum, a healer on the bench is
+   rostered ahead of them."* when those who joined together can't meet the healer minimum, a healer is on the bench and a seat
+   is left for them; *"The lock decides again where each Bench answer goes, unless an officer dragged them there as a
+   Bench answer."* when Auto-fill or a whole board put a Bench answer in a group, or a placed joiner answered Bench. Then who is told: *"Everyone rostered gets the Confirm or
    Can't make it DM."* (*"… ask, as a DM or on the site."* when some have DMs off), counted only when the board is the
    whole roster (*"The 20 rostered get the Confirm or Can't make it DM."*), and *"They have until Tue 15 Dec 12:30 PM
    to answer."* — on a one-off *"Nobody is asked to confirm. You can still move people after

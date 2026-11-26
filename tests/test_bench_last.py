@@ -893,7 +893,28 @@ def _case_b13_one_pinned_bench_answer_empty_board(reg, rs):
     return ev
 
 
-REVIEW_CASES = {"B1": _case_b1_full_hand_board_healer_short, "B6": _case_b6_pinned_bench_on_a_full_event,
+# the final review's cases
+def _case_kept_on_hold_all_but_one_healer_short(reg, rs):
+    """12 damage dealers joined, 9 of them pinned "in", a healer minimum of 2, a healer on the Bench: the kept-on names
+    hold every seat but one, those who joined cannot meet the healer minimum, so the lock rosters the benched healer."""
+    ev = _case_healer(reg, rs)
+    for s in sorted(ev.by_status("in"), key=lambda s: s.display_name)[:9]:
+        ev.pins[str(s.discord_id)] = "in"
+    return ev
+
+
+def _case_auto_fill_bench_then_pinned_two_joins(reg, rs):
+    """Case 1 auto-filled (two Bench answers placed by Auto-fill), an officer then pins one of them in, two more join."""
+    ev, joiners, core, raider, trial = _autofilled_case_one(reg, rs)
+    ev.pins[str(core.discord_id)] = "in"
+    rs.save(ev, "pin (test)")
+    join(reg, rs, ev, people(reg, 2, DPS))
+    return rs.events[ev.key]
+
+
+REVIEW_CASES = {"kept-on names hold every seat but one, a healer short": _case_kept_on_hold_all_but_one_healer_short,
+                "a Bench answer Auto-fill placed and an officer then pinned in, two later joins": _case_auto_fill_bench_then_pinned_two_joins,
+                "B1": _case_b1_full_hand_board_healer_short, "B6": _case_b6_pinned_bench_on_a_full_event,
                 "B6b": _case_b6b_pinned_bench_with_seats_left, "B11": _case_b11_second_rosters_group,
                 "B12": _case_b12_auto_fill_then_two_joins, "B13": _case_b13_auto_fill_then_one_join,
                 "A1": _case_a1_proposal_used_then_two_joins, "A1b": _case_a1b_plain_text_board_then_two_joins,
@@ -981,6 +1002,8 @@ def test_the_box_names_auto_fills_bench_places_as_open(reg, rs):
     for make in (_case_b12_auto_fill_then_two_joins, _case_a1_proposal_used_then_two_joins):
         b = cq.lock_box(reg, make(reg, rs), rs)
         assert b["sentences"][0] == cq.AUTO_AGAIN, b
+        assert cq.AUTO_AGAIN == ("The lock decides again where each Bench answer goes, unless an officer dragged them there "
+                                 "as a Bench answer.")
         assert b["sentences"][1] == "Everyone rostered gets the Confirm or Can't make it DM.", b
 
 
@@ -998,7 +1021,7 @@ def test_the_box_says_a_benched_healer_comes_ahead_for_the_healer_minimum(reg, r
 
     for make in (_case_healer, _case_only_tank_heals):
         head = cq.lock_box(reg, make(reg, rs), rs)["sentences"][0]
-        assert head == "A healer on the bench is rostered ahead of those who joined if they cannot meet the healer minimum.", head
+        assert head == "If those who joined cannot meet the healer minimum, a healer on the bench is rostered ahead of them.", head
     assert rc.bench_short_roles(reg, rs, _case_spare_tank_heals(reg, rs)) == [], "the joiners together cover the minimums"
 
 
@@ -1171,7 +1194,7 @@ def test_a_whole_board_write_that_moves_a_dragged_bench_name_makes_it_decided_ag
 def test_the_bench_receipt_says_when_the_lock_rosters_them(reg, rs):
     ev, joiners, core, raider, trial = case_one(reg, rs)
     text = rc.answer_receipt(reg, ev, core)
-    assert "you may be rostered if a seat would otherwise stay empty" in text and "first asked when one opens later" in text
+    assert "you may be rostered if a seat would otherwise stay empty" in text and "first asked when a seat opens later" in text
     assert "only if" not in text  # an officer may place a Bench answer by hand: never promise "only"
     assert "short a" not in text  # a damage dealer: the tank / healer exception isn't theirs
     healer = people(reg, 1, HEAL)[0]
@@ -1242,3 +1265,83 @@ def test_raids_of_one_event_that_differ_get_the_rule_true_of_both(reg, rs):
     assert b["sentences"][0] == "The lock fills open seats from those who joined first, then from the bench.", b
     for s in b["sentences"]:
         assert len(s.split()) <= 20 and not any(ch.isdigit() for ch in s.split(" until ")[0]), s
+
+
+# ---------------------------------------------------------------- the final review: Join → Bench → Join keeps a drag
+
+def test_a_dragged_joiner_who_answers_bench_then_join_keeps_the_officers_place(reg, rs):
+    """An officer drags a joiner into a group on an event with more joiners than seats; they answer Bench, then Join
+    again: the drag is theirs again (not in auto_placed), so the next Auto-fill keeps it and the lock rosters them."""
+    import asyncio
+
+    ev = schedule_event(reg, rs)
+    join(reg, rs, ev, base_eight(reg) + people(reg, 2, DPS))
+    late = people(reg, 1, DPS, "trial")[0]
+    join(reg, rs, ev, [late])  # 11 joined, 10 seats
+    bot = _night_bot(reg, rs)
+    asyncio.run(bot.board_move(reg, rs, ev, late.display_name, (1, 0), "Jon", by_id=1))
+    assert late.display_name in rs.events[ev.key].placed_by
+    rc.set_signup(reg, rs, rs.events[ev.key], late, None, "sub", source="test")
+    assert late.display_name in rs.events[ev.key].auto_placed, "their Bench answer: decided again at the lock"
+    rc.set_signup(reg, rs, rs.events[ev.key], late, None, "in", source="test")
+    ev = rs.events[ev.key]
+    assert late.display_name not in ev.auto_placed, "joined again: the officer's drag stands"
+    layout, auto = rc.autofill(reg, rs, ev)
+    assert late.display_name in layout[1] and late.display_name not in auto
+    ev.layout, ev.auto_placed = layout, sorted(auto)
+    rs.save(ev, "auto-fill (test)")
+    asyncio.run(bot.lock_run(reg, rs, rs.events[ev.key], by="Jon"))
+    assert late.display_name in {p.signup_name for p in rs.events[ev.key].seated()}
+
+
+def test_a_later_raids_dragged_joiner_who_answers_bench_then_join_keeps_the_place(reg, rs):
+    """The same on a later raid of the evening: the answers reach it through sync_parts."""
+    import asyncio
+
+    unlock_hyjal(reg)
+    start = (reg.now_local() + timedelta(days=3)).replace(hour=18, minute=30, second=0, microsecond=0)
+    lead = rc.open_run(reg, rs, LEAD, start, by="t", schedule=rc.ADHOC_SCHEDULE, lineup=[{"raid": RID, "rosters": 1}])
+    join(reg, rs, lead, base_eight(reg) + people(reg, 2, DPS))
+    late = people(reg, 1, DPS, "trial")[0]
+    join(reg, rs, lead, [late])
+    fev = rs.events[rc.follow_of(rs, lead).key]
+    asyncio.run(_night_bot(reg, rs).board_move(reg, rs, fev, late.display_name, (1, 0), "Jon", by_id=1))
+    assert late.display_name in rs.events[fev.key].placed_by
+    rc.set_signup(reg, rs, rs.events[lead.key], late, None, "sub", source="test")
+    assert late.display_name in rs.events[fev.key].auto_placed
+    rc.set_signup(reg, rs, rs.events[lead.key], late, None, "in", source="test")
+    fev = rs.events[fev.key]
+    assert late.display_name not in fev.auto_placed
+    layout, auto = rc.autofill(reg, rs, fev, earlier=rc.earlier_counts(reg, rs, fev))
+    assert late.display_name in layout[1] and late.display_name not in auto
+
+
+def test_plain_text_run_board_without_the_bot_marks_its_bench_names_as_the_bot_does(reg, rs):
+    """configops.apply's run_board (no bot running) records the written board's Bench names as auto-placed exactly as
+    discord_raid.save_board does: a Bench name an officer dragged keeps its place when the write leaves it in that group."""
+    import asyncio
+
+    from oibot_gm import configops
+    from oibot_gm.configops import ConfigOp
+
+    ev, joiners, core, raider, trial = case_one(reg, rs)
+    asyncio.run(_night_bot(reg, rs).board_move(reg, rs, ev, core.display_name, (0, 0), "Jon", by_id=1))
+    value = ", ".join([core.display_name, raider.display_name] + sorted(names(joiners))[:3])
+    configops.apply(reg, ConfigOp(op="run_board", target=ev.key, value=value), "Officer", True, raids=rs, by_id=1)
+    ev = rs.events[ev.key]
+    assert core.display_name in ev.layout[0] and raider.display_name in ev.layout[0]
+    assert ev.auto_placed == [raider.display_name], ev.auto_placed
+
+
+def test_the_final_reviews_two_boxes_say_what_the_lock_does(reg, rs):
+    from oibot_gm import consequences as cq
+
+    ev = _case_kept_on_hold_all_but_one_healer_short(reg, rs)
+    assert cq.lock_box(reg, ev, rs)["sentences"][0] == cq._short_first(("healer",))
+    healer = next(s.display_name for s in ev.by_status("sub"))
+    assert healer in seated(reg, rs, ev), "the lock rosters the benched healer"
+    ev = _case_auto_fill_bench_then_pinned_two_joins(reg, rs)
+    assert cq.lock_box(reg, ev, rs)["sentences"][0] == \
+        "A Bench answer an officer placed or pinned is rostered ahead of people who joined."
+    pinned = next(s.display_name for s in ev.by_status("sub") if ev.pins.get(str(s.discord_id)) == "in")
+    assert pinned in seated(reg, rs, ev), "the lock agrees"

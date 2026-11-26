@@ -1217,14 +1217,8 @@ class RaidMixin:
                 raise rc.BoardChanged()
             if strategy:
                 ev.split_strategy = strategy
-            # a whole board a person writes keeps its JOINERS as theirs (the next Auto-fill keeps them), but its Bench
-            # names are decided again at the lock (the Bench is last): only an officer's own drag of a Bench name fixes
-            # it — and the write keeps that drag when it leaves the name in the SAME group (a Bench name new to the
-            # board or moved by the write is decided again)
-            bench = {s.display_name for s in ev.by_status("sub")} if ev.state == "open" else set()
-            hand = {n: gi for gi, g in enumerate(ev.layout or []) for n in g if n in bench and n not in ev.auto_placed}
-            auto = [n for gi, g in enumerate(groups) for n in g if n in bench and hand.get(n) != gi]
-            return await self._write_board(reg, rs, ev, groups, by, via=via, auto=auto)
+            # its Bench names are decided again at the lock, except an officer's drag the write leaves in its group
+            return await self._write_board(reg, rs, ev, groups, by, via=via, auto=rc.board_write_auto(ev, groups))
 
     async def board_move(self, reg, rs, ev, name: str, to: tuple[int, int] | None, by: str, *, rev: str | None = None, via: str = "web",
                          expect_state: str | None = None, by_id: int | None = None) -> str:

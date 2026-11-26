@@ -3182,12 +3182,16 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         return (f"{run_words(reg, ev)}: short {nd['headcount']} seat(s)" + (f", roles {nd['roles']}" if nd["roles"] else "") + (f"; waiting on {', '.join(waiting)}" if waiting else "")
                 + "; a send would ask (nothing sent): " + " | ".join(batch))
     if op.op == "run_board":
+        from . import raidcycle as rc
+
         rs, ev = _live_event(reg, op.target, raids)
         if ev.state != "open":
             raise RegistryError(f"run_board on a locked event {NEEDS_BOT}")
         layout = _layout(op.value)
         _board_check(ev, layout)
+        auto = rc.board_write_auto(ev, layout)  # the same Bench rule as the bot's whole-board write (save_board)
         ev.layout = layout if any(layout) else None
+        ev.auto_placed = auto  # the written board's names only: a joiner it holds is the writer's
         ev.log.append(f"{by}: board set")
         rs.save(ev, f"board (by {by})")
         return f"{run_words(reg, ev)}: board = " + (" | ".join(", ".join(g) for g in layout) or "cleared")

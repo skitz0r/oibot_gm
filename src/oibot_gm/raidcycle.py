@@ -2781,13 +2781,31 @@ def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character
 def bench_again(ev: RaidEvent, old: Signup | None, new: Signup) -> None:
     """A placed joiner who answers Bench (design §3 of 2026-11-25, fix round 2): their own answer now says "only if you
     need me", so the place stays on the board but goes into auto_placed — the lock decides it again, as it does a Bench
-    place Auto-fill made. Bench → Join leaves the name as it is. Open runs only (the first part's answer write, and
-    sync_parts for every later part)."""
-    if ev.state != "open" or old is None or old.status != "in" or new.status != "sub":
+    place Auto-fill made. Bench → Join gives an officer's own drag (placed_by) back to them: the name leaves
+    auto_placed, so the next Auto-fill keeps it (the final review: Join → Bench → Join lost the drag); any other place
+    is left as it is. Open runs only (the first part's answer write, and sync_parts for every later part)."""
+    if ev.state != "open" or old is None:
+        return
+    names = (old.display_name, new.display_name)
+    if old.status == "sub" and new.status == "in":
+        if any(n in ev.placed_by for n in names):
+            ev.auto_placed = [n for n in ev.auto_placed if n not in names]
+        return
+    if old.status != "in" or new.status != "sub":
         return
     if any(n in (old.display_name, new.display_name) for g in ev.layout or [] for n in g):
         ev.auto_placed = list(dict.fromkeys([*ev.auto_placed, *(n for g in ev.layout or [] for n in g
                                                                  if n in (old.display_name, new.display_name))]))
+
+
+def board_write_auto(ev: RaidEvent, groups: list[list[str]]) -> list[str]:
+    """A whole board a person writes (discord_raid.save_board; plain text's run_board without the bot) keeps its JOINERS
+    as theirs, but its Bench names are decided again at the lock (the Bench is last): only an officer's own drag of a
+    Bench name fixes it, and the write keeps that drag when it leaves the name in the SAME group. → the names to record
+    as ev.auto_placed (a Bench name new to the board or moved by the write)."""
+    bench = {s.display_name for s in ev.by_status("sub")} if ev.state == "open" else set()
+    hand = {n: gi for gi, g in enumerate(ev.layout or []) for n in g if n in bench and n not in ev.auto_placed}
+    return [n for gi, g in enumerate(groups) for n in g if n in bench and hand.get(n) != gi]
 
 
 def signup_by_name(ev: RaidEvent, display_name: str) -> Optional[Signup]:
@@ -4860,6 +4878,8 @@ def solve_inputs(ev: RaidEvent) -> str:
     import json
 
     sgs = sorted((k, s.display_name, s.character, s.cls, s.spec, s.offspec, s.role, s.status) for k, s in ev.signups.items())
+    # ev.auto_placed is not part of it, safely: a board write holds the board lock the lock's solve holds, and the one
+    # other writer (bench_again, an answer) also changes a status above, so a change to it is still seen
     return json.dumps([sgs, sorted(ev.pins.items()), ev.layout, ev.split_strategy])
 
 
@@ -6280,7 +6300,7 @@ def bench_promise(reg: Registry, s: Signup) -> str:
             pass
     can = [r for r in EXTRA_ROLES if r in roles]
     short = f" or the event is short a {' or '.join(can)} nobody who joined can cover" if can else ""
-    return f"you may be rostered if a seat would otherwise stay empty{short}, and you're among the first asked when one opens later."
+    return f"you may be rostered if a seat would otherwise stay empty{short}, and you're among the first asked when a seat opens later."
 
 
 def answer_receipt(reg: Registry, ev: RaidEvent, m: Member) -> str:
