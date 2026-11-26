@@ -228,7 +228,9 @@ PY_FILES = ["raid_views.py", "wizard.py", "inbox.py", "consequences.py", "discor
             "loot/scoring.py", "loot/distil.py", "loot/tierdraft.py", "conversation.py", "importers/ledger_csv.py",
             "web/app.py", "web/api_armory.py", "web/api_loot.py", "web/api_me.py", "web/api_memory.py", "web/api_ops.py",
             "web/api_policy.py", "web/api_prices.py", "web/api_professions.py", "web/api_schedules.py",
-            "web/api_setup.py"]
+            "web/api_setup.py",
+            # answering questions with lookup tools: the resolver's lines the model reads (design §5)
+            "answer_names.py"]
 LOG_CALLS = {"debug", "info", "warning", "warn", "error", "exception", "critical"}
 # calls whose string arguments are machine-facing (patterns, keys, ids), not words a person reads
 MACHINE_CALLS = {"compile", "match", "search", "fullmatch", "sub", "findall", "finditer", "split", "startswith", "endswith",
