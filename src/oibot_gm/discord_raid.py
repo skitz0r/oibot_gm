@@ -1206,7 +1206,8 @@ class RaidMixin:
                          strategy: str | None = None) -> str:
         """A whole-board write (the site's Clear / Use this split, MCP set_layout, plain text run_board). `rev` = the
         rc.board_rev the author was looking at: when the board changed since, rc.BoardChanged is raised and nothing is
-        written. Only joiners count; returns the line to show. `via`: the surface, for the audit line's prefix.
+        written. Join and Bench names count (rc.board_names); a Bench name on it is recorded as auto-placed, so the
+        lock decides it again; returns the line to show. `via`: the surface, for the audit line's prefix.
         `strategy`: the split philosophy the layout came from (Use this split) — written in the SAME step, under the same
         lock and rev check, so a strategy can't be saved while its layout is refused (design B6, one request)."""
         state = ev.state
@@ -1215,8 +1216,11 @@ class RaidMixin:
                 raise rc.BoardChanged()
             if strategy:
                 ev.split_strategy = strategy
-            ev.auto_placed = []  # a whole board a person writes is theirs: the next Auto-fill keeps every name on it
-            return await self._write_board(reg, rs, ev, groups, by, via=via)
+            # a whole board a person writes keeps its JOINERS as theirs (the next Auto-fill keeps them), but its Bench
+            # names are decided again at the lock (the Bench is last): only an officer's own drag of a Bench name fixes it
+            bench = {s.display_name for s in ev.by_status("sub")} if ev.state == "open" else set()
+            auto = [n for g in groups for n in g if n in bench]
+            return await self._write_board(reg, rs, ev, groups, by, via=via, auto=auto)
 
     async def board_move(self, reg, rs, ev, name: str, to: tuple[int, int] | None, by: str, *, rev: str | None = None, via: str = "web",
                          expect_state: str | None = None, by_id: int | None = None) -> str:

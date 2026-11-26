@@ -48,12 +48,14 @@ def test_lock_consequence_counts_dms_and_names_the_deadline_in_words(reg, rs):
     lines = consequences.consequence("lock", reg, ev)
     text = " ".join(lines)
     assert lines[0] == "The lock builds the roster for Barrow Deeps from those who joined."
-    assert "The 6 rostered get the Confirm or Can't make it DM, and the puppets' DMs come to the tester." in lines, "a test run says where the DMs really go"
+    assert "Everyone rostered gets the Confirm or Can't make it DM, and the puppets' DMs come to the tester." in lines, "a test run says where the DMs really go"
     assert re.search(r"They have until \w{3} \d{1,2} \w{3} \d{1,2}:\d\d [AP]M to answer\.", text), text
     assert not MILITARY.search(text) and not ISO_DAY.search(text), "the clock rule: words, never 24-hour or ISO"
     ms[1].dm_opt_out = True
     rc.run_team(reg, ev)["test"] = False  # a real run: the DMs-off count is said
     ev.test = False
+    assert "Everyone rostered gets the Confirm or Can't make it ask, as a DM or on the site." in consequences.consequence("lock", reg, ev)
+    ev.layout = [[m.display_name for m in ms[:5]], [ms[5].display_name]]  # the board is the roster: the count is said
     assert "4 of the 6 rostered get the Confirm or Can't make it DM and 2 see it on the site." in consequences.consequence("lock", reg, ev)
 
 
@@ -350,7 +352,7 @@ def test_lock_card_button_locks_on_the_press_and_reports_a_bug_with_the_generic_
     async def go():
         state["fail"] = True
         await RunButton(reg.key, ev.key, "lock").callback(h.card_press())
-        assert "The 3 rostered get the Confirm or Can't make it DM" in h.text
+        assert "Everyone rostered gets the Confirm or Can't make it DM" in h.text
         await h.press("Lock")
         assert configops.GENERIC_ERROR in h.text and "solver exploded" not in h.text
         assert any(lvl == "error" and "solver exploded" in text for lvl, text in bot.ops.lines)

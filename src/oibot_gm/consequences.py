@@ -179,32 +179,50 @@ def _closed(ev: rc.RaidEvent) -> list[str] | None:
     return None
 
 
-def _board_state(reg: Registry, ev: rc.RaidEvent) -> str:
-    """What the lock does with one raid's board: 'empty' (nobody placed: the lock places those who joined), 'full'
-    (every seat placed, or nobody left to place: the board is the roster) or 'part' (the lock keeps the board and fills
-    the open seats from Not placed, then the bench). Left to place = the joiners not on the board and not kept off,
-    and while the board holds fewer than the seats the Bench answers not on it and not kept off. Read from lock_forces,
-    the lock's own inputs."""
-    lf = rc.lock_forces(reg, None, ev)
-    placed = len(lf.placed)
-    if placed == 0:
-        return "empty"
-    seats = rc.run_size(reg, ev) * max(1, rc.run_rosters(reg, ev))
-    if placed >= seats:
-        return "full"
-    off = set(lf.kept_off)
-    waiting = [s for s in ev.by_status("in") + ev.by_status("sub") if s.display_name not in off and s.display_name not in lf.placed]
-    return "part" if waiting else "full"
+class _LockFacts:
+    """What the lock box may say about one raid's board, all of it CERTAIN from the board and the answers alone (the box
+    never predicts what the solve decides — Preview lock shows the exact roster). Read from the lock's own inputs:
+    rc.lock_forces (who is kept on and off, the board without the Bench names Auto-fill or a whole-board write placed)
+    and rc.lock_seat_count (the seats of every roster the lock builds)."""
 
+    def __init__(self, reg: Registry, rs, ev: rc.RaidEvent):
+        players = rc.players_for(reg, ev)
+        lf = rc.lock_forces(reg, rs, ev, players)
+        off, kept = set(lf.kept_off), set(lf.kept_on)
+        bench = {s.display_name for s in ev.by_status("sub")}
+        on_board = {n for g in (ev.layout or []) for n in g}
+        self.placed = list(lf.placed)
+        self.seats = rc.lock_seat_count(reg, ev, players, lf)
+        self.joined = [s for s in ev.by_status("in") if s.display_name not in off]
+        self.bench = [s for s in ev.by_status("sub") if s.display_name not in off]
+        self.joiners_waiting = [s for s in self.joined if s.display_name not in lf.placed]
+        # the Bench answers the lock still decides on: not kept off, not kept on (an Auto-fill / whole-board place counts here)
+        self.bench_waiting = [s for s in self.bench if s.display_name not in kept]
+        self.auto_on = sorted(on_board & set(ev.auto_placed) & bench)  # Bench places decided again at the lock
+        self.hand_bench = [n for n in lf.kept_on if n in bench]  # placed by hand, pinned in, or the policy's never_bench
+        self.hand_on_board = [n for n in self.hand_bench if n in lf.placed]
+        waiting = self.joiners_waiting or self.bench_waiting
+        self.empty = not self.placed
+        # the board IS the roster: every seat of every roster the lock builds is placed, or nobody is left to place —
+        # and no Bench place on it is decided again
+        self.full = not self.empty and not self.auto_on and (len(self.placed) >= self.seats or not waiting)
+        self.short_roles = rc.bench_short_roles(reg, rs, ev) if self.bench_waiting and not self.full else []
 
-def _from_bench(k: int) -> str:
-    """'one' / '2' Bench answers, as the lock box's head counts them."""
-    return "one" if k == 1 else str(k)
-
-
-def _sit_out(d: int) -> str:
-    """The joiners the Bench answers rostered leave off (rc.BenchSeats.displaced)."""
-    return "one person who joined sits out" if d == 1 else f"{d} people who joined sit out"
+    def key(self) -> tuple:
+        """Which head sentence is true of this raid (see _lock_head)."""
+        many = len(self.hand_bench) > 1
+        if self.full:
+            loses = bool(self.hand_on_board) and bool(self.joiners_waiting)
+            return ("FH", len(self.hand_on_board) > 1) if loses else ("full",)
+        if self.hand_bench and len(self.joined) >= self.seats:
+            return ("H", many)  # a joiner is certainly not rostered: the hand-placed / pinned Bench answer holds a seat
+        if not self.bench_waiting:
+            return ("empty",) if self.empty else ("part",)
+        if self.short_roles:
+            return ("EX", tuple(self.short_roles))
+        if self.auto_on:
+            return ("A",)
+        return ("EB",) if self.empty else ("PB",)
 
 
 def _fit(make, whom: str, lineup: list) -> str:
@@ -216,81 +234,130 @@ def _fit(make, whom: str, lineup: list) -> str:
     return head
 
 
+def _ahead(many: bool) -> str:
+    return ("Bench answers an officer placed or pinned are rostered ahead of people who joined." if many
+            else "A Bench answer an officer placed or pinned is rostered ahead of people who joined.")
+
+
 def _lock_head(reg: Registry, ev: rc.RaidEvent, rs=None) -> str:
-    """The lock box's first sentence: what becomes the roster — the board as officers placed it, the board plus Not
-    placed and the bench, or (nobody placed) everyone who joined — how many come from the bench, and how many who
-    joined sit out because of them (rc.bench_prediction: the seats the joiners leave empty, a tank / healer minimum
-    they cannot meet, a Bench answer placed by hand). Raids that would differ get the sentence without numbers. `rs`:
-    every raid of the event is read (its open ones), else `ev`."""
+    """The lock box's first sentence: a RULE that is true whatever the solve decides, never a predicted number (design
+    §3 of 2026-11-25, the Task 6 fix). By what is certain from each raid's board (_LockFacts.key):
+    the board is the whole roster (full) — and then a Bench answer placed on it ahead of a joiner left off (FH);
+    a Bench answer an officer placed or pinned while as many joined as there are seats (H: a joiner is not rostered);
+    a benched tank or healer may come first because the joiners together cannot fill that minimum (EX);
+    Bench places Auto-fill or a whole-board write made, decided again at the lock (A);
+    otherwise the lock fills open seats from those who joined, then the bench (EB empty board, PB part-filled).
+    Without a Bench answer the lock still decides on, today's sentences. Raids that differ get the rule true of all:
+    the losses first (FH / H), then EX, then A, then the plain fill rule. `rs`: every open raid of the event, else `ev`."""
     parts = [p for p in rc.event_parts(rs, ev) if p.state == "open"] if rs is not None else [ev]
     parts = parts or [ev]
-    states = {p.key: _board_state(reg, p) for p in parts}
-    preds = {p.key: rc.bench_prediction(reg, rs, p) for p in parts}
+    keys = [_LockFacts(reg, rs, p).key() for p in parts]
     lineup = rc.event_lineup(reg, ev)
     whom = rc.lineup_roster_words(reg, lineup)
-    shapes = {(0 if states[k] == "full" else b.rest, b.displaced) for k, b in preds.items()}
-    k, d = next(iter(shapes)) if len(shapes) == 1 else (None, None)  # None: the raids differ
-    kind = set(states.values())
-    if kind == {"full"} and d is not None:
-        return _fit(lambda w: f"The board becomes the roster{w}." if not d else
-                    f"The board becomes the roster{w}, and {_sit_out(d)}.", whom, lineup)
-    if kind == {"empty"}:
-        if k is None:
-            return _fit(lambda w: f"The lock builds the roster{w} from those who joined, then the bench where they fall short.", whom, lineup)
-        if d:
-            return _fit(lambda w: f"The lock builds the roster{w} with {_from_bench(k)} from the bench, so {_sit_out(d)}.", whom, lineup)
-        tail = f" and {_from_bench(k)} from the bench" if k else ""
-        return _fit(lambda w: f"The lock builds the roster{w} from those who joined{tail}.", whom, lineup)
-    if k is None:
-        return "Everyone on the board keeps their place, and the lock fills the rest from Not placed, then the bench."
-    if d:
-        return f"Everyone on the board keeps their place, and {_sit_out(d)}."
-    if k:
-        return f"Everyone on the board keeps their place, and the lock fills the rest, {_from_bench(k)} from the bench."
+    kinds = {k[0] for k in keys}
+    if len(set(keys)) == 1:
+        k = keys[0]
+        if k[0] == "full":
+            return _fit(lambda w: f"The board becomes the roster{w}.", whom, lineup)
+        if k[0] == "FH":
+            return _fit(lambda w: f"The board becomes the roster{w}, so its Bench answer{'s are' if k[1] else ' is'} rostered "
+                        "ahead of people who joined.", whom, lineup)
+        if k[0] == "H":
+            return _ahead(k[1])
+        if k[0] == "empty":
+            return _fit(lambda w: f"The lock builds the roster{w} from those who joined.", whom, lineup)
+        if k[0] == "part":
+            return "Everyone on the board keeps their place, and the lock fills the open seats from Not placed."
+        if k[0] == "EX":
+            return _short_first(k[1])
+        if k[0] == "A":
+            return AUTO_AGAIN
+        if k[0] == "EB":
+            return _fit(lambda w: f"The lock builds the roster{w} from those who joined, then from the bench.", whom, lineup)
+        return "The lock keeps the board and fills open seats from those who joined, then from the bench."
+    if kinds <= {"full", "FH"}:
+        many = any(k[0] == "FH" and k[1] for k in keys)
+        return _fit(lambda w: f"The board becomes the roster{w}, so its Bench answer{'s are' if many else ' is'} rostered "
+                    "ahead of people who joined.", whom, lineup)
+    if kinds & {"FH", "H"}:
+        return _ahead(any(k[0] in ("FH", "H") and k[1] for k in keys))
+    if "EX" in kinds:
+        return _short_first(tuple(r for r in rc.EXTRA_ROLES if any(k[0] == "EX" and r in k[1] for k in keys)))
+    if "A" in kinds:
+        return AUTO_AGAIN
+    if kinds & {"EB", "PB"}:
+        return "The lock fills open seats from those who joined first, then from the bench."
     return "Everyone on the board keeps their place, and the lock fills the open seats from Not placed."
 
 
+# the lock box's head when Auto-fill or a whole-board write put a Bench answer on the board: the lock decides that
+# place again (lock_forces in raidcycle), so a later joiner comes first
+AUTO_AGAIN = "The lock fills open seats from those who joined, then the bench, and Bench places nobody dragged count as open."
+
+
+def _short_first(roles: tuple) -> str:
+    """The lock box's head when the Bench exception may fire (rc.bench_short_roles): a benched tank or healer comes
+    before a joiner only for a minimum those who joined together cannot fill."""
+    return f"The lock fills seats from those who joined, then the bench, but a needed benched {' or '.join(roles)} comes first."
+
+
 def _lock(reg: Registry, ev: rc.RaidEvent, rs=None) -> list[str]:
+    """The lock box's sentences: the head (_lock_head), who is asked to confirm and how, and by when. A count of the
+    rostered only when it is certain — the board is the whole roster (_LockFacts.full), so it is the number on the board."""
     from .raid_views import run_times
 
     if ev.state != "open":
         return _closed(ev) or ["This event is already locked."]
-    off = set(rc.lock_forces(reg, None, ev).kept_off)  # THE solve's kept-off list: the count never promises them a DM
-    joined = [s for s in ev.by_status("in") if s.display_name not in off]
-    bench = [s for s in ev.by_status("sub") if s.display_name not in off]
-    pred = rc.bench_prediction(reg, rs, ev)  # the Bench answers the lock rosters get the same ask
-    k = pred.total
-    n = pred.rostered  # the seats of the rosters the lock builds (a board place in a second roster's group makes two)
+    facts = _LockFacts(reg, rs, ev)
     lines = [_lock_head(reg, ev, rs)]
     test = rc.is_test_run(reg, ev)
     if not rc.run_confirms(reg, ev):  # a one-off (D5): Join is the commitment
         lines.append("Nobody is asked to confirm.")
         lines.append("On a test event the puppets' messages come to the tester." if test else "You can still move people after the lock.")
         return lines
-    if n == 0:
+    if not facts.joined and not facts.bench:
         lines.append("Nobody has joined yet, so nobody is asked to confirm.")
         return lines
-    off = _dms_off(reg, (s.discord_id for s in joined))
-    bench_off = _dms_off(reg, (s.discord_id for s in bench)) if k else 0
-    if k and k >= len(bench):
-        off += bench_off
-    # who of them the lock takes is the solve's (some Bench answers, or joiners past the seats): with DMs off among
-    # them, how many see it on the site is unknown — the sentence says both ways, never a number the lock contradicts
-    unsure = (0 < k < len(bench) and bench_off > 0) or (off > 0 and len(joined) + k > n)
     _, _, confirm = run_times(reg, ev, rc.run_team(reg, ev))
-    who = "The one person rostered gets" if n == 1 else f"The {n} rostered get"
-    if test:
-        lines.append(f"{who} {CONFIRM_DM}, and the puppets' DMs come to the tester.")
-    elif unsure:
-        lines.append(f"{who} {CONFIRM_DM}, or {'sees' if n == 1 else 'see'} it on the site with DMs off.")
-    elif off and off >= n:
-        lines.append(("The one person rostered sees" if n == 1 else f"The {n} rostered see") + " a Confirm or Can't make it ask on the site, with DMs off.")
-    else:
-        got = n - off
-        lines.append(f"{who} {CONFIRM_DM}." if not off else
-                     f"{got} of the {n} rostered {'gets' if got == 1 else 'get'} {CONFIRM_DM} and {off} {'sees' if off == 1 else 'see'} it on the site.")
+    if facts.full:  # the board is the roster: the count and who has DMs off are certain
+        n = len(facts.placed)
+        ids = [sg.discord_id for x in facts.placed if (sg := rc.signup_by_name(ev, x)) is not None]
+        off = _dms_off(reg, ids)
+        who = "The one person rostered gets" if n == 1 else f"The {n} rostered get"
+        if test:
+            lines.append(f"{who} {CONFIRM_DM}, and the puppets' DMs come to the tester.")
+        elif off and off >= n:
+            lines.append(("The one person rostered sees" if n == 1 else f"The {n} rostered see") + " a Confirm or Can't make it ask on the site, with DMs off.")
+        else:
+            got = n - off
+            lines.append(f"{who} {CONFIRM_DM}." if not off else
+                         f"{got} of the {n} rostered {'gets' if got == 1 else 'get'} {CONFIRM_DM} and {off} {'sees' if off == 1 else 'see'} it on the site.")
+    else:  # who the lock takes is the solve's: no number, and DMs off said as a way the ask arrives
+        cands = [s.discord_id for s in facts.joined + facts.bench]
+        off = _dms_off(reg, cands)
+        if test:
+            lines.append(f"Everyone rostered gets {CONFIRM_DM}, and the puppets' DMs come to the tester.")
+        elif off and off >= len(cands):
+            lines.append("Everyone rostered sees a Confirm or Can't make it ask on the site.")
+        elif off:
+            lines.append("Everyone rostered gets the Confirm or Can't make it ask, as a DM or on the site.")
+        else:
+            lines.append(f"Everyone rostered gets {CONFIRM_DM}.")
     lines.append(f"They have until {reg.local12(confirm)} to answer.")
     return lines
+
+
+def _lock_rev(reg: Registry, rs, ev: rc.RaidEvent) -> str:
+    """What the lock box's fingerprint covers beyond its sentences (which no longer count people): the event (rc.event_rev),
+    and every open raid's board (rc.board_rev: groups, pins, state), Auto-fill's places and the answers."""
+    import hashlib
+    import json
+
+    parts = [p for p in rc.event_parts(rs, ev) if p.state == "open"] or [ev]
+    blob = json.dumps([rc.event_rev(reg, rs, ev)] + [[rc.board_rev(reg, p), sorted(p.auto_placed),
+                       sorted((u, s.status, s.display_name, s.character or "", s.spec or "") for u, s in p.signups.items())]
+                      for p in parts], default=str)
+    return hashlib.sha1(blob.encode()).hexdigest()[:16]
 
 
 def lock_refusal(reg: Registry, ev: rc.RaidEvent) -> str | None:
@@ -309,7 +376,7 @@ def lock_box(reg: Registry, ev: rc.RaidEvent, rs=None) -> dict:
         return refusal_box_for(_lock(reg, ev)[0])
     if (why := lock_refusal(reg, ev)) is not None:
         return refusal_box_for(why)
-    return box(f"Lock {event_title(reg, ev)}?", _lock(reg, ev, rs), "Lock", rev=rc.event_rev(reg, rs, ev) if rs is not None else "")
+    return box(f"Lock {event_title(reg, ev)}?", _lock(reg, ev, rs), "Lock", rev=_lock_rev(reg, rs, ev) if rs is not None else "")
 
 
 def _cancel(reg: Registry, ev: rc.RaidEvent, rs=None) -> list[str]:
@@ -788,15 +855,30 @@ def leave_follow_consequence(reg: Registry, ev: rc.RaidEvent, seated: bool, lead
     return [first, f"You are out of the later raid, {mine}."]
 
 
+def back_sentence(ev: rc.RaidEvent, names, where: str) -> str:
+    """Where names taken out of the groups go before the lock, in one sentence: a Join answer to Not placed, a Bench
+    answer to the bank's Bench list (rc.BANK_WORDS). `where` = 'on the board' / 'you placed'; the names are counted,
+    never listed."""
+    bench = {s.display_name for s in ev.by_status("sub")}
+    b = sum(1 for x in names if x in bench)
+    j = len(names) - b
+    to_j, to_b = rc.BANK_WORDS["open"], rc.BANK_WORDS["bench"]
+    if not b:
+        return f"The {j} people {where} go back to {to_j}." if j > 1 else f"The one person {where} goes back to {to_j}."
+    if not j:
+        return (f"The {b} Bench answers {where} go back to {to_b}." if b > 1
+                else f"The one Bench answer {where} goes back to {to_b}.")
+    return f"The {j + b} people {where} go back to {to_j} or {to_b}, by their answer."
+
+
 def _clear(reg: Registry, ev: rc.RaidEvent) -> list[str]:
     if (closed := _closed(ev)):
         return closed
     if ev.state == "open":
-        placed = sum(len(g) for g in (ev.layout or []))
-        if not placed:
+        on = [x for g in (ev.layout or []) for x in g]
+        if not on:
             return ["The board is already empty."]
-        return [(f"The {placed} people on the board go back to {rc.BANK_WORDS['open']}." if placed > 1 else
-                 f"The one person on the board goes back to {rc.BANK_WORDS['open']}."), "Nothing is sent before the lock."]
+        return [back_sentence(ev, on, "on the board"), "Nothing is sent before the lock."]
     rostered = len(ev.seated())
     if not rostered:
         return ["The roster is already empty."]
@@ -825,6 +907,13 @@ def _release(reg: Registry, ev: rc.RaidEvent, name: str | None) -> list[str]:
 BEFORE_LOCK = "Nothing is sent before the lock."
 
 
+def _bank_word(ev: rc.RaidEvent, name: str) -> str:
+    """The list a name taken out of the groups goes back to before the lock: Bench for a Bench answer, else Not placed.
+    A name token (consequences_json's OTHER_TOKEN) is no Bench answer: the board fills it for a joiner."""
+    sg = rc.signup_by_name(ev, name)
+    return rc.BANK_WORDS["bench"] if sg is not None and sg.status == "sub" else rc.BANK_WORDS["open"]
+
+
 def _board(verb: str, reg: Registry, ev: rc.RaidEvent, name: str, other: str, to: str) -> list[str]:
     """One move on the board (RaidMixin.board_move — a drag or Move to…). Before the lock the board is only the layout the
     lock will use: nobody is told. After it the board IS the roster (rc.apply_layout_locked): moving between groups is
@@ -836,7 +925,7 @@ def _board(verb: str, reg: Registry, ev: rc.RaidEvent, name: str, other: str, to
         return {"move": [f"{name} takes an open seat in {to}.", BEFORE_LOCK],
                 "roster": [f"{name} takes an open seat in {to}.", BEFORE_LOCK],
                 "swap": [f"{name} and {other} swap places.", BEFORE_LOCK],
-                "substitute": [f"{name} takes {other}'s place in {to}.", f"{other} goes back to {rc.BANK_WORDS['open']}.", BEFORE_LOCK]}[verb]
+                "substitute": [f"{name} takes {other}'s place in {to}.", f"{other} goes back to {_bank_word(ev, other)}.", BEFORE_LOCK]}[verb]
     if verb == "move":
         return [f"{name} moves to {to} and stays rostered.", "Nobody is told."]
     if verb == "swap":
@@ -1062,18 +1151,23 @@ def board_move_box(reg: Registry, ev: rc.RaidEvent, name: str, to: tuple[int, in
     return box(BOARD_MOVE_TITLES[kind].format(name=name, other=other), said, BOARD_MOVE_VERBS[kind], rev=rc.board_rev(reg, ev))
 
 
-def undo_box(n: int, rev: str = "") -> dict:
-    """Box 9: Undo my moves (`rev`: the board's fingerprint, rc.board_rev)."""
+def undo_box(n: int, rev: str = "", bench: int = 0) -> dict:
+    """Box 9: Undo my moves (`rev`: the board's fingerprint, rc.board_rev; `bench`: how many of the names are Bench
+    answers — they go back to the bank's Bench list, the others to Not placed)."""
     head = "Your one move on this board is dropped." if n == 1 else f"Your {n} moves on this board are dropped."
-    return box("Undo your moves?", [head, "That person goes back to Not placed." if n == 1 else "Those people go back to Not placed."],
-               "Undo moves", rev=rev)
+    to_j, to_b = rc.BANK_WORDS["open"], rc.BANK_WORDS["bench"]
+    where = to_b if bench >= n else to_j if not bench else f"{to_j} or {to_b}, by their answer"
+    back = f"That person goes back to {where}." if n == 1 else f"Those people go back to {where}."
+    return box("Undo your moves?", [head, back], "Undo moves", rev=rev)
 
 
 def undo_box_for(reg: Registry, ev: rc.RaidEvent, viewer: int | None) -> dict | None:
     """Box 9 for officer `viewer` on raid `ev`'s board: the count is THEIR moves as the server records them
     (rc.own_moves), the fingerprint the board and those moves (rc.undo_rev). None when they have none."""
-    n = len(rc.own_moves(ev, viewer))
-    return undo_box(n, rev=rc.undo_rev(reg, ev, viewer)) if n else None
+    mine = rc.own_moves(ev, viewer)
+    bench = {s.display_name for s in ev.by_status("sub")}
+    n = len(mine)
+    return undo_box(n, rev=rc.undo_rev(reg, ev, viewer), bench=sum(1 for x in mine if x in bench)) if n else None
 
 
 CLEAR_LOCKED = "The roster is locked, so the board is the roster now and can't be cleared."

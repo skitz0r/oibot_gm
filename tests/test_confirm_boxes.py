@@ -114,7 +114,7 @@ def test_lock_box_on_a_scheduled_event_says_who_confirms(reg, rs):
     join(reg, rs, ev, people(reg, 20))
     s = cq.lock_box(reg, ev)["sentences"]
     assert s[0] == "The lock builds the roster for Hyjal Summit and both Barrow Deeps rosters from those who joined."
-    assert s[1] == "The 20 rostered get the Confirm or Can't make it DM." and s[2].startswith("They have until ")
+    assert s[1] == "Everyone rostered gets the Confirm or Can't make it DM." and s[2].startswith("They have until ")
 
 
 def test_lock_box_says_what_the_board_becomes(reg, rs):
@@ -259,7 +259,7 @@ def test_a_stale_box_is_refused_with_the_fresh_one(reg, rs, web_bot, monkeypatch
     assert r.status_code == 409 and ev.state == "open", "nothing is locked on a box that changed"
     fresh = r.json()["box"]
     assert r.json()["error"] == CONFIRM_WORDS["changed"] and fresh["fp"] != a["fp"] and fresh == cq.lock_box(reg, ev, rs)
-    assert "The 5 rostered" in fresh["sentences"][1] and "The 4 rostered" in a["sentences"][1], "the fresh box names the new count"
+    assert fresh["sentences"] == a["sentences"], "no count: the fingerprint alone covers the new answer"
     r = web_bot.c.post(f"/api/run/{ev.key}/lock", json={"seen": fresh["fp"]}, headers=H())
     assert r.status_code == 200 and ev.state == "locked", r.text
 
@@ -542,15 +542,20 @@ def test_open_refuses_when_its_times_cant_be_read(reg, rs, web_bot, monkeypatch,
 
 
 def test_the_lock_box_never_counts_a_joiner_kept_off(reg, rs):
-    """The count is the solve's own kept-off list (rc.lock_forces): one joiner pinned out is not "rostered", and with
-    everyone who joined kept off the box is a refusal (the lock would roster nobody)."""
+    """The count is the board's, said only when the board is the whole roster (consequences._LockFacts.full): seven
+    joined and all placed is "The 7 rostered"; one kept off and the others placed is "The 6 rostered"; with everyone
+    who joined kept off the box is a refusal (the lock would roster nobody)."""
     sid = tuesday(reg)
     ev = rc.open_run(reg, rs, HYJAL, next_tuesday(reg, sid), schedule=sid)
     ms = people(reg, 7)
     join(reg, rs, ev, ms)
+    assert cq.lock_box(reg, ev)["sentences"][1] == "Everyone rostered gets the Confirm or Can't make it DM.", "nobody placed: no count"
+    ev.layout = [[m.display_name for m in ms[:5]], [m.display_name for m in ms[5:]]]
     assert cq.lock_box(reg, ev)["sentences"][1].startswith("The 7 rostered get")
+    ev.layout = [[m.display_name for m in ms[1:6]], [ms[6].display_name]]
     ev.pins[str(ms[0].discord_id)] = "out"
     assert cq.lock_box(reg, ev)["sentences"][1].startswith("The 6 rostered get")
+    ev.layout = None
     for m in ms:
         ev.pins[str(m.discord_id)] = "out"
     b = cq.lock_box(reg, ev)

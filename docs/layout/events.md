@@ -33,7 +33,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        Stopped = THE way the Events board's pictures give way to a lock (only they pass one); SolveOptions.kept_off is informational
                        (explain's Closest to a seat skips it)), explain.py (advisories; "Closest to a seat" lists who joined before any Bench
                        answer and tries them first — never the what-if's numbers, which carry the bench's cost; "In from the bench" + its
-                       details line: rostered only for a seat nobody who joined could take), coverage.py (slot-aware)
+                       details line: an officer placed or pinned them, a seat would otherwise stay empty, or a tank / healer minimum those who joined could not fill), coverage.py (slot-aware)
   raidcycle.py         signup-driven cycle (design.md §5.20): raid SCHEDULES (§5.27: Registry.schedules/schedule_def; weekly slots · day N of each
                        lockout · pickup templates; every schedule has a guild-unique id, there is no `default` one) + timing (schedule_def: slots, the
                        schedule's own SCHEDULE_TIMING, weights) → occurrences/upcoming/schedule_starts/open_run(schedule=) (ephemeral run dict per raid
@@ -44,8 +44,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        when the vacated role would go short; asks expire after fill_ask_hours). `nudge`/`nudge_hours_before`/`autofill`/`open_dm`
                        are the run dict's, seeded from its schedule at open (a run's own via reschedule). No LLM. Run states open | locked | done | cancelled; the member-facing word is "rostered", never "seated".
                        THE run vocabulary (design §5.56 phase 2): RUN_STATE_WORDS, NO_CONFIRMATIONS, FIRST_COME, SHEET_ANSWERS (the open sheet's
-                       footer: Bench = call me if a seat would stay empty), bench_promise(reg, signup) (the Bench receipt's tail: rostered only
-                       for a seat that would stay empty — or a tank / healer short, for one who plays it — and among the first asked), BANK_WORDS (Not placed / Not rostered / Bench — the Events board's second bank section before the lock),
+                       footer: Bench = call me if a seat would stay empty), bench_promise(reg, signup) (the Bench receipt's tail: rostered if a
+                       seat would otherwise stay empty — or a tank / healer short, for one who plays it — and among the first asked when one
+                       opens later; never "only if": an officer may place them), BANK_WORDS (Not placed / Not rostered / Bench — the Events board's second bank section before the lock),
                        LEFTOVERS, PIN_WORDS, NOT_ANSWERED_WORDS, ASK_HOW (how an ask reaches someone), ASK_ANSWER_WORDS, fill_state_text (sentences),
                        answer_word (the Me badge), balance_words (a split compared in words) — /api/meta carries them; the site keeps no copy
                        ONE planner (rc.role_plan; fill engine extended to before lock): ranked moves with alternates and a still-short line; nothing is
@@ -133,12 +134,12 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        keeps only the HAND placements: ev.auto_placed taken off first; the solve's names in board_names kept, a Bench answer it
                        rosters included — the board shows what the lock would roster; PURE); RaidEvent.placed_by {name: officer}, drag_pins {uid:
                        {by, was, now}} and auto_placed [names Auto-fill placed] (all cleared at the lock) via record_moves (a move from another surface
-                       clears whose it was; any moved name leaves auto_placed), own_moves / own_pins / undo_rev; open_seat_roles (a locked roster's).
+                       clears whose it was; only the DRAGGED name leaves auto_placed, never one a swap displaced), own_moves / own_pins / undo_rev; open_seat_roles (a locked roster's).
                        board_names(ev) = THE names a board may hold (task 5 of 2026-11-25): open = Join or Bench answers; locked = Join answers +
                        every rostered name (a Bench answer the lock rostered survives an officer's drag) — prune_board, apply_move, autofill,
                        RaidMixin._write_board and configops' run_move / run_board (configops._board_check, the one check) read it;
                        NOT_ON_SHEET / NOT_ON_SHEET_MANY = the refusal of any other name (whole sentences), BENCH_LOCKED = a Bench answer off a
-                       locked roster (once a seat opens, More › Fill seats… asks the bench first); configops.board_text lists the parser the
+                       locked roster (can't be put on the roster until an open seat is offered to them); configops.board_text lists the parser the
                        unplaced Join answers ('not placed' / 'not rostered') and, apart, the unplaced Bench answers. An older build prunes a placed
                        Bench name at that run's next save (nothing is rewritten at start).
                        prune_board(ev) = in EVERY RaidStore.save of an open run: a placed name neither Join nor Bench, pinned out, or whose
@@ -156,13 +157,11 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        answers past the seats the joiners leave, in answer order (Player.pos — a Bench answer's place is when its Bench began:
                        Signup.benched_at, kept by carry_joined like joined_at, absent on older files = updated_at; Signup.order_at), keeping a
                        hand-placed one and one able to play a tank / healer seat the joiners together leave short (solver.bench_refund_room's
-                       total and roles, in answer order); bench_prediction(reg, rs, ev) → BenchSeats(total, placed, joiners, seats; rest,
-                       displaced, rostered) = how many Bench answers the lock rosters, WITHOUT a solve (the lock box's count; bench_seats =
-                       its total): lock_forces, _roster_count, merged_role_min and on a first-to-join event first_come_out +
-                       first_come_bench_out as _solve_run takes them, then the kept-on Bench answers + min(the queue, max(the seats the
-                       joiners leave empty, the tank / healer seats solver.bench_refund_room leaves the joiners short matched by
-                       solver.role_cover against the queue)); `displaced` = joiners who sit out because of them, `rostered` = the lock's
-                       headcount over the rosters it builds; _solve_run's later-raid branch no longer reuses the groups per
+                       total and roles, in answer order); lock_seat_count(reg, ev, players=, forces=) = run size × _roster_count with the
+                       board's highest kept place (the lock box's "is the board the whole roster"); bench_short_roles(reg, rs, ev) = the tank /
+                       healer roles the Bench exception may bring a Bench answer in for (solver.bench_refund_room with _solve_run's need and
+                       late joiners, and a Bench answer still decided on who plays it) — the lock box's rule sentence, never a count (the
+                       Task 6 fix removed bench_prediction / bench_seats: the box no longer predicts); _solve_run's later-raid branch no longer reuses the groups per
                        roster as the part number (a hand place past a later raid's first groups reaches the solve); SOLVER_WORDS + conflict_sentence →
                        solver_error_text (a timeout checked before infeasible; never an exception's words; a stored sentence reads as itself).
                        Role switches: event_switches(reg, rs, first, viewer=) → {short [{raid, roles, why}], rows, revs} composed from each live raid's
@@ -209,7 +208,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        rc.apply_move on the officers' layout (names from rc.board_names): a drop on Not placed only un-places — no pin —, a place in a group lifts a kept-off pin;
                        recorded per officer; before the lock it awaits only RaidStore.save — the file and the synchronous git commit, no
                        Discord edit —, after it _write_board's after_board_change awaits the confirm DM, the sheet and card edits and the fill
-                       before the route answers (measured in issue #12)); _write_board(…, auto=) (Auto-fill's write: ev.auto_placed; save_board empties it; keeps only rc.board_names); undo_moves(reg,
+                       before the route answers (measured in issue #12)); _write_board(…, auto=) (Auto-fill's write: ev.auto_placed; save_board records its Bench names in it — decided again at the lock — and its joiners as hand placements; keeps only rc.board_names); undo_moves(reg,
                        rs, ev, by_id, by, rev=) = Undo my moves (only that officer's placements and the pins their drags changed, rc.undo_rev checked);
                        set_answer(…, spec=, via=) (a role switch: the spec on the answer for the whole evening, a notice, one audited line);
                        send_plan(…, seats=) (one ask: the Events page's Switch after the lock); open_run_and_post(…, lock_hours=, first_rosters=);

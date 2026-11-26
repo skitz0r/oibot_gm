@@ -315,7 +315,7 @@ def live_runs_text(reg: Registry, raids=None) -> str:
             continue
         if nxt:
             upcoming.append(f"- {rid}: " + ", ".join(f"{reg.local(t, '%Y-%m-%d %H:%M')} {s['id']} (= {reg.local12(t)})" for s, t in nxt))
-    return ("\n".join(out) or "(none)") + (data_block("Boards of the live events (event key board: groups · bench — display names people chose)", boards) if boards else "") \
+    return ("\n".join(out) or "(none)") + (data_block("Boards of the live events (event key board: groups · not placed · Bench — display names people chose)", boards) if boards else "") \
         + ("\n## Upcoming events not opened yet (raid: guild-time start + schedule id, = the same time as a person reads it)\n" + "\n".join(upcoming) if upcoming else "")
 
 

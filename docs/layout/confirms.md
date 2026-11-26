@@ -36,12 +36,17 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        THE confirmation box (§5.67 phase 4, spec §7b): box(title, sentences, verb, *, danger, diff, rev) → {title, sentences, verb,
                        danger, diff, fp} (fp = sha1 of title + diff + sentences + rev, 12 hex; verb None = a refusal, Back alone; red only when it can't
                        be undone); refusal_box / refusal_kind (the kind a built refusal carries — rc.Refusal past | clash — or the constant it equals,
-                       never words inside it) / refusal_box_for → REFUSAL_TITLES; the twenty boxes: lock_box (1–2; the head from _board_state (a Bench answer
-                       waiting counts while seats are open) and rc.bench_prediction: "… from those who joined and 2 from the bench." /
-                       "… with one from the bench, so one person who joined sits out." / "… fills the rest, 2 from the bench." / "… and
-                       one person who joined sits out." — raids that differ get the sentence without numbers; the DM count = the
-                       prediction's rostered, Bench answers included; DMs off among those the solve picks → "…, or see it on the site with
-                       DMs off."; lock_refusal = everyone kept off), reschedule_box (3; `edit=True` = Edit event's box, the owner's tweaks B:
+                       never words inside it) / refusal_box_for → REFUSAL_TITLES; the twenty boxes: lock_box (1–2; the head states a RULE true whatever the solve decides, never a predicted
+                       number (Task 6 fix): _LockFacts per open raid from rc.lock_forces + rc.lock_seat_count (full = every seat of every
+                       roster the lock builds placed, or nobody left to place, and no auto-placed Bench name) → key: "The board becomes the
+                       roster…" (+ ", so its Bench answer is rostered ahead of people who joined" when a hand-placed one leaves a joiner off) ·
+                       "A Bench answer an officer placed or pinned is rostered ahead of people who joined." (joined ≥ seats) · _short_first
+                       (rc.bench_short_roles: "… but a needed benched healer comes first.") · AUTO_AGAIN (a Bench place Auto-fill or a
+                       whole-board write made) · "… from those who joined, then from the bench." — raids that differ get the rule true of
+                       all (losses first); the DM sentence counts only when the board is full (the board's number), else "Everyone rostered
+                       gets …" / "… ask, as a DM or on the site." with DMs off; the fp covers _lock_rev (event_rev + each open raid's
+                       board_rev, auto_placed and answers); back_sentence / _bank_word / undo_box(bench=) = where names taken off the
+                       groups go (Not placed, or Bench for a Bench answer); lock_refusal = everyone kept off), reschedule_box (3; `edit=True` = Edit event's box, the owner's tweaks B:
                        "Change <event>?" + Save + event_edit_lines = 'label: old → new' in PAGE_WORDS schedule_fields / priority / split words,
                        event_value_words; TIMING_NAMES carries confirmation, seating, priority, split) + reschedule_pick_box, lineup_box (4) + lineup_diff_lines,
                        cancel_box (5, red), switch_box (6–7: locked=, swap=, own=), answer_box (8, inbox.action_lines) = a thin call of

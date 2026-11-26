@@ -227,8 +227,9 @@ def test_after_autofill_a_kept_off_name_is_not_rostered(reg, rs):
 
 def test_after_autofill_a_placed_name_that_answers_bench_keeps_its_place(reg, rs):
     """Task 5 of 2026-11-25: a placed name whose answer becomes Bench stays on the board (rc.board_names). Auto-fill
-    placed it, so the lock decides that seat again (task 5 fix: not kept on); with seats still empty they are rostered,
-    and Preview lock shows the roster Lock builds."""
+    placed it, so the lock decides that seat again (task 5 fix: not kept on). Twenty-one joiners remain for twenty seats,
+    so no seat is empty: they are rostered because they are a tank the joiners lack (the tank / healer exception), and
+    Preview lock shows the roster Lock builds."""
     reg.seed_test_members(24, "t")
     start = (reg.now_local() + timedelta(days=3)).replace(hour=18, minute=30, second=0, microsecond=0)
     ev = rc.open_run(reg, rs, HYJAL, start, by="t", schedule=rc.ADHOC_SCHEDULE)

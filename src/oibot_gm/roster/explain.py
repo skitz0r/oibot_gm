@@ -86,8 +86,8 @@ def annotate(profile: GameProfile, players: list[Player], raid_id: str, result: 
     if promoted:
         adv.append("🟢 In from the bench · "
                    + ", ".join(f"{p.signup_name} ({p.spec}, came {p.attended} of {p.attendance_total})" for p in promoted[:3]))
-        details.append("In from the bench: rostered only for a seat nobody who joined could take, an empty seat or a tank "
-                       "or healer minimum those who joined could not meet.")
+        details.append("In from the bench: an officer placed or pinned them, or a seat would otherwise have stayed empty. "
+                       "A benched tank or healer also comes in for a minimum those who joined could not fill.")
     if whatif_map:
         ranked = sorted(whatif_map.items(), key=lambda kv: (kv[0] in bench, -kv[1]))[:4]
         # who left out comes closest to a seat, closest first — the order alone (the group-building numbers stay in
