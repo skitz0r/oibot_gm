@@ -5,21 +5,23 @@ Code, not the prompt, enforces every limit of §6: at most MAX_ROUNDS lookup rou
 (the rest answered TOO_MANY_LOOKUPS), TOTAL_RESULT_CHARS of lookup results in one answer (a result that would cross it
 is answered RESULTS_FULL and the next request is the last), MAX_REQUESTS model requests (a hard stop), and the reply's
 ANSWER_CHARS. The last request offers the model the forced `reply` (where the model takes a forced tool — converse
-decides, provider.forced_tool_ok) and always carries FINAL_NUDGE; a model that still looks something up gets the honest
-ANSWER_NOT_FOUND, never a guess.
+decides, provider.forced_tool_ok) and always carries FINAL_NUDGE; a model that still only looks something up gets the
+honest ANSWER_NOT_FOUND, never a guess (text it wrote beside the lookup is its answer). A failed request ends with
+ANSWER_FAILED: nothing was looked up, so "couldn't find" would be untrue.
 
 Messages: the first user message is one text block (`first_user`); each assistant message is the turn's `content`
 exactly as converse gave it (thinking blocks and their signatures included, never edited); every lookup result of a
 round goes back in ONE user message, a tool_result per call in the order called, each with its call's id. The tool list
 (answer_tools.tools_for(profile) + reply_spec()) and the system text never change within one answer, so the prompt
 cache holds. `reply`'s fields are checked here: the page against help.PAGES (an officers' page dropped for a viewer who
-is not one), each choice against the names this answer's first request and lookups actually showed, the answer cut to
-ANSWER_CHARS. Nothing here writes anything."""
+is not one), each choice against NAMES — the resolver's candidates exactly, or a whole-word phrase of the lookup
+results (never the question, the wrapper lines or the system text) —, the answer cut to ANSWER_CHARS. Nothing here writes anything."""
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Iterable, Literal
 
 from . import help as help_mod
 from .answer_tools import BIG_RESULT_CAP, RESULT_CAP, Viewer, run_tool, tools_for
@@ -29,7 +31,7 @@ from .llm.provider import BudgetExceeded, CutShort, Refused
 log = logging.getLogger(__name__)
 
 __all__ = ["MAX_ROUNDS", "MAX_CALLS_PER_ROUND", "RESULT_CAP", "BIG_RESULT_CAP", "TOTAL_RESULT_CHARS", "MAX_REQUESTS",
-           "ANSWER_CHARS", "MAX_CHOICES", "REPLY", "reply_spec", "ANSWER_NOT_FOUND", "TOO_MANY_LOOKUPS", "RESULTS_FULL",
+           "ANSWER_CHARS", "MAX_CHOICES", "REPLY", "reply_spec", "ANSWER_NOT_FOUND", "ANSWER_FAILED", "TOO_MANY_LOOKUPS", "RESULTS_FULL",
            "FINAL_NUDGE", "KIND_PAGE", "AnswerResult", "run"]
 
 MAX_ROUNDS = 3              # lookup rounds per answer (design §6)
@@ -46,6 +48,9 @@ REPLY = "reply"
 
 # what the asker reads when the loop ends without an answer (the Copy rule: say what happened, never a guess)
 ANSWER_NOT_FOUND = "I couldn't find the answer in the guild's records, so I haven't guessed."
+# what the asker reads when a request failed (refused, cut off, the API or the network): nothing was looked up, so
+# ANSWER_NOT_FOUND would be untrue. The one copy: discord_help.help_answer reads it from here.
+ANSWER_FAILED = "Something went wrong, so I couldn't answer. The officers have the details."
 # what the model reads (lint-clean too)
 TOO_MANY_LOOKUPS = "Too many lookups in one step, so this one was skipped."
 RESULTS_FULL = "The lookups for this answer have used their room. Reply now with what you have."
@@ -90,7 +95,8 @@ class AnswerResult:
     """What one answer came to. `answer` = what help_answer posts today (answer text with the choices rendered,
     commands, page, officer_view, for_officer, acts); the rest is for the answers log: `ending` how it ended, `rounds`
     lookup rounds, `requests` model requests sent (a refused or cut-off one counts — it was billed), `tools` every
-    lookup the model asked for, in order, `usage` the requests' tokens and cost summed, `error` the failure's type name."""
+    lookup the model asked for, in order — `not_run` those of them that never ran (asked beside `reply`, or on the
+    last request) —, `usage` the requests' tokens and cost summed, `error` the failure's type name."""
     answer: HelpAnswer
     ending: Ending
     rounds: int
@@ -99,6 +105,7 @@ class AnswerResult:
     usage: dict
     error: str | None = None
     choices: list[str] = field(default_factory=list)
+    not_run: list[str] = field(default_factory=list)
 
 
 def _text(v) -> str:
@@ -135,12 +142,29 @@ def _cut_answer(text: str, room: int) -> str:
     return head.rstrip(" ,;:—-") + "…"
 
 
-def _checked(fields: dict, viewer: Viewer, seen: str) -> tuple[HelpAnswer, list[str]]:
-    """The reply's fields as code allows them (design §7): (the HelpAnswer, the choices kept)."""
-    seen = seen.casefold()
+_WRAPPER = re.compile(r'^<data source="[^"]*">$|^</data>$', re.M)
+
+
+def _result_body(text: str) -> str:
+    """A lookup result without its data-block wrapper lines: a choice is never found in the wrapper's own words."""
+    return _WRAPPER.sub("", text)
+
+
+def _is_name(choice: str, names: set[str], results: str) -> bool:
+    """A choice is a NAME the answer was shown: one of the resolver's names exactly, or a whole-word-bounded phrase of
+    the lookup results' text (never a fragment of a longer word, never the asker's question nor the system text)."""
+    c = choice.casefold()
+    if c in names:
+        return True
+    return re.search(r"(?<!\w)" + re.escape(c) + r"(?!\w)", results) is not None
+
+
+def _checked(fields: dict, viewer: Viewer, names: set[str], results: str) -> tuple[HelpAnswer, list[str]]:
+    """The reply's fields as code allows them (design §7): (the HelpAnswer, the choices kept). `names` = the resolver's
+    names (case-folded), `results` = the lookup results' bodies (case-folded)."""
     choices: list[str] = []
     for c in _strings(fields.get("choices")):
-        if CHOICE_MIN <= len(c) <= CHOICE_MAX and c.casefold() in seen and c.casefold() not in (x.casefold() for x in choices):
+        if CHOICE_MIN <= len(c) <= CHOICE_MAX and _is_name(c, names, results) and c.casefold() not in (x.casefold() for x in choices):
             choices.append(c)
         if len(choices) == MAX_CHOICES:
             break
@@ -152,17 +176,21 @@ def _checked(fields: dict, viewer: Viewer, seen: str) -> tuple[HelpAnswer, list[
 
 
 def run(provider, system: str, first_user: str, viewer: Viewer, *, known_kind: str | None = None,
-        workload: str = "help") -> AnswerResult:
+        names: Iterable[str] = (), workload: str = "help") -> AnswerResult:
     """One question answered through the lookups, every limit enforced here. BLOCKING (model requests and lookups):
-    callers run it in a thread. Never raises: a spent budget ends "budget" with the provider's own sentence; a refused
-    or cut-off response, an empty turn or any other failure ends "error" with ANSWER_NOT_FOUND; a model that keeps
-    looking things up past its last request ends "cap" the same way."""
+    callers run it in a thread. Never raises: a spent budget ends "budget" with the provider's own sentence (no page);
+    a refused or cut-off response or any other failure ends "error" with ANSWER_FAILED; an empty turn ends "error" with
+    ANSWER_NOT_FOUND; a model that keeps looking things up past its last request ends "cap" with ANSWER_NOT_FOUND,
+    unless that last turn also wrote text, which is then the answer. `names` = the resolver's candidates' names for
+    this question (NameMatch.name): with the lookup results, what a choice may be."""
     tools = [t.spec() for t in tools_for(viewer.reg.profile)] + [reply_spec()]
     messages: list[dict] = [{"role": "user", "content": [{"type": "text", "text": first_user}]}]
-    seen = first_user
+    shown = {str(n).casefold() for n in names if str(n).strip()}
+    results_seen = ""
     rounds = requests = used = 0
     full = False  # a result was refused for room: the next request is the last
     called: list[str] = []
+    not_run: list[str] = []
     usage = {k: 0 for k in USAGE_KEYS}
     usage["cost"] = 0.0
 
@@ -171,13 +199,13 @@ def run(provider, system: str, first_user: str, viewer: Viewer, *, known_kind: s
             usage[k] += (row or {}).get(k) or 0
 
     def done(ending: Ending, answer: HelpAnswer | None = None, error: str | None = None,
-             choices: list[str] | None = None) -> AnswerResult:
-        if answer is None:  # an ending without an answer: the honest sentence, linking the page of the kind when known
-            answer = HelpAnswer(answer=ANSWER_NOT_FOUND, page=_page(KIND_PAGE.get(known_kind or "", ""), viewer))
-        return AnswerResult(answer, ending, rounds, requests, called, usage, error, choices or [])
+             choices: list[str] | None = None, sentence: str = ANSWER_NOT_FOUND) -> AnswerResult:
+        if answer is None:  # an ending without an answer: its honest sentence, linking the page of the kind when known
+            answer = HelpAnswer(answer=sentence, page=_page(KIND_PAGE.get(known_kind or "", ""), viewer))
+        return AnswerResult(answer, ending, rounds, requests, called, usage, error, choices or [], not_run)
 
     def ended_by(fields: dict) -> AnswerResult:
-        ans, choices = _checked(fields, viewer, seen)
+        ans, choices = _checked(fields, viewer, shown, results_seen)
         if ans.acts:
             return done("acts", ans, choices=choices)
         if choices:
@@ -188,6 +216,7 @@ def run(provider, system: str, first_user: str, viewer: Viewer, *, known_kind: s
 
     try:
         while True:
+            # the requests clause is a safeguard: with MAX_ROUNDS = 3 and MAX_REQUESTS = 4 the rounds clause reaches it first
             final = rounds >= MAX_ROUNDS or used >= TOTAL_RESULT_CHARS or full or requests >= MAX_REQUESTS - 1
             if final:
                 messages[-1]["content"].append({"type": "text", "text": FINAL_NUDGE})
@@ -201,12 +230,16 @@ def run(provider, system: str, first_user: str, viewer: Viewer, *, known_kind: s
             add_usage(turn.usage)
             messages.append({"role": "assistant", "content": turn.content})
             reply_call = next((c for c in turn.calls if c.name == REPLY), None)
-            if reply_call is not None:  # the ending; any other call of that turn is never run
+            if reply_call is not None:  # the ending; any other call of that turn is never run, only listed
+                others = [str(c.name)[:64] for c in turn.calls if c is not reply_call]
+                called.extend(others)
+                not_run.extend(others)
                 return ended_by(reply_call.input if isinstance(reply_call.input, dict) else {})
             if turn.calls:
                 called.extend(str(c.name)[:64] for c in turn.calls)
-                if final:
-                    return done("cap")  # told to reply, and didn't
+                if final:  # told to reply, and didn't: a written answer is still the answer, else the honest sentence
+                    not_run.extend(str(c.name)[:64] for c in turn.calls)
+                    return ended_by({"answer": turn.text}) if turn.text.strip() else done("cap")
                 rounds += 1
                 results = []
                 for i, c in enumerate(turn.calls):
@@ -220,19 +253,18 @@ def run(provider, system: str, first_user: str, viewer: Viewer, *, known_kind: s
                             text, is_error, full = RESULTS_FULL, True, True
                         else:
                             used += len(text)
-                            seen += "\n" + text
+                            results_seen += "\n" + _result_body(text).casefold()
                     results.append({"type": "tool_result", "tool_use_id": c.id, "content": text, "is_error": is_error})
                 messages.append({"role": "user", "content": results})
                 continue
             if turn.text.strip():
                 return ended_by({"answer": turn.text})
             return done("error", error="EmptyTurn")
-    except BudgetExceeded as e:  # its sentence is written for the asker (provider._check_budget)
-        return done("budget", HelpAnswer(answer=str(e), page=_page(KIND_PAGE.get(known_kind or "", ""), viewer)),
-                    error=type(e).__name__)
+    except BudgetExceeded as e:  # its sentence is written for the asker (provider._check_budget); no page under it
+        return done("budget", HelpAnswer(answer=str(e)), error=type(e).__name__)
     except (Refused, CutShort) as e:
         log.warning("answer loop: %s", e)
-        return done("error", error=type(e).__name__)
-    except Exception as e:  # noqa: BLE001 — any failure ends with the honest sentence, never a crash or a guess
+        return done("error", error=type(e).__name__, sentence=ANSWER_FAILED)
+    except Exception as e:  # noqa: BLE001 — any failure ends with its own sentence, never a crash or a guess
         log.exception("answer loop failed")
-        return done("error", error=type(e).__name__)
+        return done("error", error=type(e).__name__, sentence=ANSWER_FAILED)

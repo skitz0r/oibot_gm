@@ -9,6 +9,7 @@ import discord
 from discord import app_commands
 
 from . import guild_routing, help as help_mod
+from .answer_loop import ANSWER_FAILED
 from .discord_registry import Guilds
 from .ops import Ops
 
@@ -440,7 +441,7 @@ class HelpMixin:
             await self.ops.emit(reg.config, "warn", f"help answer failed: {type(e).__name__}: {str(e)[:120]}")
             if type(e).__name__ == "BudgetExceeded":  # its sentence is written for the asker (provider.complete): nothing "went wrong"
                 return str(e)
-            return "Something went wrong, so I couldn't answer. The officers have the details."
+            return ANSWER_FAILED
         if may_act and ans.acts:
             return ACT
         text = ans.answer.strip()

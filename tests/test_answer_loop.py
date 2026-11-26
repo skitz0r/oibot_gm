@@ -152,7 +152,7 @@ def test_a_choice_only_the_model_wrote_is_dropped_and_the_reply_is_an_answer(reg
 
 def test_at_most_five_choices(reg, rs):
     names = [f"Name number {i}" for i in range(8)]
-    res = al.run(ScriptedProvider([[reply(answer="Which?", choices=names)]]), SYSTEM, "q " + " ".join(names), member(reg, rs))
+    res = al.run(ScriptedProvider([[reply(answer="Which?", choices=names)]]), SYSTEM, "q", member(reg, rs), names=names)
     assert res.choices == names[:al.MAX_CHOICES]
 
 
@@ -195,22 +195,23 @@ def test_a_reply_beside_other_calls_ends_and_runs_none_of_them(reg, rs):
 
 def test_budget_checked_before_every_request(reg, rs):
     pv = ScriptedProvider([[call("find", text="ironfeather")], BudgetExceeded("The bot's monthly budget is used up.")])
-    res = al.run(pv, SYSTEM, "q", member(reg, rs))
+    res = al.run(pv, SYSTEM, "q", member(reg, rs), known_kind="recipe")
     assert res.ending == "budget" and res.answer.answer == "The bot's monthly budget is used up." and res.requests == 1
+    assert res.answer.page == ""  # the provider's sentence alone, as today: no page link under it
 
 
-def test_a_model_error_ends_with_the_honest_sentence_and_the_page_of_the_kind(reg, rs):
+def test_a_model_error_ends_with_its_own_sentence_and_the_page_of_the_kind(reg, rs):
     res = al.run(ScriptedProvider([RuntimeError("boom")]), SYSTEM, "q", member(reg, rs), known_kind="recipe")
-    assert res.ending == "error" and res.answer.answer == al.ANSWER_NOT_FOUND
+    assert res.ending == "error" and res.answer.answer == al.ANSWER_FAILED
     assert res.answer.page == "professions" and res.error == "RuntimeError" and res.requests == 0
 
 
 @pytest.mark.parametrize("exc", [Refused("cyber"), CutShort()], ids=["refused", "cut-short"])
-def test_a_refused_or_cut_off_response_ends_with_the_honest_sentence(reg, rs, exc):
+def test_a_refused_or_cut_off_response_ends_with_its_own_sentence(reg, rs, exc):
     pv = ScriptedProvider([[call("find", text="ironfeather")], exc])
     pv.last_usage = dict(USAGE)  # the provider writes the billed request's row before it raises
     res = al.run(pv, SYSTEM, "q", member(reg, rs), known_kind="item")
-    assert res.ending == "error" and res.answer.answer == al.ANSWER_NOT_FOUND and res.error == type(exc).__name__
+    assert res.ending == "error" and res.answer.answer == al.ANSWER_FAILED and res.error == type(exc).__name__
     assert res.answer.page == "prices" and res.requests == 2 and res.usage["input"] == 200
 
 
@@ -294,3 +295,64 @@ def test_bench_ironfeather_breastplate_reaches_the_crafter(reg, rs):
 
 def test_bench_ironfeather_pieces_reaches_the_crafter(reg, rs):
     _reaches_the_crafter(reg, rs, "ironfeather_pieces")
+
+
+# ---------------------------------------------------------------- the fix round (Task 5 review)
+
+def test_the_failed_request_sentence_is_todays_one_copy():
+    from oibot_gm import discord_help
+    assert al.ANSWER_FAILED == "Something went wrong, so I couldn't answer. The officers have the details."
+    assert discord_help.ANSWER_FAILED is al.ANSWER_FAILED and al.ANSWER_FAILED != al.ANSWER_NOT_FOUND
+
+
+class TextAndCallsProvider(ScriptedProvider):
+    """A scripted model whose step may be ("text", [calls]): a turn that writes text AND asks for lookups."""
+
+    def converse(self, workload, system, tools, messages, *, force=None):
+        step = self.steps[self.n] if self.n < len(self.steps) else None
+        if isinstance(step, tuple):
+            self.requests.append({"system": system, "tools": tools, "messages": json.loads(json.dumps(messages)), "force": force})
+            self.n += 1
+            text, calls = step
+            tc = [ToolCall(f"call-{self.n}-{i}", c["name"], dict(c["input"])) for i, c in enumerate(calls)]
+            content = [{"type": "text", "text": text}] + [{"type": "tool_use", "id": c.id, "name": c.name, "input": c.input} for c in tc]
+            return Turn(content=content, calls=tc, text=text, stop_reason="tool_use", usage=dict(USAGE))
+        return super().converse(workload, system, tools, messages, force=force)
+
+
+def test_a_written_answer_on_the_last_request_is_never_dropped(reg, rs):
+    look = [call("find", text="ironfeather")]
+    pv = TextAndCallsProvider([look] * 3 + [("Thornwick makes the Ironfeather Breastplate.", look)])
+    res = al.run(pv, SYSTEM, "q", member(reg, rs))
+    assert pv.requests[3]["force"] == "reply"
+    assert res.ending == "answered" and res.answer.answer == "Thornwick makes the Ironfeather Breastplate."
+    assert res.not_run == ["find"]
+    # with lookups and no text the last request still ends "cap"
+    res = al.run(TextAndCallsProvider([look] * 3 + [("  ", look)]), SYSTEM, "q", member(reg, rs))
+    assert res.ending == "cap" and res.answer.answer == al.ANSWER_NOT_FOUND
+
+
+def test_choices_are_names_never_fragments_the_question_or_the_wrapper(reg, rs):
+    question = "who can make ironfeather?"
+    pv = ScriptedProvider([[call("recipe", name="ironfeather")],
+                           [reply(answer="Which one?", choices=["Ironfeather Leg", "who can make", "data source", "Ironfeather Leggings"])]])
+    res = al.run(pv, SYSTEM, question, member(reg, rs, question=question))
+    assert res.choices == ["Ironfeather Leggings"]
+
+
+def test_a_resolver_name_is_a_choice_without_a_lookup(reg, rs):
+    names = ["Ironfeather Breastplate", "Ironfeather Leggings"]
+    pv = ScriptedProvider([[reply(answer="Which one?", choices=[*names, "Ironfeather Shoulders"])]])
+    res = al.run(pv, SYSTEM, "q", member(reg, rs), names=names)
+    assert res.choices == names
+
+
+def test_the_limits_of_section_six():
+    assert (al.MAX_ROUNDS, al.MAX_CALLS_PER_ROUND, al.TOTAL_RESULT_CHARS, al.MAX_REQUESTS, al.ANSWER_CHARS,
+            al.MAX_CHOICES) == (3, 4, 12_000, 4, 1_200, 5)
+
+
+def test_lookups_beside_reply_are_listed_as_not_run(reg, rs):
+    pv = ScriptedProvider([[call("find", text="x"), reply(answer="Done."), call("recipe", name="y")]])
+    res = al.run(pv, SYSTEM, "q", member(reg, rs))
+    assert res.tools == ["find", "recipe"] and res.not_run == ["find", "recipe"] and res.rounds == 0
