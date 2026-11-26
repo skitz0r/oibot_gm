@@ -38,6 +38,8 @@ from .. import ops as ops_mod
 from ..raid_views import run_title
 from ..raidcycle import is_test_run
 from ..loot.session import DISENCHANT, LootBusy, LootChanged
+from ..loot_ops import LOG_MAX, award_is_members, log_row, log_rows
+from ..loot_ops import log_day as day
 from ..loot_ops import loot_log_state  # noqa: F401 — re-exported (web/api.py's Config)
 from ..registry import ROLES, TIER_VALUES, WISHLIST_MAX, RegistryError, WishlistChanged, item_key
 
@@ -81,12 +83,6 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
 
     def clock(reg, iso) -> str:
         return bot.loot_clock(reg, iso) if iso else ""
-
-    def day(reg, value) -> str:
-        try:
-            return reg.day_label(str(value)[:10], with_year=False) if value else ""
-        except Exception:  # noqa: BLE001 — a label is a courtesy
-            return str(value or "")
 
     def run_of(reg, ref: str):
         """(RaidStore, RaidEvent, its sessions) — any run by key (a done one too: reasons and corrections outlive the
@@ -535,38 +531,6 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         return {"message": line}
 
     # ------------------------------------------------------------ the award log (members, logged in — D2)
-    def owner(reg, a, memo: dict):
-        """Whose award `a` is (Registry.award_holder: an award with a Discord id by the id, never by its name; an id-less
-        row by the full name, a current name first — design §5.2), read once per award per request."""
-        if id(a) not in memo:
-            memo[id(a)] = reg.award_holder(a)
-        return memo[id(a)]
-
-    def is_members(reg, a, uid, memo: dict) -> bool:
-        """The award is member `uid`'s: by its Discord id resolved through character moves (owner_of_award); an id-less
-        row by whose character the name is."""
-        if uid is None:
-            return False
-        if a.discord_id is not None:
-            return reg.owner_of_award(a) == uid  # its member now: a moved character's past awards follow it (§5.4)
-        h = owner(reg, a, memo)
-        return h is not None and h[0].discord_id == uid
-
-    def log_row(reg, a, memo: dict, officer: bool, scores: bool, ctx, viewer_uid: int | None) -> dict:
-        it = reg.item(a.item_id or None, a.item_name)
-        name = a.item_name or (it.name if it is not None else f"item {a.item_id}")
-        h = owner(reg, a, memo)
-        c = h[1] if h is not None else None
-        cls, spec = (c.cls, c.spec) if c is not None else (None, None)
-        row = {"item": name, "item_id": a.item_id, "key": item_key(a.item_id, name), "character": "disenchant" if a.raider == DISENCHANT else a.raider,
-               "disenchant": a.raider == DISENCHANT, "cls": cls, "spec": spec, "boss": a.boss, "instance": a.instance, "received": a.received.isoformat(),
-               "date_label": day(reg, a.received.isoformat()), "offspec": a.offspec, "mine": is_members(reg, a, viewer_uid, memo)}
-        if officer and scores:
-            prec = ctx.precedent_for(a.import_id) if a.import_id else None
-            row.update({"tier": a.tier, "weight": a.total_weight, "source": a.source, "bot": a.bot_pick, "by": a.by, "import_id": a.import_id,
-                        "candidates": list(a.candidates_snapshot), "reason": (prec or {}).get("reason")})
-        return row
-
     @app.get("/api/loot/log")
     async def loot_log(request: Request, limit: int = LOG_LIMIT, scores: bool = False, member: str | None = None):
         """The guild award log for anyone logged in to this guild: item, character (spec), date, boss, MS/OS — newest
@@ -575,12 +539,9 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         v = await who(request)
         reg = v.reg
         ctx = ctx_of(reg)
-        memo: dict = {}
-        rows = sorted(ctx.ledger, key=lambda a: (a.received, a.confirmed_at or ""), reverse=True)
-        if member:
-            m = resolve_member(reg, member)
-            rows = [a for a in rows if is_members(reg, a, m.discord_id, memo)]
-        out = [log_row(reg, a, memo, v.officer, scores, ctx, v.uid) for a in rows[:max(1, min(int(limit), 1000))]]
+        m = resolve_member(reg, member) if member else None
+        out = log_rows(reg, ctx, member_uid=m.discord_id if m else None, limit=max(1, min(int(limit), LOG_MAX)),
+                       officer=v.officer, scores=scores, viewer_uid=v.uid)
         return {"rows": out, "scores": bool(v.officer and scores), "officer": v.officer}
 
     @app.get("/api/me/loot")
@@ -593,7 +554,7 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         reg = v.reg
         ctx = ctx_of(reg)
         memo: dict = {}
-        rows = [a for a in ctx.ledger if is_members(reg, a, v.uid, memo)]
+        rows = [a for a in ctx.ledger if award_is_members(reg, a, v.uid, memo)]
         rows.sort(key=lambda a: (a.received, a.confirmed_at or ""), reverse=True)
         needle = " ".join(str(q or "").split()).lower()[:60]
         if needle:  # the member's own awards only — a search never widens what they see

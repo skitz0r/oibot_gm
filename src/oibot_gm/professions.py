@@ -251,6 +251,9 @@ def _tiers(q: str, items, *, longest: bool = False, kept=lambda x: False):
     return [x for x, kw, _ in items if all(any(k.startswith(w) for k in kw) for w in wl)]
 
 
+match_tiers = _tiers  # the public name of the finder's three tiers (answer_names.resolve matches through it)
+
+
 def _list_items(reg: Registry, q: str, profession: str | None) -> list:
     """The game's list as _tiers items: the exact key's recipes alone when the text IS a recipe's name (no walk of the
     list), else every recipe; `profession` keeps that profession's."""

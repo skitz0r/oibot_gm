@@ -424,7 +424,8 @@ character links whether or not the owner has linked the guild — §8; what a li
 
 **Tell the bot** (officers): every officer page has **Tell the bot…** in the left rail (on an event, name the event: *"Thursday's event: …"*), and
 every test event's card on the Test bench has **Tell the bot about this raid** (it starts with the event's name). Type a question ("who hasn't answered tonight?") and the answer comes
-back from the same snapshot `/ask` uses, the officer view; type a request ("bench Jonny tonight", "Barrow Deeps alt nights lock 12 hours
+back from the same snapshot `/ask` uses, the officer view (where the owner has turned the lookup answers on, §10a, from
+the same lookups, and a question the change reader catches is answered there too, never changed); type a request ("bench Jonny tonight", "Barrow Deeps alt nights lock 12 hours
 before") and the bot shows the change first — the same current → new lines an @mention shows in Discord, refused lines saying who may
 and where — with **Apply N changes** / **Cancel**, then the result line by line. Nothing is saved before Apply; a preview is good for
 ten minutes (it says how long is left) and an expired one is previewed again rather than applied unseen. The box keeps its preview while
@@ -712,7 +713,8 @@ standing signup: each event is answered on its sheet in Discord, or by telling t
   what your characters received.
 - All `/me` commands also work in a DM with the bot.
 - **Or just tell the bot.** DM it or @mention it: "I'll be away Nov 1–3", "back early, clear my absence",
-  "make Xanthe my main", "change Xanthe to Holy", "add my alt Jonny, Mage Frost", "add Jonny as my main",
+  "make Xanthe my main", "change Xanthe to Holy" (or "change me from Shadow to Holy": when only one of your characters
+  fits, the bot names it itself instead of asking which), "add my alt Jonny, Mage Frost", "add Jonny as my main",
   "plan my main as a Holy Priest" (a planned character, no name yet; saying it again replaces the plan and keeps
   its rank and roster placement), "delete my alt Jonny", "I can also tank on Xanthe", "bench me for tonight",
   "I can't make tonight" (a callout like `/raid out`; "… — work trip" adds a note only the officers see), "I confirm for
@@ -2385,6 +2387,8 @@ when is the next raid") counts as speaking to it; talking *about* the bot to oth
   proposed under it: when it reads as something to record (an absence, a signup answer), the bot adds 👀 and posts
   nothing. The writer clicks the 👀 to see the proposed change with Apply and Cancel; with no click the 👀 comes off
   after the hour and nothing was said or changed. An overheard question is answered straight away, as before.
+  After the bot asks you a question, your next message in that channel within five minutes is taken as your answer,
+  with no need to tag the bot again; only that one message, and only yours. A restart forgets the question.
 The bot judges a message with what it knows about the room: its own job there (the signup channel, the officers'
 channel) and the channel's topic and category in Discord — so give a listening channel a topic ("General chat about the
 game", "Raid signups and questions") and the bot reads it in that light.
@@ -2401,7 +2405,7 @@ listening channel stays silent, the Ops page says "Listening needs the host's Ty
 "TypeSafe key: not set" and the ops channel says so once an hour. The bot keeps its last 50 decisions per server in
 memory, and a log of them without the messages' text. Officers read them on the Ops page's **Listening** tab, under **Recent decisions** (the tab also names the channels the bot listens in): when,
 the channel, who wrote, what they wrote, how likely it was for the bot (a bar and a percent) and what the bot did —
-replied, asked with 👀, stayed quiet, would have replied, would have asked, or skipped (over the hourly limit). The list
+replied, asked with 👀, stayed quiet, would have replied, would have asked, took it as the answer (to a question the bot had just asked that person), or skipped (over the hourly limit). The list
 updates as messages come in. `/gm config plain` lists the listening channels too ("• #signups: Replies — listening"), and
 its first line ends "— listening (Replies)" when the channel you are in listens.
 
@@ -2442,9 +2446,12 @@ only* — so a raider can tell the bot about their absence anywhere, while event
 officer channels.
 
 **How it decides.** The bot reads a message's intent first: in a channel that acts, the sentence is parsed as a
-change straight away (a question is handed to the same answer as `/ask`, with its full snapshot). Elsewhere the bot answers it like
+change straight away (a question is handed to the same answer as `/ask`, with its full snapshot — where the owner has
+turned the lookup answers on, §10a, every question is, even one the change reader would have asked something back
+about, and it looks the facts up instead). Elsewhere the bot answers it like
 `/ask`, and only when the message asks it to *do* something — and you could act there — does it turn it into a
-change for you to Apply. Who an operation is about is decided by the bot's code, not the model: leaving the
+change for you to Apply. With the lookup answers on, a message the change reader then finds to be a question after all
+is answered, never changed: a question is never answered in the change reader's words. Who an operation is about is decided by the bot's code, not the model: leaving the
 person out ("I'll be away") means *you*; naming yourself by display name, @mention or one of your characters
 means you; a name that could also be someone else (two people with that name, or your name is another member's
 character) counts as someone else; a character you name must be one of yours. Refusals say who may and where:
@@ -2461,7 +2468,19 @@ Only Discord saying they are gone counts: a Discord outage never locks a member 
 
 **A follow-up is understood.** Reply to the bot's message, or write again in the same channel within 20 minutes, and
 "him", "that event" and answers to its questions refer to what you said before — answer "7:30 PM" to "What time should
-the event open?" and the diff carries both your first request and the answer. The bot keeps this only in memory (a
+the event open?" and the diff carries both your first request and the answer. When the bot has just asked you
+something, your next message in that channel within five minutes is the answer even without tagging the bot. A reply
+to the bot's question is its answer however long ago it was asked. The answer goes back to whatever asked, tagged or
+not. After a question about a change, your answer becomes that change, a question of your own gets a full answer, and
+anything else gets no reply. If the bot has to ask again, your next message answers that too; after a third question
+in a row, tag the bot or reply to its message to answer. After a question the bot asked while answering you, it
+replies once to whatever you say next. Someone else's reply to a question the bot asked you is never taken as your
+answer. A message that mentions someone else or replies to someone else's message is never taken as the answer; it
+only ends the wait, and so does a sticker or a picture on its own.
+A spec change that names a member but not which character goes to the one character whose class has that spec (and
+that plays the spec named as the old one); only when several fit does the bot ask, and it lists just those. A
+character's name means that character, even when a member is called the same; if both could be meant, the bot asks
+which. If the named character can't take that spec, or already has it, the bot says so. The bot keeps this only in memory (a
 restart forgets it) and only for the last few exchanges, per person and per place: someone else writing in the same
 channel is never read as continuing your conversation. On the site, the Tell the bot box remembers its own last few
 exchanges while the page is open.
@@ -3046,7 +3065,8 @@ only questions have used their half, a question is answered with "This kind of r
 monthly Claude budget; the host raises it. Slash commands, the sheets and the site keep working." and the officers get
 a line in the ops channel. To keep a question cheap the bot doesn't read this whole manual for each one: it gets the
 manual's contents list, answers a question about the guild's data straight from the records, and for a how-to reads
-only the few parts that cover it — one or two small requests an answer, a few cents at most.
+only the few parts that cover it — one or two small requests an answer, a few cents at most. Where the owner has turned
+the lookup answers on (§10a), an answer takes at most four requests and usually two, under a cent.
 
 ## 10a. Asking the bot questions
 
@@ -3072,7 +3092,44 @@ registered members, or everyone; default registered). Anyone outside that audien
 guide** instead — a menu with *About the guild*, *Raid schedule*, *How to register*, *How signups work*,
 *How to apply*, *Who to contact* — built from the guild's settings, no AI involved.
 
-What `/ask` knows comes from one bounded snapshot the bot builds in code when you ask (it summarises, it never
+**Looking things up** — only where the owner has turned the lookup answers on for the server (off by default; see *For
+the host* below). There the bot first reads what your question names: recipes, items, members, characters, raids,
+schedules, professions, classes and specs, commands and the parts of this manual. One telling word is enough — "who can
+make ironfeather?" finds every recipe with *Ironfeather* in its name, and the game's short names ("bs", "pally", "lw")
+are read as the full ones. Then it looks up what the answer needs, the way the site shows it: a recipe and who makes it
+(with its cost to make when prices show), a profession's crafters, prices, a member's characters, an event, the
+schedules, loot, attendance and this manual's own text — at most three steps of lookups for one answer. When several
+things match and the question doesn't say which, it asks back with a short list of names; answer with one and it
+carries on from there. When it can't find the answer it says *"I couldn't find the answer in the guild's records, so I
+haven't guessed."* rather than guess. Any member may ask who received an item: the answer shows the Loot log's rows —
+item, character, date, boss — never scores, the bot's pick or the council's reasons, in a channel others read too. Your
+own attendance is answered only where nobody else reads the reply. Who sees what is the rule of *Where you ask* below:
+an officer asking where members read the reply gets the member view. `/ask` reads your last exchange with the bot in
+that place, so you can answer a question it asked back; it keeps its own answer for your next question only in a DM or
+in a channel where only officers read the reply. A question is never answered by the change reader: in an act
+channel, with `/gm change`, in the site's **Tell the bot** box and in a loot council's thread a question gets this same
+answer, and nothing is changed from it. A change that misses a detail ("mark me away") still gets its question back
+("Which dates?"), and a change the bot overheard in a channel it listens in still waits behind its 👀 for your click.
+
+**For the host: the switch, the log and the probe.** `OIBOT_ANSWER_TOOLS` in the bot's `.env` turns the lookup answers
+on: `off` or unset (the default) for no server, `on` for every server, or the servers' keys (a comma or a space between
+them) for those servers only. The bot reads `.env` when it starts, so a change needs a restart of the bot. A value that
+is none of these reads as off, and the bot's log says so once, without repeating the value. The model that answers is
+the help route's (`OIBOT_MODEL_HELP` in `.env` changes it, for both kinds of answer). Each lookup answer adds one line
+to `out/answers.jsonl` on the bot's machine: when, the server's key, where the question came in (an @mention, a DM, a
+channel the bot listens in, `/ask`, the site's box, an act channel, `/gm change`, a loot thread), how many lookup steps
+and requests it took, which lookups by name, how it ended (answered, asked back, handed on as a change, a change it
+could not make from that message, out of room, out of budget, failed) and the tokens and cost. The line never holds the
+question, the answer or anyone's name; past 5 MB the file is set aside as `answers.jsonl.1`. Before the switch widens,
+`uv run python scripts/answer_probe.py` has the real model answer the question bench — about twenty questions over a
+scratch copy of the demo guild, never the real guild's data or anything of the live bot's — and prints a table: per
+question whether the answer said what a good answer must say, held nothing it must never show, and answered (or asked
+back where the question has two readings), with its lookup steps, requests and cost. `--model` and `--effort` pick the
+setting, `--compare` puts a second model beside it and `--baseline` adds the answers without lookups. It passes when at
+least 80% of the questions pass and no answer showed something it must never show. It stops at its own spending limit
+(`--budget`, in dollars, 3 by default) and never counts against the bot's monthly budget.
+
+Where the lookup answers are off (the default), what `/ask` knows comes from one bounded snapshot the bot builds in code when you ask (it summarises, it never
 dumps; long lists are cut short). Always in it: the guild's channels (a channel the bot can no longer see is marked
 *not found*), officer roles, owner and ask audience; the *about* text, the invite link and the news keywords;
 recruitment (applications open or closed, the note, the guild's questions with their hints); every raid's schedules (in words, with
@@ -3114,7 +3171,7 @@ the bot listens in).
 "who has the highest tailoring?" are answered with the crafters of what you asked about, highest skill first — names
 only, nobody pinged. The question has to name a profession or a recipe of the game's list: its whole name, two words
 that sit together in it (*"can anyone do fiery weapon?"*), or an enchant by the word after its dash (*"the crusader
-enchant"*). A character linked to the armory that doesn't show a recipe doesn't know it: the answer is a plain no.
+enchant"*) — where the lookup answers are on, one telling word of it is enough (above). A character linked to the armory that doesn't show a recipe doesn't know it: the answer is a plain no.
 Only for a character kept by hand, asked about a recipe it lacks, does the answer add that the crafter can put it on the Me page. A recipe of the game's list nobody makes gets *"Nobody in the guild makes … yet."*; a name the
 game doesn't have gets *"That isn't a recipe in the game's list."* *"What tailoring recipes does <character> know?"*
 gives the count and the recipes that matter for the question, with a link to the Professions page for the rest. Retired
@@ -3123,7 +3180,7 @@ characters, puppets and people who left the server are never named.
 **What a thing costs** is open to every member too, once the owner has picked the guild's auction house (§8): "how much
 is an Arcanite Bar right now?", "what do arcanite bars cost?", "how much does it cost to make Transmute: Arcanite?". The
 question has to ask about a price (*price*, *cost*, *worth*, *how much*, *auction*, *cheapest*) and name an item by its
-whole name or a recipe of the game's list. A price answer gives the time of the prices,
+whole name or a recipe of the game's list (where the lookup answers are on, any question that names the item will do). A price answer gives the time of the prices,
 then up to ten named items with their lowest price listed on the guild's auction house — or
 *none listed* when nothing is up right now — and, for a named recipe, each reagent at its lowest price, what one craft
 makes priced each, and its cost to make (*"at least …"* when a reagent has none listed). The numbers are computed in

@@ -37,7 +37,9 @@ src/oibot_gm/
   conversation.py      plain-text memory (design §5.51): a ring per (guild, channel|DM, uid) of the last 4 exchanges, IN MEMORY only (a restart
                        forgets); recall = a Discord reply to the bot's message (any age) else the same person + place within 20 min; context_block =
                        ONE fenced <conversation> data block (unfence) → configops.parse / help.answer(conversation=); handle_change, plain_text,
-                       loot_chat remember after replying; the web sends TellTheBot's own exchanges (exchanges_from_client), no server memory
+                       loot_chat remember after replying; the web sends TellTheBot's own exchanges (exchanges_from_client), no server memory;
+                       take_open_question = the bot's OPEN question (the newest exchange has `questions` — the parser's, or the loop's choices
+                       via discord_help.Asked — within a window, Exchange.followed not set): taken once (Task 11, the listening follow-up)
   perms.py             THE Discord permission test (design §5.46): required(kind) (+ Manage Messages for the pinned cards, + threads for roster,
                        + history for news), missing_for(channel, kind) / missing_for(guild), cant_post() = the one sentence; permissions_value() /
                        invite_link() (scripts/move_guild.py imports them; Manage Webhooks in — D39; Manage Roles / Channels OPTIONAL); CLIENT = the
@@ -58,7 +60,48 @@ src/oibot_gm/
                        append; an apply is refused while a council of the guild is live (live_council_refusal)
                        professions.py (§5.60) = THE professions import boundary: detect / parse / FORMATS → rows {character, profession, skill, recipes};
                        EMPTY — no format is read yet (no paste box); a format = one parser here + the Me page's box
-  llm/provider.py      provider boundary, per-workload routing, usage log, budget cap; unfence = THE fence neutraliser for text inside a prompt's data block
+  llm/provider.py      provider boundary, per-workload routing, usage log, budget cap; unfence = THE fence neutraliser for text inside a prompt's data block;
+                       converse(workload, system, tools, messages, force=) → Turn {content (every block, appended back verbatim — thinking
+                       included), calls [ToolCall], text, usage} = THE only multi-turn tool-use code (design §5.68: two cache breakpoints, the
+                       system block and the newest user message's last block on a copy; one usage row per request, written before Refused —
+                       stop_reason refusal — or CutShort — max_tokens — is raised; the monthly cap checked first); force= is sent only where
+                       forced_tool_ok(model) (NO_FORCED_TOOL, read through model_id — THE id normaliser price_of reads too); PRICES has claude-sonnet-5-5
+  answer_names.py      what a message names (design §5.68): resolve(reg, text, kinds=, limit=RESOLVE_LIMIT 10, tree=) → ([NameMatch(kind, id, name,
+                       why, detail)], total) over the existing finders only (professions.search / phrase_hits / match_tiers, prices.names,
+                       help.mentioned_members + help.whole_words, help.manual_match) — KINDS recipe · item · member · character · raid · schedule ·
+                       profession · class · command · manual; word_table(reg) = WordTable, the word counts (the profile's part cached, the guild's
+                       names counted on every call) that RANK a rare word over a common one and never match alone; match_lines = the first
+                       request's lines (NOTHING when none); people = the population every people finder reads (no puppet, nobody who left);
+                       names and details come back escaped for a data block. Backs the `find` lookup. Nothing written, no model
+  answer_tools.py      the lookups (design §5.68): Viewer (reg, rs, user_id, officer — already downgraded where members read —, public,
+                       audience_public, owner, question, extras, data, name, may_act; Viewer.of = help.guild_state's rule; never a tool
+                       argument), Tool (name, description, schema, handler, cap, available, schema_for) in TOOLS, tools_for(profile) = sorted,
+                       per-profile schemas (profession / class enums), constant per profile = the cached prefix; run_tool(viewer, name, args)
+                       → (text, is_error), never raises (TOOL_FAILED; an unknown name's source UNKNOWN_SOURCE), every result cut on whole lines
+                       (cut; RESULT_CAP 1,500, BIG_RESULT_CAP 4,000 for manual / section / event and an officer's loot in private), unfenced
+                       (FENCES) and wrapped; arguments coerced, never validated. find · recipe · crafters · price (only with auction houses) ·
+                       member (a record, or who plays a class / role: main specs first, off specs marked) · event (visible_event = THE
+                       predicate the start shares: no dropped raid, a rehearsal only to its tester in private) · schedule · loot (any member:
+                       loot_ops.log_rows' members' fields; the council's view for an officer in private) · attendance (own only where nobody
+                       else reads; anyone's for an officer) · manual · section (help.SECTIONS' builders); OFFICERS_ONLY = a refused lookup's one line
+  answer_start.py      the first request (design §5.68): system_text(tree, profile) = SYSTEM_TEXT with the profile's lookups (lookup_words,
+                       LOOKUP_ORDER), OLD_WORDS_PROMPT, CANNOT_ACT, help.CONVERSATION_LINE, its own MEMORY_LINE (no "snapshot"), manual_index
+                       and the command list — one string per (profile, tree) for every asker and question, CACHED PER PROCESS (_SYSTEM_CACHE: a
+                       manual edit shows after a restart); user_text(viewer, question, matches, total, conversation=, memory=) = guild, time,
+                       where the reply is read, ACTING_OFF when viewer.may_act is off, the asker (help.who_line), START_EVENTS 8 live events,
+                       the matched names, the officers' loot data in private, the conversation / memory blocks, the question ≤ QUESTION_CHARS
+  answer_loop.py       the loop (design §5.68): run(provider, system, first_user, viewer) / answer(provider, tree, viewer, conversation=,
+                       memory=) → AnswerResult(answer: HelpAnswer, ending answered|asked|acts|acts_off|cap|budget|error, rounds, requests,
+                       tools, usage, error, choices, not_run); MAX_ROUNDS 3, MAX_CALLS_PER_ROUND 4 (TOO_MANY_LOOKUPS), TOTAL_RESULT_CHARS 12,000
+                       (RESULTS_FULL), MAX_REQUESTS 4, ANSWER_CHARS 1,200, MAX_CHOICES 5; the last request offers `reply` forced (where taken)
+                       with FINAL_NUDGE; reply_spec() = HelpAnswer's fields + choices, strict, `acts` = ACTS_DOC (a how-to is answered, never
+                       acts); the page checked against help.PAGES, each choice against the names the lookups showed; ANSWER_NOT_FOUND /
+                       ANSWER_FAILED = the honest endings; KIND_PAGE = the page under a not-found ending. Re-exports answer_switch's names
+  answer_switch.py     enabled(guild_key) = OIBOT_ANSWER_TOOLS read at call time (off | on | guild keys; malformed → off, logged once without
+                       the value — _warned); entry_kw(key, entry) = help_answer's `entry` only while on (off = every caller's call unchanged);
+                       ENTRIES mention · dm · listen · ask · site · act · change · loot; log_answer(key, entry, result) → one row in
+                       answers_log() = out/answers.jsonl (OIBOT_ANSWERS_LOG overrides; .1 past ANSWERS_MAX_BYTES 5 MB): at, guild, entry,
+                       rounds, requests, tools, ending, tokens, cost — never the question, the answer or a name
   llm/decisions.py     listening's decision service (design §5.59): DecisionProvider.noul(state, instructions, criteria) → p | None (TypeSafe Jev over httpx,
                        TYPESAFE_API_KEY in .env; never raises, never writes text); usage rows in Claude's ledger (workload listen, PRICES jev, SHARES 0.2);
                        DECISIONS = the bot's instance (None without the key); key_set() = the key is set (a yes or no — listen_ready, the Host line)

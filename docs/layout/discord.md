@@ -21,7 +21,22 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        👀 and the AUTHOR's 👀 click (on_raw_reaction_add, LISTEN_ASK_S 1 hour) → plain_text; an overheard message that
                        parses to a CHANGE is never answered with a card (the owner, 2026-11-21): plain_text(hold=) → handle_change(hold=) →
                        _listen_hold = 👀 only + the parsed request kept, the author's click → handle_change(req=) shows the diff, no click →
-                       the 👀 comes off, nothing posted; an overheard question is answered as before; LISTEN_PER_HOUR cap; listen_recent(reg) = the ring of
+                       the 👀 comes off, nothing posted; an overheard question is answered as before; listen_followup (Task 11) = run in
+                       on_message BEFORE the gate for an untagged message: when the bot's last reply to that person in that channel asked
+                       something (conversation.take_open_question, LISTEN_FOLLOWUP_S 5 min, taken once — an @mention takes it too), the
+                       message goes back to WHOEVER ASKED (Exchange.asked_by: conversation.PARSER = handle_change's question, LOOP = the
+                       answer loop's choices, discord_help.Asked): the parser's → plain_text(to_parser=True) → handle_change with the
+                       conversation, skipping the help-first step (only where an @mention could reach the parser: not ignore, in the
+                       server, may act there; then authorize, describe(strict), the live check at Apply); the loop's → plain_text as an
+                       @mention (no decision request, no 👀, no hold; entry "listen" in a listened channel). A message that mentions another
+                       user / a role / everyone, replies to a message that isn't the bot's, or has no words only CLOSES the question
+                       (then the gate judges it as any other); an ADDRESSED message (an @mention, a DM, a Discord reply to the bot's
+                       message) routes the same way: answers_parser(reg, message, channel) → conversation.take_answered (a reply → the
+                       exchange of the message it replies to, at any age; else the open question within LISTEN_FOLLOWUP_S) — a parser
+                       question → plain_text(to_parser=True) → handle_change(to_help=True: the parser's kind=question gets the full help
+                       answer; its prompt defines kind=ignore for chat → silence), a loop question or none → today's path; the untagged
+                       follow-up is bounded (Exchange.depth, conversation.FOLLOW_DEPTH 1: a question asked again of an answer is
+                       followable once, a third in a row is closed); never in a watch or ignore channel; a listened channel logs did "followup" (p null); LISTEN_PER_HOUR cap; listen_recent(reg) = the ring of
                        50 verdicts (memory, text ≤120) and out/listen.jsonl rows WITHOUT text; no key → one ops warn per guild per hour. Never a DM;
                        LISTEN_LISTENERS fn(guild key) on every verdict → the web's officers-only `listen` topic (the Ops page's Recent decisions)
   policy.py            policy docs (<guild>/policy/*.md) + Claude compile → *.compiled.json (compiled_at, text_sha, confirmed_by), confirmed by an officer;
@@ -82,9 +97,16 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        `guides` section (every member, gated on "guide" as a word: each faction's latest guild guide, uploader unfenced — §5.63);
                        manual_sections (the manual by its own ## headings, mtime-cached, tiers tagged — the Help page), command_rows(tree, tier),
                        site_url(reg, path, anchor) = THE site link (?g= before the #anchor; & when the path has a query); PAGES names the officers'
-                       events / schedules / raids pages (no rosters / readiness), PAGE_ALIASES rosters → events, readiness → raids
+                       events / schedules / raids pages (no rosters / readiness), PAGE_ALIASES rosters → events, readiness → raids;
+                       shared with the answer lookups (design §5.68, behaviour-preserving extractions): who_line(reg, m) (the `who` section's
+                       line, pinned), role_of(reg, c, spec=), who_chars(m), who_char_words(reg, c); the public names safe_text / whole_words /
+                       clip_lines / council_loot = _safe / _words / _clip / _loot (the same functions); MEMORY_LINE stays the old path's words
   discord_help.py      /help (no LLM, by tier), /ask; help_answer(may_act) flags requests to act (routing is discord_bot.plain_text:
-                       @mentions and DMs routed by intent under the plain-text policy)
+                       @mentions and DMs routed by intent under the plain-text policy). help_answer(…, entry=) (design §5.68): with
+                       answer_loop.enabled(reg.key) and a provider that converses, answer_loop.answer on Viewer.of(…, may_act=) instead of
+                       help.answer — the provider-None and ask-audience returns first, the same post-processing after; log_answer per answer;
+                       an `error` ending warns ops as today; acting off and the reply still acts → its words alone (ACTS_OFF_EMPTY when none).
+                       /ask (on): conversation.recall for the place, remembered only where ask_private (a DM or reply_private)
   wizard.py            the wizard core: one ephemeral message advancing in place (Wizard.show/working/finish/refuse), Forms; Wizard.decide = THE confirm screen (consequence · <verb> · <verb> with a note · Back; do_label = the verb, required; guard re-run on every press);
                        Wizard.decide_box(box, do=, refresh=, note=, extra=, back=, hint=) = the server's box (consequences.box) as given: box_text = [CONFIRM_WORDS changed] · **title** · diff lines · sentences (one heading, never the wizard's too); the verb (red iff danger) · '<verb> with a note' (a Form whose Submit is the write) · extra · Back (back=None → "Nothing was changed."); embed= under this screen only (the lock's preview roster; a box shown again goes without it); a refusal box (verb None) = Back alone; refresh() re-run at the press and the note's submit — another fp is shown again under CONFIRM_WORDS['changed'], nothing written; button_label = THE ellipsis drop (Wizard.button and the persistent RunButton / LootButton / CfgApplyButton apply it; the site's shared words keep theirs, D1); when_fields(step=) reaches minute_opts
                        (a select inside ui.Label, or a TextInput only for prose), owner-only presses + a guard re-checked on
@@ -162,7 +184,10 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        compiled_at) and is deleted too; words only where Discord won't delete: TIMED_OUT / READING_TIMED_OUT / READING_DROPPED /
                        EXPIRED_RESTART / BUTTON_GONE each say what happened and what is true now, never "Expired — say it again"; diff_text = the diff's body: setup ops as configops.describe_ops(…).as_discord(),
                        other ops their preview_line; refusals end with configops.plain_footer;
-                       guild name when many_guilds); policy_show_messages
+                       guild name when many_guilds); the question rule (design §5.68, switch on — answer_loop.enabled): the parser's verdict
+                       question (with or without its own questions), or a change with no ops and no questions, goes to help_answer once with
+                       may_act=False (entry act | change | the caller's), never the parser's words; a change missing a detail keeps its
+                       questions; with `hold` (listening) any change verdict is held behind 👀 first; policy_show_messages
                        (≤3 text messages + one Compiled reading embed ≤15 rules); PolicyEditModal append-only past 4000
   pending_views.py     out/pending_views.jsonl: open wizards and plain-text diffs mirrored while they wait; restore_pending_views on ready edits the
                        last process's leftovers ("The bot restarted; nothing was changed"); live_count for /api/agents/quiet

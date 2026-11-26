@@ -5,7 +5,8 @@ In memory only — never the data repo; a restart forgets. One ring per (guild k
 last N exchanges. `recall` returns what a new message continues: a Discord REPLY to one of the bot's plain-text messages
 continues that exchange whatever its age (while the ring still holds it); otherwise the same person in the same place
 within CONTEXT_MINUTES. Another person's exchanges in the same channel are never someone's context (the ring is keyed
-by uid). `context_block` renders them as ONE delimited data block for the parser / the help answer: every piece of text
+by uid). `take_open_question` = the bot's open question in that ring (the listening follow-up, design §5.59).
+`context_block` renders them as ONE delimited data block for the parser / the help answer: every piece of text
 (the person's and the bot's own replies, which can quote member text) goes through llm.provider.unfence, so nothing in
 it can close the block. The web keeps no server memory: the Tell the bot box sends its own last exchanges
 (`exchanges_from_client`)."""
@@ -27,6 +28,8 @@ QUESTION_CAP = 300
 FENCE_TAGS = ("conversation", "request", "question", "data", "member-text")
 
 DM = "dm"
+FOLLOW_DEPTH = 1  # an untagged follow-up answers a question of at most this depth: one more after the first, never a chain
+PARSER, LOOP = "parser", "loop"  # Exchange.asked_by: the answer to the parser's question goes back to the parser, the loop's to the loop
 
 
 @dataclass
@@ -39,6 +42,9 @@ class Exchange:
     questions: list[str] = field(default_factory=list)
     message_id: int | None = None  # the person's message (None for a slash command or the site)
     reply_message_id: int | None = None  # the bot's reply (what a Discord reply references)
+    followed: bool = False  # the person's next message was taken as the answer to `questions` (take_open_question): once only
+    asked_by: str = ""  # who asked `questions`: PARSER (the change parser) or LOOP (the answer loop's choices); "" = neither said
+    depth: int = 0  # questions asked in a row: 0 = asked of a fresh message, 1 = asked again of the answer to that, …
 
 
 _rings: OrderedDict[tuple, deque] = OrderedDict()
@@ -51,16 +57,19 @@ def _key(reg_or_key, channel_id, uid) -> tuple:
 
 
 def remember(reg, channel_id, uid: int, request: str, reply: str = "", questions=None, *, message_id: int | None = None,
-             reply_message_id: int | None = None, at: float | None = None) -> Exchange:
-    """Keep one exchange (in memory only). The caller remembers after it replied, with the bot's reply message id."""
+             reply_message_id: int | None = None, at: float | None = None, asked_by: str = "") -> Exchange:
+    """Keep one exchange (in memory only). The caller remembers after it replied, with the bot's reply message id.
+    `asked_by`: who asked the questions (PARSER | LOOP), so the person's answer goes back to it."""
     ex = Exchange(at=time.time() if at is None else at, uid=int(uid), channel_id=channel_id, request=str(request or "")[:2000],
                   reply=str(reply or "")[:2000], questions=[str(q)[:QUESTION_CAP] for q in (questions or [])][:6],
-                  message_id=message_id, reply_message_id=reply_message_id)
+                  message_id=message_id, reply_message_id=reply_message_id, asked_by=asked_by if questions else "")
     k = _key(reg, channel_id, uid)
     with _lock:
         ring = _rings.get(k)
         if ring is None:
             ring = _rings[k] = deque(maxlen=N)
+        if ex.questions and ring and ring[-1].followed and ring[-1].questions:  # asked again of the answer to a question
+            ex.depth = ring[-1].depth + 1
         ring.append(ex)
         _rings.move_to_end(k)
         while len(_rings) > MAX_RINGS:
@@ -83,6 +92,46 @@ def recall(reg, channel_id, uid: int, *, reply_to_message_id: int | None = None,
             if ex.reply_message_id is not None and ex.reply_message_id == reply_to_message_id:
                 return [e for e in ring[: i + 1] if ex.at - e.at <= window]
     return [e for e in ring if now - e.at <= window]
+
+
+def take_open_question(reg, channel_id, uid: int, *, window_s: float, posted: bool = False, max_depth: int | None = None,
+                       now: float | None = None) -> Exchange | None:
+    """The bot's open question to `uid` in `channel_id`, taken: the ring's NEWEST exchange when it ended with questions
+    the bot asked (the parser's, or the loop's choices), is at most `window_s` old and was not taken before — marked
+    taken under the lock, so only one message ever answers it. None otherwise (a newer reply that asked nothing closed
+    it). Every message from that person in that place calls this once, so only their next message counts. `posted`:
+    only a question asked in answer to a Discord message (not a slash command's private reply) counts. `max_depth`: a
+    question asked again more often than this in a row is closed, never taken (the untagged follow-up: FOLLOW_DEPTH)."""
+    now = time.time() if now is None else now
+    with _lock:
+        ring = _rings.get(_key(reg, channel_id, uid))
+        if not ring:
+            return None
+        ex = ring[-1]
+        if ex.followed or not ex.questions or now - ex.at > window_s or (posted and ex.message_id is None):
+            return None
+        ex.followed = True
+        if max_depth is not None and ex.depth > max_depth:
+            return None  # closed: a third question in a row is answered only by tagging the bot or replying to it
+        return ex
+
+
+def take_answered(reg, channel_id, uid: int, *, window_s: float, reply_to_message_id: int | None = None,
+                  now: float | None = None) -> Exchange | None:
+    """The question an ADDRESSED message (an @mention, a DM, a reply to the bot's message) answers, taken. A Discord
+    reply to one of the bot's messages answers the exchange that message belongs to, whatever its age (while the ring
+    holds it) — the open question is closed too; otherwise take_open_question's newest open question within `window_s`.
+    None when it answers nothing the bot asked. The caller routes by the exchange's `asked_by`."""
+    opened = take_open_question(reg, channel_id, uid, window_s=window_s, now=now)  # this message is the person's next one
+    if reply_to_message_id is None:
+        return opened
+    with _lock:
+        ring = list(_rings.get(_key(reg, channel_id, uid)) or ())
+        hit = next((ex for ex in ring if ex.reply_message_id is not None and ex.reply_message_id == reply_to_message_id), None)
+        if hit is None or not hit.questions:
+            return None
+        hit.followed = True
+        return hit
 
 
 def forget(reg=None) -> None:

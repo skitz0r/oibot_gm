@@ -9,9 +9,12 @@ import css from "./plain.module.css";
 /** What the bot did with a message it read, in words (discord_bot.ListenMixin's `did`). */
 const DID: Record<string, string> = {
   replied: "Replied", asked: "Asked with 👀", quiet: "Stayed quiet",
-  "would reply": "Would have replied", "would ask": "Would have asked", skipped: "Skipped",
+  "would reply": "Would have replied", "would ask": "Would have asked", skipped: "Skipped", followup: "Took it as the answer",
 };
-const DID_WHY: Record<string, string> = { skipped: "over the hourly limit of decisions for this server" };
+const DID_WHY: Record<string, string> = {
+  skipped: "over the hourly limit of decisions for this server",
+  followup: "the bot had just asked this person a question here, so their next message was the answer",
+};
 const LISTEN_COLOUR: Record<string, string> = { watch: "gray", reply: "teal" };
 
 /** The Ops page's Listening tab (design §5.59): which channels the bot listens in, and Recent decisions — every untagged

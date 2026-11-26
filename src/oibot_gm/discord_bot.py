@@ -19,7 +19,7 @@ import discord
 import yaml
 from discord import app_commands
 
-from . import configops, conversation, guides, guild_routing, render
+from . import answer_loop, configops, conversation, guides, guild_routing, render
 from . import memory as mem
 from .constants import OLD_WORDS_PROMPT
 from . import registry as registry_mod
@@ -176,6 +176,7 @@ LISTEN_RING = 50  # verdicts kept in memory per guild (listen_recent, the Ops pa
 LISTEN_ASK_S = 3600  # how long a 👀 waits for its writer's click; then the bot takes its 👀 off (a 👀 you can see still works)
 LISTEN_RECENT = 3  # earlier messages kept per listened channel (context for the next decision; no REST call)
 LISTEN_EYES = "👀"
+LISTEN_FOLLOWUP_S = 300  # after the bot asked a person a question in a channel: their next message there within this is the answer
 RECALL_TIMEOUT_S = 2.0  # chat memory's recall before a decision: past this the gate decides with `memory: []` (the thread finishes alone)
 LISTEN_WARN_S = 3600  # "listening is on but there is no key": one ops warn per guild per hour
 LISTEN_LOG = OUT / "listen.jsonl"  # one row per verdict, NO text: {at, guild, channel, author_id, p, mode, did}
@@ -299,6 +300,16 @@ def mention_names(message, reg, bot_user=None) -> str:
 
     text = _USER_MENTION.sub(user, _ROLE_MENTION.sub(role, content))
     return re.sub(r"[ \t]{2,}", " ", text).strip()
+
+
+def answers_parser(reg, message, channel) -> bool:
+    """Whether an ADDRESSED message (an @mention, a DM, a reply to the bot's message) answers the change parser's
+    own question — then plain_text(to_parser=True) hands it to the parser, never through the help answer's act
+    verdict. A reply to the bot's message: the exchange that message belongs to, at any age; else the person's open
+    question here within LISTEN_FOLLOWUP_S. Either is taken (conversation.take_answered)."""
+    ex = conversation.take_answered(reg, channel, message.author.id, window_s=LISTEN_FOLLOWUP_S,
+                                    reply_to_message_id=conversation.reply_to_id(message))
+    return ex is not None and ex.asked_by == conversation.PARSER
 
 
 class ListenMixin:
@@ -459,7 +470,7 @@ class ListenMixin:
 
         try:
             if did == "replied":
-                await self.plain_text(message, reg, text, cid, memory=judged, hold=hold)
+                await self.plain_text(message, reg, text, cid, memory=judged, hold=hold, **answer_loop.entry_kw(reg.key, "listen"))
                 if held:
                     did = "asked" if held[0] else "quiet"
         finally:
@@ -470,6 +481,45 @@ class ListenMixin:
                 remembered = await self._remember(reg, message, text, cid, state["message"].get("replying_to", ""), p_remember)
             self._listen_record(reg, message, text, p, mode, did, remembered=remembered)
         return did
+
+    async def listen_followup(self, message, reg) -> bool:
+        """The answer to the bot's own question (2026-11-25: an officer answered the bot's "which character?" with a bare
+        name and the gate scored it as chat). When the bot's last reply to this person in this channel asked them
+        something (conversation.take_open_question: the ring's newest exchange has questions, younger than
+        LISTEN_FOLLOWUP_S, not taken before), their next message there goes back to WHOEVER ASKED, as an @mention would —
+        no decision request, no 👀, and no `hold`: it continues an exchange the bot already answered in public. The parser's
+        question → plain_text(to_parser=True): straight to the parser (handle_change), never through a help verdict; the
+        loop's → plain_text as an @mention. plain_text checks who may ask and act exactly as for an @mention. The question
+        is taken by that one message whatever it says; a message meant for someone else (it mentions another person or a
+        role, or replies to a message that isn't the bot's) and one with no words (a sticker, an attachment) only close it.
+        Never in a channel the bot only watches or ignores; a listened channel logs it (did "followup", no text)."""
+        cid = message.channel.id
+        mode = reg.listen_mode(cid)
+        if mode == "watch" or getattr(message.author, "bot", False) or reg.plain_mode(cid) == "ignore":
+            return False
+        # only a question the bot posted under a message here: a /gm change's private question never makes a public reply
+        ex = conversation.take_open_question(reg, cid, message.author.id, window_s=LISTEN_FOLLOWUP_S, posted=True,
+                                             max_depth=conversation.FOLLOW_DEPTH)  # never an endless back-and-forth
+        if ex is None:
+            return False
+        me = getattr(self, "user", None)
+        others = [u for u in (getattr(message, "mentions", None) or ()) if getattr(u, "id", None) != getattr(me, "id", -1)]
+        ref = conversation.reply_to_id(message)
+        if others or getattr(message, "role_mentions", None) or getattr(message, "mention_everyone", False) or (ref is not None and ref != ex.reply_message_id):
+            return False  # meant for someone else: the question is closed, and the message is judged as any other
+        text = mention_names(message, reg, me)
+        if not text:
+            return False
+        if mode:  # the next decision in this channel still sees the answer as the chat before it
+            recent = self._listen()["recent"].setdefault(cid, collections.deque(maxlen=LISTEN_RECENT))
+            recent.append({"author": getattr(message.author, "display_name", "") or "", "text": text[:200]})
+        try:  # a listened channel's answers log names it as listening, as the gate's own replies do
+            await self.plain_text(message, reg, text, cid, **({"to_parser": True} if ex.asked_by == conversation.PARSER else {}),
+                                  **(answer_loop.entry_kw(reg.key, "listen") if mode else {}))
+        finally:
+            if mode:
+                self._listen_record(reg, message, text, None, mode, "followup")
+        return True
 
     async def _remember(self, reg, message, text: str, cid: int, context: str, p: float) -> bool:
         """Keep the message as the writer's words (off the loop: an embedding and a git commit); whether it was kept."""
@@ -639,9 +689,9 @@ class ListenMixin:
             return  # listening was turned off (or to watch) since the 👀
         if ask.get("req") is not None:  # a held change (_listen_hold): the diff with Apply / Cancel, now that they asked
             await handle_change(ask["message"], reg, self.policies.store(reg), self.ctx.provider, self.ops, ask["text"], bot=self,
-                                channel=ask["channel"], req=ask["req"])
+                                channel=ask["channel"], req=ask["req"], **answer_loop.entry_kw(reg.key, "listen"))
             return
-        await self.plain_text(ask["message"], reg, ask["text"], ask["channel"], memory=ask.get("memory"))
+        await self.plain_text(ask["message"], reg, ask["text"], ask["channel"], memory=ask.get("memory"), **answer_loop.entry_kw(reg.key, "listen"))
 
 
 class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin, RaidMixin, RaidSchedulerMixin, PoolMixin, AbsencesMixin, SetupMixin, HelpMixin, NewsMixin, discord.Client):
@@ -1315,7 +1365,8 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
             log.warning("memory: recall failed (%s)", type(e).__name__)
             return []
 
-    async def plain_text(self, message: discord.Message, reg, text: str, channel, memory: list | None = None, hold=None) -> None:
+    async def plain_text(self, message: discord.Message, reg, text: str, channel, memory: list | None = None, hold=None,
+                         entry: str | None = None, to_parser: bool = False) -> None:
         """An @mention or a DM, routed by intent under the guild's plain-text policy (design §5.25).
         An "act" channel (ops/analytics by default): configops.parse first — a change becomes the diff + Apply, a
         question gets the parser's own reply from the live config (one model call either way). Elsewhere (DMs and
@@ -1325,7 +1376,10 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
         who must apply (Registry.must_apply) while applications are open gets the persistent Apply to join button on the
         reply, so the application wizard opens straight from the chat (typed class/spec is never parsed).
         `hold`: set by the listening gate for a message that never addressed the bot — a change is held behind a 👀
-        instead of shown (handle_change's `hold`)."""
+        instead of shown (handle_change's `hold`). `entry`: where it came in, for the answers log (listening passes
+        "listen"; else a DM or an @mention). `to_parser`: the message answers the change parser's own question
+        (listen_followup): where the help answer would come first, the parser reads it instead (handle_change, with the
+        conversation) — every check above it still runs, and only a person who may act here gets there."""
         mode = reg.plain_mode(channel)
         hold_kw = {"hold": hold} if hold is not None else {}  # only the listening gate sets it: every other call is as before
         if mode == "ignore":
@@ -1338,8 +1392,9 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
         officer, role_ids = await self.plain_identity(reg, message.author)
         provider, ps = self.ctx.provider, self.policies.store(reg)
         if mode == "act" and provider is not None:
-            async with message.channel.typing():
-                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, **hold_kw)
+            async with message.channel.typing():  # the answers log's entry: listening names itself, else the act channel
+                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, **hold_kw,
+                                    **(answer_loop.entry_kw(reg.key, entry) if entry else {}))
             return
         # the snapshot and the parser context follow who can READ the reply: an officer asking where members read it
         # gets the member view (help_answer adds where the officer view is)
@@ -1361,23 +1416,33 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
                 except Exception as e:  # noqa: BLE001 — the model being down is a reply + an ops error, never silence
                     await message.reply(await configops.report_error(self.ops, reg.config, e, "plain-text parse"), allowed_mentions=quiet)
                     return
-                if req.kind == "change" and req.ops:
+                # overheard with the answer tools on: any change verdict is held (👀 only), the questions-only one too
+                if req.kind == "change" and (req.ops or (hold is not None and answer_loop.enabled(reg.key))):
                     await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, req=req, conversation=convo, **hold_kw)
                 else:
                     await message.reply(guide_intro(reg), view=apply_button(guide_view(reg)), allowed_mentions=quiet)
                 return
+            if to_parser and may_act:  # the answer to the parser's question goes back to the parser, never via a help verdict
+                # to_help: a plain question gets the full help answer, never the parser's one line (switch on: the loop)
+                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, conversation=convo, to_help=True,
+                                    **answer_loop.entry_kw(reg.key, entry or ("mention" if message.guild else "dm")))
+                return
             if memory is None and provider is not None and reg.may_ask(uid, officer):  # an @mention or a DM: recall and judge here
                 memory = await self.recall_memories(reg, text, channel)  # (the listening gate hands its own judged list)
             mem_kw = {"memory": mem.memory_block(memory, mem.guild_tz(reg))} if memory else {}
-            answer = await self.help_answer(reg, uid, officer, text, may_act=may_act, public=public, **conv_kw, **mem_kw)
-            if answer == HELP_ACT:
-                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, conversation=convo, **hold_kw)
+            entry_kw = answer_loop.entry_kw(reg.key, entry or ("mention" if message.guild else "dm"))  # the answers log's entry point
+            answer = await self.help_answer(reg, uid, officer, text, may_act=may_act, public=public, **conv_kw, **mem_kw, **entry_kw)
+            if answer == HELP_ACT:  # the parser's question verdict comes back to the loop as this entry (switch on only),
+                # with the judged memory the first answer had
+                await handle_change(message, reg, ps, provider, self.ops, text, bot=self, channel=channel, conversation=convo, **hold_kw, **entry_kw,
+                                    **(mem_kw if entry_kw else {}))
                 return
         if answer is None:  # outside the ask audience: static guide only
             await message.reply(guide_intro(reg), view=apply_button(guide_view(reg)), allowed_mentions=quiet)
         else:
             sent = await message.reply(answer, view=apply_button(), allowed_mentions=quiet)
-            conversation.remember(reg, channel, uid, text, answer, message_id=getattr(message, "id", None), reply_message_id=getattr(sent, "id", None))
+            conversation.remember(reg, channel, uid, text, answer, getattr(answer, "questions", None), message_id=getattr(message, "id", None),
+                                  reply_message_id=getattr(sent, "id", None), asked_by=conversation.LOOP)
 
     async def on_message(self, message: discord.Message):
         if await self.news_message(message):  # the news webhook (a bot) is read before the bot filter below
@@ -1394,16 +1459,18 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
             reg = await self.dm_guild(message)
             if reg is not None:
                 text = mention_names(message, reg, getattr(self, "user", None))
-                if text:
-                    await self.plain_text(message, reg, text, None)
+                if text:  # the answer to the parser's own question goes back to the parser (answers_parser)
+                    await self.plain_text(message, reg, text, None, **({"to_parser": True} if answers_parser(reg, message, None) else {}))
             return
         reg = self.registries.for_guild(message.guild.id)
         # an @mention: routed by intent and by the channel's plain-text mode (the ops and analytics channels act by default;
         # a loot thread keeps its own chat below)
         if reg and self._addressed(message) and (message.channel.id in (reg.config.ops_channel_id, reg.config.analytics_channel_id) or not self.event_for(message.channel.id)):
             text = mention_names(message, reg, getattr(self, "user", None))  # the bot's own mention goes; anyone else's becomes their name
-            if text:
-                await self.plain_text(message, reg, text, message.channel.id)
+            if text:  # an open question is taken by this message too: only the person's NEXT message answers it; the
+                # parser's question goes back to the parser, a Discord reply to the bot's message answers that message's
+                await self.plain_text(message, reg, text, message.channel.id,
+                                      **({"to_parser": True} if answers_parser(reg, message, message.channel.id) else {}))
             return
         ev = self.event_for(message.channel.id)
         if ev is not None and reg is not None and ev.guild == reg.key and message.channel.id == ev.raid_thread_id:
@@ -1413,6 +1480,9 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
             parent = getattr(message.channel, "parent_id", None) or ev.cards.get("channel")
             if text and reg.plain_mode(parent) != "ignore":
                 await self.loot_chat(message, ev, text)
+            return
+        # the answer to the bot's own question here: taken as addressed, before (and instead of) the listening gate
+        if reg is not None and not self._addressed(message) and await self.listen_followup(message, reg):
             return
         # listening (design §5.59): a message nobody tagged the bot in, in a channel the owner chose — decided, never twice
         if reg is not None and reg.listen_mode(message.channel.id) and not self._addressed(message):

@@ -495,3 +495,34 @@ def test_the_listening_state_carries_the_older_words_line(gate):
     # the gate's own question and glossary are NOT reworded here: "event" is a common chat word (in-game events), and a
     # change to what the gate weighs needs scripts/listen_probe.py first
     assert "event" not in db.LISTEN_GLOSSARY and "a raid or run happens" in db.LISTEN_QUESTION and "when a raid is on" in db.LISTEN_BOT_WORDS
+
+
+@pytest.mark.parametrize("on", [False, True])
+def test_a_held_change_shown_on_the_click_is_logged_as_listening(gate, monkeypatch, on):
+    """The 👀 click on a held change hands handle_change the `listen` entry while the answer tools' switch is on, so the
+    answers log counts it as listening, not acting; with the switch off the call is made exactly as before."""
+    from oibot_gm import answer_switch
+
+    if on:
+        monkeypatch.setenv(answer_switch.SWITCH_ENV, "on")
+    else:
+        monkeypatch.delenv(answer_switch.SWITCH_ENV, raising=False)
+    me = gate.g.me.discord_id
+    req = configops.ConfigRequest(kind="change", reply="", ops=[ConfigOp(op="dm", value="off")])
+
+    async def plain_text(message, reg, text, channel, memory=None, hold=None, **kw):
+        await hold(req)
+
+    monkeypatch.setattr(gate.bot, "plain_text", plain_text)
+    shown = []
+
+    async def handle_change(message, reg, ps, provider, ops, text, *, bot, channel, req=None, **kw):
+        shown.append(kw)
+
+    monkeypatch.setattr(db, "handle_change", handle_change)
+    gate.bot.policies = types.SimpleNamespace(store=lambda reg: None)
+    gate.bot.ctx = types.SimpleNamespace(provider=None)
+    msg = message(me, text="can't rly play this weekend")
+    gate.run(0.92, msg)
+    react(gate.bot, msg, me)
+    assert shown == [{"entry": "listen"} if on else {}]

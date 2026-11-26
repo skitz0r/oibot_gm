@@ -476,10 +476,18 @@ def schedule_choice_label(reg: Registry, key: str) -> str:
     return f"{reg.raid_def(rid).get('name', rid)} · " + (f"{title}: " if title else "") + reg.schedule_label(rid, sc)
 
 
-def _char(reg: Registry, c) -> str:
+def role_of(reg: Registry, c, spec: str | None = None) -> str | None:
+    """The role a character's spec plays — its main spec, or `spec` (an off spec) — None for a spec the profile no
+    longer has. The one role reader of the who-line and the answer tools' class list."""
     try:
-        role = reg.profile.spec(c.cls, c.spec).role
+        return reg.profile.spec(c.cls, spec or c.spec).role
     except Exception:  # noqa: BLE001 — a spec the profile no longer has
+        return None
+
+
+def _char(reg: Registry, c) -> str:
+    role = role_of(reg, c)
+    if role is None:
         role = "?"
     return f"{c.label} {c.spec}{'/' + c.offspec if c.offspec else ''} {c.cls} {role}"
 
@@ -970,6 +978,14 @@ def _loot(ask: Ask) -> list[str]:
     return out
 
 
+# the public names of the helpers the answer modules read (answer_names, answer_tools, answer_start): the same
+# functions, so the old path and the lookups never drift apart
+safe_text = _safe        # member text inside a block can't close or open one
+whole_words = _words     # any term in the (folded) question as a whole word
+clip_lines = _clip       # whole lines while they fit, then a marker
+council_loot = _loot     # the loot section as the council (or a member, D2) reads it
+
+
 def _bank(ask: Ask) -> list[str]:
     reg, x = ask.reg, ask.extras
     priv = x.privilege if x else {}
@@ -988,6 +1004,27 @@ def _bank(ask: Ask) -> list[str]:
     return out
 
 
+def who_line(reg: Registry, m) -> str | None:
+    """One member's line in the who section: their characters as Label Spec Class role (* main) and rank, escaped.
+    None for a member with no character it shows (planned characters aren't shown). The answer tools' `member` tool
+    prints the same line for a member someone else asks about."""
+    chars = who_chars(m)
+    if not chars:
+        return None
+    cs = "; ".join(who_char_words(reg, c) for c in chars)
+    return _safe(f"- {m.display_name}: {cs}")
+
+
+def who_chars(m) -> list:
+    """The characters a who-line lists: active ones, planned characters left out."""
+    return [c for c in m.active() if c.status != "planned"]
+
+
+def who_char_words(reg: Registry, c) -> str:
+    """One character in a who-line: Label Spec[/Offspec] Class role, * for a main, then rank (not yet escaped)."""
+    return f"{_char(reg, c)}{'*' if c.is_main else ''} {c.rank}"
+
+
 def _who(ask: Ask) -> list[str]:
     """Who plays what, for every member (design §5.25, owner decision 2026-10-29): the site and the sheets already show
     every member's characters, mains, alts and ranks, so any member may read them anywhere the bot answers. Public-safe:
@@ -999,11 +1036,9 @@ def _who(ask: Ask) -> list[str]:
     rest = sorted((m for m in reg.members.values() if not m.test and m.discord_id not in first), key=lambda m: m.display_name.lower())
     out = ["### Who plays what (every member may read this): name: characters as Label Spec Class role (* main) · rank"]
     for m in named + rest:
-        chars = [c for c in m.active() if c.status != "planned"]
-        if not chars:
-            continue
-        cs = "; ".join(f"{_char(reg, c)}{'*' if c.is_main else ''} {c.rank}" for c in chars)
-        out.append(_safe(f"- {m.display_name}: {cs}"))
+        line = who_line(reg, m)
+        if line is not None:
+            out.append(line)
     if len(out) == 1:
         out.append("  no member has a character yet (members add one with /register or on the Me page)")
     return out

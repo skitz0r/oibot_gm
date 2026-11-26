@@ -269,32 +269,7 @@ def listed(bot) -> list:
     return [r for r in bot.registries.ordered() if getattr(r.config, "public", True)]
 
 
-SCHEDULE_RUNS = 3  # the next three runs per schedule (PUB-05)
-
-
-def schedule_sections(reg) -> list[dict]:
-    """A guild's raid schedules in words, for anyone: per raid its name and size, per schedule its label and the next
-    three runs (Registry.local12 — the clock rule), paused or ad hoc said in words. Nothing about members: no regulars,
-    no counts, no names."""
-    from .. import raidcycle as rc
-
-    out = []
-    for rid in reg.profile.raids:
-        rd = reg.raid_def(rid)
-        rows = []
-        for sc in reg.schedules(rid):
-            title = sc.get("name") if len(reg.schedules(rid)) > 1 and sc.get("name") else None
-            if sc.get("kind") == "pickup":
-                rows.append({"title": title, "label": "Opened by an officer when there's interest — first come, first served", "runs": []})
-                continue
-            if not sc.get("active", True):
-                # schedule_label ends ' · paused'; the page says it once, in its own words ('paused for now')
-                rows.append({"title": title, "label": reg.schedule_label(rid, sc).removesuffix(" · paused"), "runs": [], "paused": True})
-                continue
-            rows.append({"title": title, "label": reg.schedule_label(rid, sc), "runs": [reg.local12(t) for t in rc.next_runs_of(reg, rid, sc, n=SCHEDULE_RUNS)]})
-        if rows:
-            out.append({"raid": rd.get("name", rid), "size": rd.get("size"), "schedules": rows})
-    return out
+from ..schedule_view import SCHEDULE_RUNS, schedule_sections  # noqa: E402 — the public page's rows (moved, unchanged)
 
 
 def schedule_block(reg) -> str:

@@ -29,7 +29,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        session.cards = message ids; persistent thread-line buttons; distribute's card ticker; loot_scheduler_step ("Start a one-off
                        event" prompt in the officer channel, the one after-end DM to officers); addressed-only thread chat (loot_addressed / loot_chat →
                        help_answer(data=) or `loot` ConfigOps in LootChatConfirmView = ConfigConfirmView + Give the reason…; the revs carry the batch /
-                       the drop's pick as the officer saw them); loot_cards_restore on ready
+                       the drop's pick as the officer saw them; with the answer tools on, nl.parse_loot_feedback's question verdict goes to
+                       help_answer(may_act=False, data=loot_digest, entry="loot"), never fb.reply — design §5.68); loot_cards_restore on ready
   flows_loot.py        every LootButton / LootPick press and lootmodal submit (loot_press / loot_pick / loot_modal_submit; loot_modal_raw =
                        the restart path from on_interaction); wizards loot_tick (TickWizard), loot_override (grouped select → reason modal,
                        also Correct…), loot_distribute (/raid distribute), loot_end (/raid end + End council: raid_buttons.end_decide, THE End screen, under the loot guard), gm_precedents
@@ -50,7 +51,10 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
   loot_ops.py          the `loot` / `wishlist` / `tier` plain-text ops (configops' loot branch → LootMixin verbs / Registry wishlist + tier verbs),
                        SCHEMA (into SCHEMA_TEXT), needs_actor (D8), loot_revs (batch_rev on a confirm-all diff), loot_log_state, member_awards, loot_block;
                        phase 4 (§5.48): the `loot_weights` op's words (weight_rows / weight_part / WEIGHT_GROUPS) + apply_weights, received_map
-                       (the Me page's and /me wishlist's "received" marks), last_council (what re-score reads)
+                       (the Me page's and /me wishlist's "received" marks), last_council (what re-score reads);
+                       THE award log's rows: log_rows(reg, ctx, member_uid=, item=, limit=, officer=, scores=, viewer_uid=) over log_row / log_day /
+                       award_is_members (moved out of web/api_loot.py: GET /api/loot/log and /api/me/loot call them; the answer loop's
+                       `loot` lookup reads the members' fields only — scores, picks and reasons need officer AND scores)
   feed.py              companion listener: aiohttp WebSocket on the tailnet (OIBOT_FEED_TOKEN/BIND; OIBOT_FEED_TOKEN_<KEY> binds a companion to one guild), hello+token;
                        dedupe is per loot SESSION (seen_idem), an `error` reply is not an ack; presence(guild) live | quiet | disconnected; status(guild) one line;
                        ts = epoch seconds (ts_kind); refuse_event = a clock-only KILL refused + warn_once → on_warn (ops_warner: "companion too old", once);

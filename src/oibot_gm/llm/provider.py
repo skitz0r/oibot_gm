@@ -7,10 +7,12 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import copy
 import json
 import logging
 import os
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol, TypeVar
@@ -49,6 +51,7 @@ PRICES: dict[str, tuple[float, float, float, float]] = {
     "claude-opus-5": (5.0, 25.0, 0.5, 6.25),
     "claude-sonnet-5": (2.0, 10.0, 0.2, 2.5),
     "claude-haiku-4-5": (1.0, 5.0, 0.1, 1.25),
+    "claude-sonnet-5-5": (2.0, 10.0, 0.1, 2.5),  # cache reads cheaper than claude-sonnet-5's
     # TypeSafe's decisions API (llm/decisions.py, design §5.59): input only, output free; "jev" = the family fallback
     "jev-latest": (0.042, 0.0, 0.0, 0.0),
     "jev": (0.042, 0.0, 0.0, 0.0),
@@ -77,9 +80,25 @@ def for_guild(key: str | None):
         CURRENT_GUILD.reset(token)
 
 
+def model_id(model: str) -> str:
+    """THE model id normaliser (price_of and forced_tool_ok read it): a platform prefix ('us.anthropic.'), a bracketed
+    option ('[1m]'), an '@' version, a dated snapshot ('-20251001') and a Bedrock version ('-v1:0') come off, so
+    'us.anthropic.claude-opus-5-5-20261001-v1:0[1m]' reads as 'claude-opus-5-5'. Any other id is returned as is."""
+    m = model.strip()
+    if "claude-" in m:
+        m = "claude-" + m.split("claude-", 1)[1]
+    m = re.sub(r"\[[^\]]*\]$", "", m)
+    m = m.split("@", 1)[0]
+    m = re.sub(r"-v\d+(:\d+)?$", "", m)
+    return re.sub(r"-\d{8}$", "", m)
+
+
 def price_of(model: str) -> tuple[float, float, float, float]:
-    """Exact id, else the model's family (claude-opus-5-5 → claude-opus-5); an unknown family is priced like the
-    dearest one and logged, so the cap errs towards stopping early rather than overspending."""
+    """Exact id (after model_id), else the model's family (claude-opus-5-5 → claude-opus-5); an unknown family is
+    priced like the dearest one and logged, so the cap errs towards stopping early rather than overspending."""
+    if model in PRICES:
+        return PRICES[model]
+    model = model_id(model)
     if model in PRICES:
         return PRICES[model]
     family = next((k for k in sorted(PRICES, key=len, reverse=True) if model.startswith(k.rsplit("-", 1)[0] + "-")), None)
@@ -93,10 +112,59 @@ class BudgetExceeded(RuntimeError):
     pass
 
 
+class Refused(RuntimeError):
+    """converse: the model declined the request (stop_reason "refusal"). `category` = the API's stop_details category
+    when it gave one (e.g. "cyber"), else None — for logs and code, never for a person to read."""
+
+    def __init__(self, category: str | None = None):
+        super().__init__("the model refused the request")
+        self.category = category
+
+
+class CutShort(RuntimeError):
+    """converse: the response hit max_tokens — a tool input or a sentence may be cut off, so nothing in it is used."""
+
+    def __init__(self) -> None:
+        super().__init__("the model's response was cut off at max_tokens")
+
+
+# Models that answer a forced tool_choice ({"type": "tool"} / {"type": "any"}) with a 400: converse asks them with
+# {"type": "auto"} and the prompt names the tool instead.
+NO_FORCED_TOOL: frozenset[str] = frozenset({"claude-fable-5-1", "claude-fable-5-2", "claude-mythos-5-1", "claude-mythos-5-2", "claude-opus-5-5", "claude-sonnet-5-5"})
+
+
+def forced_tool_ok(model: str) -> bool:
+    """Whether the model takes a forced tool_choice: its id read through model_id (so 'claude-opus-5-5[1m]', a dated
+    or a platform-prefixed id counts as its model) is not in NO_FORCED_TOOL."""
+    return model_id(model) not in NO_FORCED_TOOL
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    id: str
+    name: str
+    input: dict
+
+
+@dataclass
+class Turn:
+    """One response of a multi-turn tool-use conversation. `content` = every response block as a dict, in order, to
+    append back verbatim as the assistant message (thinking blocks and their signatures included); `calls` = the
+    tool_use blocks; `text` = the text blocks joined; `usage` = the ledger row written for this request."""
+    content: list[dict]
+    calls: list[ToolCall]
+    text: str
+    stop_reason: str
+    usage: dict
+
+
 class Provider(Protocol):
     name: str
 
     def complete(self, workload: str, system: str, user: str, schema: type[T]) -> T: ...
+
+    # converse is optional for fakes: callers test hasattr(provider, "converse") before using it.
+    def converse(self, workload: str, system: str, tools: list[dict], messages: list[dict], *, force: str | None = None) -> Turn: ...
 
 
 class AnthropicProvider:
@@ -168,7 +236,8 @@ class AnthropicProvider:
         parts = [f"{w}: {len(rs)} calls, {sum(r['input']+r['cache_read'] for r in rs)/1000:.0f}K in / {sum(r['output'] for r in rs)/1000:.1f}K out, ${sum(r['cost'] for r in rs):.2f}" for w, rs in by.items()]
         return f"LLM spend this month ${self.cost_usd:.2f} of ${self.budget_usd:.0f} · " + " · ".join(parts) if parts else "no LLM calls this month"
 
-    def complete(self, workload: str, system: str, user: str, schema: type[T]) -> T:
+    def _check_budget(self, workload: str) -> None:
+        """Before every request: the shared monthly cap, then the workload's share."""
         if self.cost_usd >= self.budget_usd:  # the words a guild's people read: the host raises it, never "set an env var" (§3.5)
             raise BudgetExceeded("The bot's monthly budget for Claude is used up; the host raises it. Slash commands, the sheets and the site keep working.")
         if self.spent(workload) >= self.cap_for(workload):  # the variable is for the host's log, never a guild's reply
@@ -176,6 +245,25 @@ class AnthropicProvider:
                         workload, self.spent(workload), self.cap_for(workload), workload.upper())
             raise BudgetExceeded("This kind of request has used its share of the bot's monthly Claude budget; the host raises it. "
                                  "Slash commands, the sheets and the site keep working.")
+
+    def _usage_row(self, workload: str, model: str, usage) -> dict:
+        """The ledger row of one request (its cost included); the caller records it."""
+        row = {
+            "month": self._month(),
+            "guild": CURRENT_GUILD.get(),
+            "workload": workload,
+            "model": model,
+            "input": usage.input_tokens,
+            "output": usage.output_tokens,
+            "cache_read": getattr(usage, "cache_read_input_tokens", 0) or 0,
+            "cache_write": getattr(usage, "cache_creation_input_tokens", 0) or 0,
+        }
+        pi, po, pr, pw = price_of(model)
+        row["cost"] = (row["input"] * pi + row["output"] * po + row["cache_read"] * pr + row["cache_write"] * pw) / 1e6
+        return row
+
+    def complete(self, workload: str, system: str, user: str, schema: type[T]) -> T:
+        self._check_budget(workload)
         model, effort = self.route(workload)
         resp = self.client.messages.parse(
             model=model,
@@ -187,24 +275,63 @@ class AnthropicProvider:
             messages=[{"role": "user", "content": user}],
             output_format=schema,
         )
-        u = resp.usage
-        row = {
-            "month": self._month(),
-            "guild": CURRENT_GUILD.get(),
-            "workload": workload,
-            "model": model,
-            "input": u.input_tokens,
-            "output": u.output_tokens,
-            "cache_read": getattr(u, "cache_read_input_tokens", 0) or 0,
-            "cache_write": getattr(u, "cache_creation_input_tokens", 0) or 0,
-        }
-        pi, po, pr, pw = price_of(model)
-        row["cost"] = (row["input"] * pi + row["output"] * po + row["cache_read"] * pr + row["cache_write"] * pw) / 1e6
+        row = self._usage_row(workload, model, resp.usage)
         self._record(row)
         self.last_usage = row
         if resp.parsed_output is None:
             raise RuntimeError(f"no parsed output (stop_reason={resp.stop_reason})")
         return resp.parsed_output
+
+    def converse(self, workload: str, system: str, tools: list[dict], messages: list[dict], *, force: str | None = None) -> Turn:
+        """One request of a tool-use conversation: the caller owns the loop and the history. Two cache breakpoints:
+        the system block (tools render before it, so it caches tools + system) and the last content block of the newest
+        user message — set on a copy, so the caller's history never piles up breakpoints. `force` names a tool the
+        model must call, sent only to a model that takes a forced tool_choice (else auto). One usage row per request,
+        written before a refusal (Refused) or a response cut off at max_tokens (CutShort) is raised."""
+        self._check_budget(workload)
+        model, effort = self.route(workload)
+        choice = {"type": "tool", "name": force} if force and forced_tool_ok(model) else {"type": "auto"}
+        resp = self.client.messages.create(
+            model=model,
+            max_tokens=8000,
+            thinking={"type": "adaptive"},
+            output_config={"effort": effort},
+            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+            tools=tools,
+            tool_choice=choice,
+            messages=_cache_last_user(messages),
+        )
+        row = self._usage_row(workload, model, resp.usage)
+        self._record(row)
+        self.last_usage = row
+        if resp.stop_reason == "refusal":  # billed all the same: the row above is written first
+            details = getattr(resp, "stop_details", None)
+            raise Refused(getattr(details, "category", None) if details is not None else None)
+        if resp.stop_reason == "max_tokens":
+            raise CutShort()
+        content = [b.model_dump(mode="json", exclude_none=True) for b in resp.content]
+        calls = [ToolCall(b.id, b.name, dict(b.input or {})) for b in resp.content if b.type == "tool_use"]
+        text = "".join(b.text for b in resp.content if b.type == "text")
+        return Turn(content=content, calls=calls, text=text, stop_reason=resp.stop_reason, usage=row)
+
+
+def _cache_last_user(messages: list[dict]) -> list[dict]:
+    """The messages with a cache breakpoint on the last content block of the newest user message — a copy of that
+    message only (a string content becomes one text block); every other message is passed as is."""
+    out = list(messages)
+    for i in range(len(out) - 1, -1, -1):
+        if out[i].get("role") != "user":
+            continue
+        msg = copy.deepcopy(out[i])
+        if isinstance(msg.get("content"), str):
+            msg["content"] = [{"type": "text", "text": msg["content"]}]
+        last = msg["content"][-1] if msg.get("content") else None
+        # an empty text block can't carry a breakpoint (the API refuses it): no breakpoint then
+        if last is not None and not (last.get("type") == "text" and not last.get("text")):
+            last["cache_control"] = {"type": "ephemeral"}
+        out[i] = msg
+        break
+    return out
 
 
 def get_provider(disabled: bool = False) -> Provider | None:

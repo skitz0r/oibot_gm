@@ -421,7 +421,7 @@ def _reply_private(bot, reg: Registry, message: discord.Message) -> bool:
 
 async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.PolicyStore, provider, ops: Ops, text: str, *, bot, channel,
                         req: configops.ConfigRequest | None = None, to_help: bool | None = None, conversation: str | None = None,
-                        hold=None):
+                        hold=None, entry: str = "act", memory: str | None = None):
     """Shared by /gm change, @mentions and DMs. `interaction_or_message` is an Interaction (deferred) or a Message;
     `channel`: where it was asked (channel id, None = DMs) — Registry.may_plain decides per op what may act there;
     `req`: an already parsed request (the router parsed first). Refused ops are listed; the rest can still apply.
@@ -432,7 +432,15 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     (design §5.51). Every reply is remembered with the bot's message id; a /gm change shares the channel's ring.
     `hold`: an async fn(req) for a message the bot only OVERHEARD (listening, 2026-11-21): a request that would change
     something is handed to it instead of being answered — nothing is posted; the writer's 👀 click brings it back here
-    with `req`. Questions are answered as ever."""
+    with `req`. Questions are answered as ever.
+    `entry`: where the message came in, for the answers log (an act channel and /gm change name themselves). With the
+    answer tools' switch on for the guild (answer_loop.enabled, design §8) the parser never answers a question: its
+    verdict `question` with no ops — with or without questions of its own, whatever `to_help` says — goes to
+    bot.help_answer once with acting off, and that answer is what the person reads. Its verdict `change` keeps
+    everything, its questions for a missing detail included — but a `change` with no ops and no questions is a
+    question too (the parser's own words never reach a person alone). Overheard (`hold`), every `change` verdict is
+    held, the questions-only one included; an overheard question is answered by the loop. `memory`: the judged
+    <memory> block the first answer had, carried into the re-ask (switch on only)."""
     from . import conversation as conv_mod
 
     is_msg = isinstance(interaction_or_message, discord.Message)
@@ -455,9 +463,9 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
         conversation = conv_mod.context_block(conv_mod.recall(reg, channel, author.id, reply_to_message_id=conv_mod.reply_to_id(interaction_or_message) if is_msg else None))
     conv_kw = {"conversation": conversation} if conversation else {}
 
-    def keep(sent, reply: str, questions=()) -> None:  # the exchange, in memory only (a restart forgets)
+    def keep(sent, reply: str, questions=(), asked_by: str = "") -> None:  # the exchange, in memory only (a restart forgets)
         conv_mod.remember(reg, channel, author.id, text, reply, list(questions), message_id=getattr(interaction_or_message, "id", None) if is_msg else None,
-                          reply_message_id=getattr(sent, "id", None))
+                          reply_message_id=getattr(sent, "id", None), asked_by=asked_by)
     officer, role_ids = await bot.plain_identity(reg, author)  # decided in code, before the parser sees anything
     # who can READ the reply decides how much it may carry: a Message outside DMs and officer-only channels is public,
     # so the parser (whose reply and questions go back verbatim) and the help snapshot get the member-level context
@@ -473,16 +481,44 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
             return
     if req.kind == "ignore":
         return
+    raids = bot.raids.store(reg) if getattr(bot, "raids", None) is not None else None
+
+    def may(op) -> bool:  # who may change that record decides first: no question about a record they can't change
+        return not configops.authorize(reg, [op.model_copy()], author.id, officer=officer, role_ids=role_ids, channel=channel, raids=raids)[1]
+    configops.narrow_characters(reg, req, author.id, may=may)  # a spec change binds the one character it can mean, in code
     if to_help is None:  # an act channel or /gm change: a plain question gets the full /ask answer, not the parser's line
         to_help = not is_msg or reg.plain_mode(channel) == "act"
+    from .answer_loop import enabled as answers_on
+
+    loop_on = answers_on(reg.key) and getattr(bot, "help_answer", None) is not None
+    if loop_on and hold is not None and req.kind == "change":
+        # overheard (switch on): a change is never answered in the channel — with ops, or asking for a missing detail,
+        # or neither; 👀 only, and the writer's click brings it back here with `req`
+        await hold(req)
+        return
+    if loop_on and not req.ops and (req.kind == "question" or (req.kind == "change" and not req.questions)):
+        # the switch on (design §8): the parser's words never answer a question — the loop does, once, with acting off
+        # (so it can't hand the message back here); outside the ask audience the static guide, never the parser's line
+        where = "change" if not is_msg else entry
+        answer = await bot.help_answer(reg, author.id, officer, text, may_act=False, public=public, **conv_kw,
+                                       **({"memory": memory} if memory else {}), entry=where)
+        if not answer:
+            from .discord_help import apply_view, guide_intro, guide_view
+
+            await send(guide_intro(reg), view=apply_view(reg, author.id, officer=officer, role_ids=role_ids, base=guide_view(reg)), ephemeral=True)
+            return
+        keep(await send(answer[:1950], ephemeral=True), answer[:1950], getattr(answer, "questions", ()), conv_mod.LOOP)
+        return
     if req.kind == "question" and not req.ops and not req.questions and to_help and getattr(bot, "help_answer", None) is not None:
-        answer = await bot.help_answer(reg, author.id, officer, text, public=public, **conv_kw)
+        from .answer_loop import entry_kw  # the answers log's entry point: an act channel, or /gm change
+
+        answer = await bot.help_answer(reg, author.id, officer, text, public=public, **conv_kw, **entry_kw(reg.key, "act" if is_msg else "change"))
         if answer:
             keep(await send(answer[:1950], ephemeral=True), answer[:1950])
             return
     if req.kind == "question" or req.questions:
         keep(await send((req.reply + ("\n" + "\n".join(f"• {q}" for q in req.questions) if req.questions else ""))[:1900] or "I couldn't tell what you want changed. Name the raid, person or setting, and what it should become.", ephemeral=True),
-             req.reply, req.questions)
+             req.reply, req.questions, conv_mod.PARSER)  # the answer to it goes back to the parser (discord_bot.listen_followup)
         return
     if not req.ops:
         keep(await send(req.reply[:1900] or "I didn't find a change to make in that message.", ephemeral=True), req.reply or "I didn't find a change to make in that message.")
@@ -490,7 +526,6 @@ async def handle_change(interaction_or_message, reg: Registry, ps: policy_mod.Po
     if hold is not None:  # overheard: no diff and no refusal under a message that never spoke to the bot
         await hold(req)
         return
-    raids = bot.raids.store(reg) if getattr(bot, "raids", None) is not None else None
     allowed, refused = configops.authorize(reg, req.ops, author.id, officer=officer, role_ids=role_ids, channel=channel, raids=raids)
     # a people or run action the registry already refuses (an unknown field, a character that isn't theirs) is a refusal,
     # never a proposed change with an Apply button under it

@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 
 import discord
 from discord import app_commands
 
 from . import guild_routing, help as help_mod
+from .answer_loop import ANSWER_FAILED
 from .discord_registry import Guilds
 from .ops import Ops
+
+log = logging.getLogger(__name__)
 
 from .constants import TEAL  # noqa: E402
 # /help topic: ONE choice per manual section (a picker, never a word to spell); the label says what is in it
@@ -265,11 +269,55 @@ def register_help_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
             await interaction.response.send_message(guide_intro(reg), view=view, ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        text = await bot.help_answer(reg, interaction.user.id, officer, question)
+        from . import answer_loop
+
+        if not answer_loop.enabled(reg.key):  # the answer tools' switch off: exactly as before (no recent exchange)
+            text = await bot.help_answer(reg, interaction.user.id, officer, question)
+            await interaction.followup.send(text, ephemeral=True)
+            return
+        from . import conversation  # design §8: /ask carries the recent exchange, so a question asked back can be followed up
+
+        uid, channel = interaction.user.id, (interaction.channel_id if interaction.guild_id else None)
+        convo = conversation.context_block(conversation.recall(reg, channel, uid))
+        text = await bot.help_answer(reg, uid, officer, question, entry="ask", **({"conversation": convo} if convo else {}))
         await interaction.followup.send(text, ephemeral=True)
+        # the reply is ephemeral and built for the asker alone (an officer's view, their own private details): it joins
+        # the place's ring only where the place itself is private (a DM, a channel only officers read) — elsewhere a
+        # later public @mention would carry it. It still recalls above, so a question it asked back can be followed up.
+        if text and ask_private(bot, reg, interaction):  # no message id to reply to: the same person here continues it
+            conversation.remember(reg, channel, uid, question, text)
+
+
+def ask_private(bot, reg, interaction) -> bool:
+    """Is the place /ask was used in private — a DM, or a channel where replies are private (HelpMixin.reply_private,
+    the predicate plain_text's `public` reads)? Anything unknown counts as public."""
+    if interaction.guild_id is None:
+        return True
+    channel = getattr(interaction, "channel", None)
+    check = getattr(bot, "reply_private", None)
+    if channel is None or getattr(channel, "guild", None) is None or check is None:
+        return False
+    try:
+        return bool(check(reg, channel))
+    except Exception:  # noqa: BLE001 — can't tell: public
+        return False
+
+
+class Asked(str):
+    """help_answer's text when the answer loop ended on a clarifying question: `.questions` = its choices, which the
+    caller keeps in the conversation ring (an open question: the person's next message there is the answer)."""
+
+    questions: list[str]
+
+    def __new__(cls, text: str, questions) -> "Asked":
+        s = super().__new__(cls, text)
+        s.questions = [str(q) for q in questions]
+        return s
 
 
 ACT = "\x00act"  # help_answer's "this was a request to do something" (never shown)
+# what a person reads when the answer tools' reply, with acting off, says it acts and has no words of its own
+ACTS_OFF_EMPTY = "I can't make that change from this message. Name what should change, or use the slash commands or the site."
 
 
 def _bot_role(role) -> bool:
@@ -402,8 +450,23 @@ class HelpMixin:
         where = f"<#{reg.config.ops_channel_id}>" if reg.config.ops_channel_id else "the ops channel"
         return f"-# Posted where members read it, so this is the member view — officers can ask in {where} or by DM for the officer view."
 
+    def _asker_name(self, reg, user_id: int) -> str:
+        """The asker's name as Discord shows it, for the answer tools' start when they have no record (else "")."""
+        if user_id in reg.members:
+            return ""
+        try:
+            get_guild = getattr(self, "get_guild", None)
+            guild = get_guild(reg.config.discord_guild_id) if get_guild and reg.config.discord_guild_id else None
+            who = guild.get_member(user_id) if guild is not None and hasattr(guild, "get_member") else None
+            if who is None and getattr(self, "get_user", None) is not None:
+                who = self.get_user(user_id)
+            return str(getattr(who, "display_name", "") or "")
+        except Exception:  # noqa: BLE001 — the gateway cache only; unknown is "someone"
+            return ""
+
     async def help_answer(self, reg, user_id: int, officer: bool, question: str, may_act: bool = False, public: bool = False,
-                          data: str | None = None, conversation: str | None = None, memory: str | None = None, link: bool = True):
+                          data: str | None = None, conversation: str | None = None, memory: str | None = None, link: bool = True,
+                          entry: str = "ask"):
         """The answer text; None outside the ask audience (the caller shows the static guide). `may_act`: plain text
         may act for this person here — a message the model reads as a request to DO something returns ACT instead
         (the caller hands it to the change flow), so a plain question costs one model call. `public`: the reply is
@@ -413,7 +476,10 @@ class HelpMixin:
         `data`: a surface's own facts for the question (the loot council's proposals, asked in its thread) — an
         officer's private snapshot only, in a <data> block. `conversation`: the recent exchange with this person
         (conversation.context_block — one fenced data block, design §5.51). `memory`: the <memory> block
-        (memory.memory_block) of the memories a judge found relevant (design §5.61)."""
+        (memory.memory_block) of the memories a judge found relevant (design §5.61). `entry`: where the question came in
+        (answer_loop.ENTRIES), for the answers log. With the answer tools' switch on for this guild (answer_loop.enabled)
+        and a provider that converses, the lookup loop answers instead of help.answer; everything after the answer is
+        the same code for both."""
         audience_public = bool(public)  # anyone's reply in a channel others read: their own absence reasons stay out too
         public = bool(public and officer)
         if not reg.may_ask(user_id, officer):
@@ -429,20 +495,43 @@ class HelpMixin:
         if data and officer and not public:
             extras = extras or help_mod.HelpExtras()
             extras.data = data
+        from . import answer_loop
         from .llm.provider import for_guild
 
+        loop_on = answer_loop.enabled(reg.key) and hasattr(provider, "converse")  # the answer tools' switch (design §9)
         try:
             with for_guild(reg.key):  # D45: the usage row is this guild's (the cap is shared)
-                ans = await asyncio.to_thread(help_mod.answer, provider, self.tree, reg, rs, user_id, officer, question, extras, audience_public,
-                                            **({"conversation": conversation} if conversation else {}),
-                                            **({"memory": memory} if memory else {}))
+                if loop_on:
+                    from .answer_tools import Viewer
+
+                    viewer = Viewer.of(reg, rs, user_id, officer, public=audience_public, question=question, extras=extras,
+                                       data=data if officer and not public else None, name=self._asker_name(reg, user_id),
+                                       may_act=may_act)
+                    result = await asyncio.to_thread(answer_loop.answer, provider, self.tree, viewer, conversation=conversation, memory=memory)
+                else:
+                    ans = await asyncio.to_thread(help_mod.answer, provider, self.tree, reg, rs, user_id, officer, question, extras, audience_public,
+                                                **({"conversation": conversation} if conversation else {}),
+                                                **({"memory": memory} if memory else {}))
         except Exception as e:  # noqa: BLE001
             await self.ops.emit(reg.config, "warn", f"help answer failed: {type(e).__name__}: {str(e)[:120]}")
             if type(e).__name__ == "BudgetExceeded":  # its sentence is written for the asker (provider.complete): nothing "went wrong"
                 return str(e)
-            return "Something went wrong, so I couldn't answer. The officers have the details."
+            return ANSWER_FAILED
+        if loop_on:  # the loop never raises: its ending says how it went, and the answer is already in its words
+            try:
+                answer_loop.log_answer(reg.key, entry, result)
+            except Exception:  # noqa: BLE001 — the log never costs the asker their answer
+                log.exception("answers log row failed")
+            if result.error:
+                await self.ops.emit(reg.config, "warn", f"help answer failed: {result.error}")
+            if result.ending == "budget":  # the provider's own sentence, as above
+                return result.answer.answer
+            ans = result.answer
         if may_act and ans.acts:
             return ACT
+        if loop_on and ans.acts:  # acting off, and the reply still says it acts: its words alone, nothing appended
+            log.info("help answer: the reply said it acts with acting off in %s (%s)", reg.key, entry)
+            return ans.answer.strip()[:1950] or ACTS_OFF_EMPTY
         text = ans.answer.strip()
         if ans.commands:
             text += "\n\n" + " · ".join(f"`{c}`" for c in ans.commands[:4])
@@ -453,5 +542,8 @@ class HelpMixin:
             text += "\n-# This needs an officer."
         if public and ans.officer_view:
             note = self.private_note(reg)
-            return text[:1950 - len(note) - 1] + "\n" + note
-        return text[:1950]
+            text = text[:1950 - len(note) - 1] + "\n" + note
+        text = text[:1950]
+        if loop_on and result.ending == "asked" and result.choices:
+            return Asked(text, result.choices)
+        return text

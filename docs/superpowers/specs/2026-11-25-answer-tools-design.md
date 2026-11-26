@@ -89,7 +89,7 @@ All limits are constants in one module, enforced in code, each with a test.
 | Lookup rounds per answer | 3 | The next request offers only `reply` (forced). |
 | Tool calls per round | 4 (run together) | Extra calls get a "too many lookups in one step" result. |
 | One tool result | 1,500 characters | Cut on a whole line, ending "… and N more — narrow it". |
-| One `manual` or `section` result | 4,000 characters (one manual part is up to 3,500; a section keeps today's cap up to this) | The same cut. |
+| One `manual`, `section` or `event` result | 4,000 characters (one manual part is up to 3,500; a section keeps today's cap up to this) | The same cut. |
 | All tool results in one answer | 12,000 characters | Further results are refused in one line; the model must reply. |
 | Model requests per answer | 4 | Hard stop; the asker gets one honest sentence. |
 | The answer | 1,200 characters, as today | As today. |

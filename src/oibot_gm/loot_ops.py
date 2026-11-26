@@ -503,6 +503,78 @@ def member_awards(reg: Registry, ctx, m, limit: int = 50) -> list:
     return rows[:max(0, int(limit))]
 
 
+LOG_MAX = 1000  # the award log's rows in one read (GET /api/loot/log's ceiling)
+
+
+def log_day(reg: Registry, value) -> str:
+    """A ledger day as the loot pages print it ('Wed 2 Sep'); '' for none, the value itself when it isn't a day."""
+    try:
+        return reg.day_label(str(value)[:10], with_year=False) if value else ""
+    except Exception:  # noqa: BLE001 — a label is a courtesy
+        return str(value or "")
+
+
+def _log_owner(reg: Registry, a, memo: dict):
+    """Whose award `a` is (Registry.award_holder: an award with a Discord id by the id, never by its name; an id-less
+    row by the full name, a current name first — design §5.2), read once per award per request."""
+    if id(a) not in memo:
+        memo[id(a)] = reg.award_holder(a)
+    return memo[id(a)]
+
+
+def award_is_members(reg: Registry, a, uid: int | None, memo: dict) -> bool:
+    """The award is member `uid`'s: by its Discord id resolved through character moves (owner_of_award); an id-less
+    row by whose character the name is."""
+    if uid is None:
+        return False
+    if a.discord_id is not None:
+        return reg.owner_of_award(a) == uid  # its member now: a moved character's past awards follow it (§5.4)
+    h = _log_owner(reg, a, memo)
+    return h is not None and h[0].discord_id == uid
+
+
+def log_row(reg: Registry, a, memo: dict, officer: bool, scores: bool, ctx, viewer_uid: int | None) -> dict:
+    """One row of the guild's award log (the site's Loot log, My loot, the answer loop's `loot` lookup): item,
+    character (class, spec), day, boss, MS/OS and whether it is the viewer's — for everyone. Only `officer` AND `scores`
+    add tier, weight, source, the bot's pick, who recorded it, the candidates at the time and the precedent's reason."""
+    from .loot.session import DISENCHANT
+    from .registry import item_key
+
+    it = reg.item(a.item_id or None, a.item_name)
+    name = a.item_name or (it.name if it is not None else f"item {a.item_id}")
+    h = _log_owner(reg, a, memo)
+    c = h[1] if h is not None else None
+    cls, spec = (c.cls, c.spec) if c is not None else (None, None)
+    row = {"item": name, "item_id": a.item_id, "key": item_key(a.item_id, name), "character": "disenchant" if a.raider == DISENCHANT else a.raider,
+           "disenchant": a.raider == DISENCHANT, "cls": cls, "spec": spec, "boss": a.boss, "instance": a.instance, "received": a.received.isoformat(),
+           "date_label": log_day(reg, a.received.isoformat()), "offspec": a.offspec, "mine": award_is_members(reg, a, viewer_uid, memo)}
+    if officer and scores:
+        prec = ctx.precedent_for(a.import_id) if a.import_id else None
+        row.update({"tier": a.tier, "weight": a.total_weight, "source": a.source, "bot": a.bot_pick, "by": a.by, "import_id": a.import_id,
+                    "candidates": list(a.candidates_snapshot), "reason": (prec or {}).get("reason")})
+    return row
+
+
+def log_rows(reg: Registry, ctx, *, member_uid: int | None = None, item: str | None = None, limit: int = LOG_MAX,
+             officer: bool = False, scores: bool = False, viewer_uid: int | None = None) -> list[dict]:
+    """The award log, newest first, at most `limit` rows: `member_uid` keeps that member's awards (award_is_members),
+    `item` the rows whose item name holds the text (case-folded). log_row decides the fields."""
+    memo: dict = {}
+    rows = sorted(ctx.ledger, key=lambda a: (a.received, a.confirmed_at or ""), reverse=True)
+    if member_uid is not None:
+        rows = [a for a in rows if award_is_members(reg, a, member_uid, memo)]
+    out = []
+    needle = (item or "").strip().casefold()
+    for a in rows:
+        if len(out) >= limit:
+            break
+        row = log_row(reg, a, memo, officer, scores, ctx, viewer_uid)
+        if needle and needle not in str(row["item"]).casefold():
+            continue
+        out.append(row)
+    return out
+
+
 def loot_block(reg: Registry, awards, ico=None) -> str:
     """/me view's Loot block: '<spec icon> Kestrel · Robe of Tests · <t:…:d> · MS' per award (one per line; the date in
     the reader's own locale; no override or reason flags — those are officer data)."""
