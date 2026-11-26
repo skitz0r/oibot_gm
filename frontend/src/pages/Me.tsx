@@ -136,7 +136,7 @@ export function MePage({ meta }: { meta: Meta }) {
             <Stack p="md" gap="xs">
               {over && <Text size="sm">{meta.page_words.me_event_over}{!me.must_apply && me.characters.length > 0 ? ` ${meta.page_words.me_event_over_tail}` : ""}</Text>}
               {me.sheets.length === 0 && <Text c="dimmed" size="sm">No live raids.</Text>}
-              {me.sheets.map((s) => <MyAnswer key={s.key} s={s} characters={me.characters} meta={meta} ask={ask} onDone={load} flash={flash === s.key} />)}
+              {me.sheets.map((s) => <MyAnswer key={s.key} s={s} characters={me.characters} meta={meta} ask={ask} onDone={load} flash={flash === s.key} link />)}
               {me.sheets.length > 0 && <Text size="xs" c="dimmed">Answer here or on the sheet in Discord — the same answer either way. Once the roster locks you confirm {me.dm ? "by DM or here" : "here — your DMs are off"}.</Text>}
             </Stack>
           </Card>

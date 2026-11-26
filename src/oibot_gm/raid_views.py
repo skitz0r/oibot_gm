@@ -250,8 +250,9 @@ def event_url(reg: Registry, ev: rc.RaidEvent) -> str | None:
     """THE address of a run's event on the site, `{web}/app/events/<key>?g=<guild key>` (?g= selects the guild; two guilds
     can hold one run key) — every Discord link to an event is this one: the sheet's title, the officer cards, the test
     bench's sandbox line. The event's own address is its FIRST raid's key (a later raid's `follows`), so a later raid's
-    link opens the evening it belongs to; a raid taken out of a lineup links itself (the page says it is gone). The page
-    sends a member who is not an officer on to their own row on the Me page. None off http(s)."""
+    link opens the evening it belongs to; a raid taken out of a lineup links itself (the page says it is gone). A member
+    who is not an officer gets the members' event view there (the sheet's public facts and their own answer). None off
+    http(s)."""
     web = os.environ.get("OIBOT_WEB_URL", "")
     key = ev.follows if rc.is_follow(ev) and ev.follows and not ev.dropped else ev.key
     return f"{web}/app/events/{key}?g={reg.key}" if web.startswith("http") else None

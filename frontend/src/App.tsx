@@ -25,6 +25,7 @@ import { SchedulesPage } from "./pages/Schedules";
 import { LineupPage } from "./pages/LineupPage";
 import { EventsPage } from "./pages/Events";
 import { EditEvent } from "./components/events/EditEvent";
+import { MemberEventsPage } from "./pages/MemberEvents";
 import { TellTheBot } from "./components/TellTheBot";
 import { PolicyPage } from "./pages/Policy";
 import { HelpPage } from "./pages/Help";
@@ -34,6 +35,8 @@ import { anyDirty } from "./hooks/useDirty";
 const NAV = [{ to: "/me", label: "Me", icon: IconUser }, { to: "/loot-log", label: "Loot log", icon: IconClipboardList }, { to: "/professions", label: "Professions", icon: IconTool }, { to: "/help", label: "Help", icon: IconHelp }];
 /** price watch §4.3: the Prices tab, for every member, where the game version has auction houses (after Professions) */
 const PRICES = { to: "/prices", label: "Prices", icon: IconCoin };
+// a member who is not an officer gets Events after Me (the members' event view); an officer has the Officers section's one
+const MEMBER_EVENTS = { to: "/events", label: "Events", icon: IconCalendarEvent };
 const OFFICER = [
   { to: "/events", label: "Events", icon: IconCalendarEvent },  // the Rosters page became the Events page (phase 4)
   { to: "/schedules", label: "Schedules", icon: IconRepeat },
@@ -105,14 +108,12 @@ function RostersRedirect() {
   return <Navigate to={key ? `/events/${encodeURIComponent(key)}${search}` : `/events${search}`} replace />;
 }
 
-/** /events/:key — the address every Discord link to an event opens (raid_views.event_url). An officer gets the Events
- *  page; a member who is not one is sent on to their own row for that event on the Me page (`/me#run-<key>`, ?g= kept),
- *  where Join / Bench / No thanks are — never an empty or "officers only" page. */
+/** /events and /events/:key — the addresses every Discord link to an event opens (raid_views.event_url, ?g= kept). An
+ *  officer gets the Events page; a member who is not one the members' event view (pages/MemberEvents), where the sheet's
+ *  public facts and their own Join / Bench / No thanks are — never an empty or "officers only" page. */
 function EventRoute({ meta }: { meta: Meta }) {
-  const { key } = useParams();
-  const { search } = useLocation();
   if (meta.viewer.officer) return <EventsPage meta={meta} />;
-  return <Navigate to={{ pathname: "/me", search, hash: key ? `#run-${encodeURIComponent(key)}` : "" }} replace />;
+  return <MemberEventsPage meta={meta} />;
 }
 
 /** /events/:key/lineup's page needs the key in its own route (Edit lineup). */
@@ -187,7 +188,9 @@ export default function App() {
   const officerPage = meta.viewer.officer && OFFICER.some((n) => loc.pathname === n.to || loc.pathname.startsWith(n.to + "/"));
   const several = meta.guilds.length > 1;
   const pricesTab = !!meta.prices?.market;  // absent on a version without auction houses (tbc)
-  const nav = pricesTab ? [...NAV.slice(0, 3), PRICES, ...NAV.slice(3)] : NAV;
+  const base = !meta.viewer.officer ? [NAV[0], MEMBER_EVENTS, ...NAV.slice(1)] : NAV;
+  // Prices goes after Professions, before Help (the last entry)
+  const nav = pricesTab ? [...base.slice(0, base.length - 1), PRICES, ...base.slice(base.length - 1)] : base;
   const link = (n: { to: string; label: string; icon: React.ElementType }) => (
     <NavLink key={n.to} component={Link} to={n.to} onClick={guardClick(n.to)} label={n.label} leftSection={<n.icon size={18} stroke={1.8} />} active={loc.pathname === n.to || loc.pathname.startsWith(n.to + "/")} variant="light" color="teal" style={{ borderRadius: 7, minHeight: mobile ? 44 : undefined }} />
   );
@@ -234,7 +237,7 @@ export default function App() {
             <Route path="/events/new" element={officer(<LineupPage meta={meta} mode="new-event" />)} />
             <Route path="/events/:key/lineup" element={officer(<EditLineupRoute meta={meta} />)} />
             <Route path="/events/:key/edit" element={officer(<EditEventRoute meta={meta} />)} />
-            <Route path="/events" element={officer(<EventsPage meta={meta} />)} />
+            <Route path="/events" element={<EventRoute meta={meta} />} />
             <Route path="/events/:key" element={<EventRoute meta={meta} />} />
             <Route path="/events/coming/:sid/:occurrence" element={officer(<EventsPage meta={meta} />)} />
             {/* Schedules: the list and one schedule (pages/Schedules); New schedule and Edit are the lineup builder's page */}

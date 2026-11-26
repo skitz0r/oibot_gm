@@ -184,6 +184,17 @@ export interface MemberPerson { display_name: string; character: string; cls: st
 export interface MemberSeat { display_name: string; character: string; cls: string; spec: string; role: string; answer?: string | null }
 /** One raid of an event, locked or done, as members see it: its rosters and the joiners the lock left out. */
 export interface MemberPart { key: string; raid_name: string; label: string; rosters: { n: number; groups: MemberSeat[][] }[]; not_rostered: string[]; marks: boolean }
+/** One live event on the members' Events list (GET /api/me/events): `answer` = the viewer's own (rc.answer_word). */
+export interface MemberEventRow { key: string; title: string; subtitle: string; state: string; chip: string; answer: string }
+/** The members' Events list: Open (live events) and Coming up (nights with no sheet yet — plain text, no page). */
+export interface MemberEventList { open: MemberEventRow[]; coming: { title: string; subtitle: string }[]; tz_words: string; empty: string }
+/** One event as a member sees it (GET /api/me/event/{key}): the sheet's public facts, the signups by answer, the locked
+ *  rosters, and the viewer's own answer rows (`answers`, one per live raid), open asks and characters. */
+export interface MemberEventView {
+  key: string; title: string; subtitle: string; state: string; chip: string; test_chip: string | null; details: Fact[];
+  signups: { counts: Record<"in" | "sub" | "out" | "away", number>; rows: Record<"in" | "sub" | "out" | "away", MemberPerson[]> };
+  rosters: MemberPart[]; part_keys: string[]; answers: MySheet[]; asks: MyAsk[]; characters: { label: string; is_main: boolean }[];
+}
 /** The confirmation box (design §7b, consequences.box): printed as it comes, Back then the verb; `verb` null = a refusal
  *  (only Back); `fp` goes back as `seen` with the press. */
 export interface Box { title: string; sentences: string[]; verb: string | null; danger: boolean; diff: string[]; fp: string }

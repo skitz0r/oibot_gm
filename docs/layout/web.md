@@ -14,7 +14,11 @@ scripts/serve_scratch.py  THIS worktree's site on a throw-away copy of fixtures/
                        recorded, never called), uvicorn on 127.0.0.1 only, the login = the test suite's bearer. Refuses with DISCORD_TOKEN set, on
                        LIVE_PORT, or on a folder outside the temp directory or holding anything it didn't write (MARKER: it deletes only what it
                        built); .env loading off and every secret out of the environment before AND after the imports; every module-level output path
-                       in the scratch folder; the suite's refused network reads refused. scripts/shots.py <base> refuses without a URL
+                       in the scratch folder; the suite's refused network reads refused. scripts/shots.py <base> refuses without a URL.
+                       `--member` = the site as a member who is not an officer: a throw-away OIBOT_WEB_SECRET (secrets.token_hex, this process only),
+                       the lowest-id seeded main who is not the owner admitted (conftest.MemberDirectory, with the owner), and
+                       <data>/member_cookie.txt = their session signed as web/app.py signs one; shots.py --member-cookie FILE shoots /app/events and
+                       each open event from /api/me/events as that session, no bearer (<view>-member-events*.png)
   web/app.py           FastAPI served inside the bot (OIBOT_WEB_BIND): Discord OAuth2, landing page, icon/emblem/card images, old URLs → /app redirects;
                        published by a Cloudflare Tunnel (~/.cloudflared/config.yml → gm.earlyandoften.gg). Several guilds: `selected_reg` picks ONE guild per
                        request — `X-Oibot-Guild` header / `?g=<key>` (explicit: honoured or 403 not_member, never switched) > `oibot_guild` cookie > first

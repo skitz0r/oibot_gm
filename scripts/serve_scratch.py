@@ -1,6 +1,6 @@
 """Serve THIS worktree's site on a scratch copy of the demo fixtures, for screenshots (phase 4: never the live bot).
 
-    uv run python scripts/serve_scratch.py [--data DIR] [--guild KEY] [--port 8799] [--seed]
+    uv run python scripts/serve_scratch.py [--data DIR] [--guild KEY] [--port 8799] [--seed] [--member]
 
 What it does:
 - builds a throw-away data repo under the system temp directory (or `--data`, a NEW or scratch-marked folder strictly
@@ -15,6 +15,9 @@ What it does:
   scratch login is the suite's MCP bearer token (tests/test_mcp.TOKEN, the guild's owner and so an officer), honoured
   from this machine only; `scripts/shots.py http://127.0.0.1:8799 --guild demo` sends it. The server's loop is the bot
   double's (attach_loop), so live updates reach open pages: a change made by a second request shows without a reload.
+- with `--member`: the site as a MEMBER who is not an officer — a throw-away cookie secret for this process only, the
+  lowest-id seeded main who is not the owner admitted to the scratch server, and `<data>/member_cookie.txt` = a session
+  for them signed as web/app.py signs one; `scripts/shots.py … --member-cookie <data>/member_cookie.txt` shoots with it.
 
 Safety: it refuses to start when DISCORD_TOKEN is set (a real bot's environment), on the live port, or on a data folder
 that is not strictly below the temp directory or that holds anything this script didn't write (MARKER). Before any of
@@ -251,12 +254,38 @@ def seed(reg, rs) -> None:
     print(f"serve_scratch: seeded schedule {sid}, an open two-raid event, a locked and a finished event (owner {OWNER})")
 
 
+def member_session(reg, data: Path, bot) -> None:
+    """--member: admit the lowest-id seeded main who is not the owner to the scratch server (with the owner, so the
+    bearer still works) and write `<data>/member_cookie.txt`, their session signed with this process's throw-away
+    OIBOT_WEB_SECRET exactly as web/app.py signs one (URLSafeSerializer(secret, salt="session"), {uid, name, iat})."""
+    import time
+    import types
+
+    from conftest import OWNER, MemberDirectory
+    from itsdangerous import URLSafeSerializer
+
+    m = min((m for m in reg.members.values() if not m.test and m.main and m.discord_id != reg.config.owner_discord_id),
+            key=lambda m: m.discord_id, default=None)
+    if m is None:
+        refuse("--member: no seeded member who is not the owner.")
+
+    def person(uid):
+        return types.SimpleNamespace(id=uid, display_name=f"u{str(uid)[-2:]}", roles=[])
+
+    MemberDirectory({(1, OWNER): person(OWNER), (1, m.discord_id): person(m.discord_id)}).install(bot, servers=(1,))
+    cookie = URLSafeSerializer(os.environ["OIBOT_WEB_SECRET"], salt="session").dumps(
+        {"uid": str(m.discord_id), "name": m.display_name, "iat": time.time()})
+    (data / "member_cookie.txt").write_text(cookie + "\n")
+    print(f"serve_scratch: member session for {m.display_name} in {data / 'member_cookie.txt'}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Serve this worktree's site on scratch demo data (screenshots only).")
     ap.add_argument("--data", default=None, help="the scratch data folder (new, below the system temp directory)")
     ap.add_argument("--guild", default="demo")
     ap.add_argument("--port", type=int, default=8799)
     ap.add_argument("--seed", action="store_true", help="add a schedule, minimums, an open and a locked event")
+    ap.add_argument("--member", action="store_true", help="also write <data>/member_cookie.txt: a member's session (not an officer)")
     args = ap.parse_args()
     sys.stdout.reconfigure(line_buffering=True)
     if os.environ.get("DISCORD_TOKEN"):
@@ -286,6 +315,9 @@ def main() -> None:
     sandbox(out)
     os.environ["OIBOT_USAGE_LOG"] = str(out / "llm_usage.jsonl")
     os.environ[web.MCP_TOKEN_ENV] = TOKEN
+    if args.member:  # a throw-away cookie secret, this process only (scrub_env took any real one out above)
+        import secrets
+        os.environ["OIBOT_WEB_SECRET"] = secrets.token_hex(16)
 
     build_data(data, args.guild)
     store = GitStore(data, push=False)
@@ -298,6 +330,8 @@ def main() -> None:
 
     print(f"serve_scratch: http://127.0.0.1:{args.port}/app/raids  (data {data}, guild {args.guild})")
     bot = NightBot(reg, rs)
+    if args.member:
+        member_session(reg, data, bot)
     # the icon cache is the scratch folder's and nothing is fetched: a missing icon is the generated badge
     app = web.create_app(bot, icon_dir=out / "icons", icon_cdn=None)
     attach_loop(app, bot)  # server-sent events: the page updates live when a second request changes something

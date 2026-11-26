@@ -60,7 +60,7 @@ export function MyAnswer({ s, characters, meta, ask, onDone, flash, link }: {
       <Group justify="space-between" wrap="nowrap">
         <Box style={{ minWidth: 0 }}><Text size="sm" fw={600} truncate>{link ? <Anchor component={Link} to={href} onClick={guardClick(href)} inherit>{title}</Anchor> : title}</Text><Text size="xs" c="dimmed">{s.when}{s.state_word ? ` · ${s.state_word}` : ""}{s.character ? ` · ${s.character}` : ""}{s.regular && !s.status ? " · you're a regular: answer it" : ""}</Text></Box>
         {/* the badge's words are the server's (rc.answer_word): "not rostered" for a joiner the lock left out, never "Join" on a locked run */}
-        <Badge variant="light" tt="none" color={s.rostered ? "teal" : s.state !== "open" && s.status === "in" ? "gray" : s.status === "in" ? "teal" : s.status === "out" ? "red" : s.status === "sub" ? "yellow" : "gray"}>{s.badge || s.label || "not answered"}</Badge>
+        <Badge variant="light" tt="none" style={{ flex: "none" }} color={s.rostered ? "teal" : s.state !== "open" && s.status === "in" ? "gray" : s.status === "in" ? "teal" : s.status === "out" ? "red" : s.status === "sub" ? "yellow" : "gray"}>{s.badge || s.label || "not answered"}</Badge>
       </Group>
       {s.may_answer && (
         <Group gap={6} wrap="wrap">

@@ -589,8 +589,8 @@ def test_memory_surfaces_read_by_their_shape():
 
 
 def test_me_page_sheet_rows_take_the_sheet_title_deep_link():
-    """A member following an event link lands on /app/me#run-<key> (App.tsx EventRoute; sheets posted before phase 5
-    linked there directly): the Me page gives each sheet row that id and scrolls to the hash once the record has loaded."""
+    """Sheets posted before phase 5 link /app/me#run-<key> directly: the Me page gives each sheet row that id and scrolls
+    to the hash once the record has loaded."""
     me = (SRC / "pages" / "Me.tsx").read_text()
     row = (SRC / "components" / "MyAnswer.tsx").read_text()  # the row (MyAnswer) the page draws per sheet
     assert 'id={`run-${s.key}`}' in row and "scrollMarginTop: 72" in row  # the row lands below the phone header, not under it
@@ -599,16 +599,69 @@ def test_me_page_sheet_rows_take_the_sheet_title_deep_link():
     assert "flash === s.key" in me  # the row is lit for a moment so the eye lands on it
 
 
-def test_an_event_link_sends_a_member_to_their_row():
-    """Every Discord link to an event opens /app/events/<key>?g=<guild> (raid_views.event_url, phase 5 Task 10). The route
-    is not officer()-wrapped (that sends a member to a bare /me and drops ?g=): an officer gets the Events page, a member
-    their own row on the Me page — /me, the same ?g=, #run-<key> — where Join / Bench / No thanks are."""
+def test_an_event_link_opens_the_member_event_view():
+    """Every Discord link to an event opens /app/events/<key>?g=<guild> (raid_views.event_url). The route is not
+    officer()-wrapped: an officer gets the Events page, a member who is not one the members' event view (MemberEvents) —
+    never a redirect to the Me page any more. Old /me#run-<key> links still land on the Me page's row."""
     app = _code_only((SRC / "App.tsx").read_text())
     assert '<Route path="/events/:key" element={<EventRoute meta={meta} />} />' in app
     route = app[app.index("function EventRoute("):]
     route = route[:route.index("\n}\n")]
     assert "if (meta.viewer.officer) return <EventsPage meta={meta} />;" in route
-    assert 'pathname: "/me", search, hash:' in route and "`#run-${encodeURIComponent(key)}`" in route and "replace" in route
+    assert "<MemberEventsPage" in route
+    assert 'pathname: "/me"' not in route and "Navigate" not in route
+    events = app[app.index('<Route path="/events" '):]
+    events = events[:events.index("\n")]
+    assert "<EventRoute meta={meta} />" in events and "officer(" not in events, "a member opens /events too"
+
+
+def test_a_member_has_events_in_the_rail_and_an_officer_has_it_once():
+    """The members' rail gains Events after Me for a viewer who is not an officer; an officer keeps only the Officers
+    section's Events, so the rail never shows two."""
+    app = _code_only((SRC / "App.tsx").read_text())
+    assert 'const MEMBER_EVENTS = { to: "/events", label: "Events", icon: IconCalendarEvent };' in app
+    assert "!meta.viewer.officer ? [NAV[0], MEMBER_EVENTS, ...NAV.slice(1)] : NAV" in app
+    officer = app[app.index("const OFFICER = ["):]
+    officer = officer[:officer.index("];")]
+    assert officer.count('to: "/events"') == 1
+    start = app.index("const NAV = [")
+    assert '"/events"' not in app[start:app.index("\n", start)], "NAV itself stays the same for everyone"
+
+
+def test_the_member_event_page_reads_only_member_routes():
+    """The members' event view reads Task 1's member routes alone and draws none of the officers' controls."""
+    page = _code_only((SRC / "pages" / "MemberEvents.tsx").read_text())
+    assert "/api/me/events" in page and "/api/me/event/" in page
+    for w in ("/api/event/", "/api/event-list", "/api/run/", "MemberMenu", "EventBoard", "RoleSwitches", "ActivitySection"):
+        assert w not in page, w
+    assert "export function MemberEventsPage(" in page
+    assert 'useLive(load, ["run:", "member"])' in page and "usePoll(load)" in page
+    assert "replace: true" in page, "a later raid's key moves the address to its event's own"
+    assert "page_words.answer_needs_character" in page and "list.empty" in page, "the words are the server's"
+
+
+def test_the_member_event_page_uses_the_shared_pieces():
+    page = _code_only((SRC / "pages" / "MemberEvents.tsx").read_text())
+    for name in ("MyAnswer", "SignupTabs", "MemberRoster", "AskCard", "EventHead", "EventDetails", "ListPage"):
+        assert f"<{name}" in page and re.search(rf"import \{{[^}}]*\b{name}\b", page), name
+    tabs = page[page.index("<SignupTabs"):]
+    tabs = tabs[:tabs.index("/>")]
+    assert '"away"' in tabs and '"none"' not in tabs and "right=" not in tabs
+
+
+def test_me_rows_link_to_their_event():
+    """The Me page's rows link to the event's page; the row keeps its #run-<key> anchor for older links."""
+    me = _code_only((SRC / "pages" / "Me.tsx").read_text())
+    row = me[me.index("<MyAnswer "):]
+    row = row[:row.index("/>")]
+    assert " link" in row
+
+
+def test_a_list_item_without_an_address_is_not_a_link():
+    """ListPage: a Coming up night has no page of its own for a member, so its row is plain text, not a link."""
+    lp = _code_only((SRC / "components" / "ListPage.tsx").read_text())
+    assert "to?: string" in lp
+    assert re.search(r"it\.to \?\s*\(?\s*<a ", lp) and "<div key={it.id}" in lp
 
 
 def test_follow_on_surfaces_exist():
@@ -1337,7 +1390,7 @@ def test_edit_lineup_prints_the_servers_box_and_guards_its_draft():
 def test_every_link_to_a_run_lands_on_its_event():
     """Phase 4, Task 10: the Rosters page is gone. Old addresses redirect (/rosters → /events, /rosters#run-<key> →
     /events/<key>, a later raid's key answers as its event, a gone key prints the server's sentence) and nothing on the
-    site links /rosters any more. A Me row (#run-<key>) is linked only by App.tsx's EventRoute, a member's landing."""
+    site links /rosters any more, and nothing links a Me row (#run-<key>): every event link opens the event's page."""
     app = _code_only((SRC / "App.tsx").read_text())
     red = app[app.index("function RostersRedirect"):]
     red = red[:red.index("\n}\n")]
@@ -1346,10 +1399,8 @@ def test_every_link_to_a_run_lands_on_its_event():
     hits = []
     for f in SRC.rglob("*.ts*"):
         code = _code_only(f.read_text())
-        if f.name == "App.tsx":  # phase 5 Task 10: EventRoute sends a member on to their Me row (#run-<key>) on purpose
+        if f.name == "App.tsx":
             code = code.replace('path="/rosters"', "")
-            start = code.index("function EventRoute(")
-            code = code[:start] + code[code.index("\n}\n", start):]
         if re.search(r"[\"'`]/rosters\b|#run-\$\{", code) and f.name not in ("Me.tsx",):
             hits.append(f.name)
     assert not hits, hits
