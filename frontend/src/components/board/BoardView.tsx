@@ -203,10 +203,11 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAct
   });
   const onDragStart = (name: string, from: Drag["from"]) => (ev: React.DragEvent) => { drag.current = { name, from }; ev.dataTransfer.effectAllowed = "move"; live.dragging = true; };
   /** Each roster's open seats as the server sends them (`open`: a role per empty seat a minimum still wants; null before the
-   *  lock = none drawn), put in that roster's drawn empty slots in order — the Events page only. */
+   *  lock = none drawn), put in that roster's drawn empty slots in order — the Events page's locked board only: an open
+   *  board never draws them, whatever a write's answer carries. */
   const openAt = (ri: number): Record<string, string> => {
     const r = board.rosters[ri];
-    const roles = event && r.open ? [...r.open] : [];
+    const roles = event && locked && r.open ? [...r.open] : [];
     const out: Record<string, string> = {};
     r.groups.forEach((g, gi) => {
       if (locked && g.length === 0 && r.groups.findIndex((x) => x.length === 0) !== gi) return;

@@ -16,6 +16,7 @@ from conftest import OWNER, join
 from test_confirm_boxes import people
 from test_raid_night import H, NightBot, web_bot  # noqa: F401 — the routes' fixture
 
+from oibot_gm import consequences as cq
 from oibot_gm import event_board as eb
 from oibot_gm import raidcycle as rc
 from oibot_gm.constants import PAGE_WORDS
@@ -207,6 +208,40 @@ def test_a_refused_move_answers_the_board_as_it_stands_and_its_sentence(reg, rs,
     ev.state = "locked"
     r = web_bot.c.post(f"/api/run/{ev.key}/move", json={"member": n[g], "to": {"r": 0, "g": 1, "i": 0}, "state": "open"}, headers=H())
     assert r.status_code == 409 and "locked" in r.json()["error"] and "board" in r.json() and r.json()["state"] == "locked"
+
+
+
+def test_every_board_write_on_an_open_board_answers_without_open_seats(reg, rs, monkeypatch, web_bot):
+    """F4 (2026-11-27): the Events page draws a board write's own answer at once (EventBoard's `own`), and BoardView
+    draws a roster's `open` as the locked roster's dashed "open seat" rows. Every answer on an OPEN board carries
+    `open: None` (as the page load does), or the rows flash until the page reloads: a move, a swap, a drop on Not
+    placed, Move to (the same route), a refused move, Undo my moves, Auto-fill groups (both answers) and a whole-board
+    write (Clear's layout write and Use this split). A locked board's answer keeps them."""
+    from conftest import lock_with_board
+
+    monkeypatch.setattr(rc, "_solve_run", in_order())
+    ev = rc.open_run(reg, rs, BD, start_in(reg), by="t", schedule=rc.ADHOC_SCHEDULE)
+    ms = reg.test_members()
+    join(reg, rs, ev, ms)
+    n = [m.display_name for m in ms]
+
+    def no_seats(r, why):
+        j = r.json()
+        assert "board" in j, (why, r.status_code, r.text)
+        assert all(x["open"] is None for x in j["board"]["rosters"]), (why, [x["open"] for x in j["board"]["rosters"]])
+
+    move = f"/api/run/{ev.key}/move"
+    no_seats(web_bot.c.post(move, json={"member": n[0], "to": {"r": 0, "g": 0, "i": 0}, "state": "open"}, headers=H()), "a move")
+    no_seats(web_bot.c.post(move, json={"member": n[1], "to": {"r": 0, "g": 0, "i": 0}, "state": "open"}, headers=H()), "a swap")
+    no_seats(web_bot.c.post(move, json={"member": n[0], "to": None, "state": "open"}, headers=H()), "a drop on Not placed")
+    no_seats(web_bot.c.post(move, json={"member": "Nobody", "to": {"r": 0, "g": 0, "i": 0}, "state": "open"}, headers=H()), "a refused move")
+    no_seats(web_bot.c.post(f"/api/run/{ev.key}/layout", json={"undo": True, "seen": cq.undo_box_for(reg, ev, OWNER)["fp"]}, headers=H()), "Undo my moves")
+    no_seats(web_bot.c.post(f"/api/run/{ev.key}/autofill", json={"wait": True}, headers=H()), "Auto-fill groups, done")
+    no_seats(web_bot.c.post(f"/api/run/{ev.key}/autofill", json={}, headers=H()), "Auto-fill groups, working")
+    no_seats(web_bot.c.post(f"/api/run/{ev.key}/layout", json={"groups": [], "rev": rc.board_rev(reg, ev)}, headers=H()), "a whole-board write")
+    lock_with_board(reg, rs, ev, n[:3])
+    r = web_bot.c.post(move, json={"member": n[0], "to": {"r": 0, "g": 0, "i": 0}, "state": "open"}, headers=H())
+    assert r.status_code == 409 and r.json()["board"]["rosters"][0]["open"], "a locked roster's answer keeps its open seats"
 
 
 # ---------------------------------------------------------------- Undo my moves

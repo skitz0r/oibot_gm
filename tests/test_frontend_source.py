@@ -1792,3 +1792,13 @@ def test_a_bench_names_move_to_says_bench():
     moves = view[view.index("const movesFor"):view.index("const swapWith")]
     assert 'answers[name] === "sub"' in view and "words.bank.bench" in moves, moves
     assert "event && !locked" in moves, "a locked board has no Bench section: its bank word stays"
+
+
+def test_an_open_event_board_never_draws_open_seats():
+    """F4 (2026-11-27): the Events page drew a move's own answer, and that answer carried the locked roster's open seats,
+    so the dashed red "open seat" rows flashed on an open board. The server answers `open: None` before the lock
+    (web.api board_reply); BoardView also draws them only on a locked event board, whatever an answer carries."""
+    view = _code_only((SRC / "components" / "board" / "BoardView.tsx").read_text())
+    at = view[view.index("const openAt = "):]
+    at = at[:at.index("\n  };\n")]
+    assert re.search(r"const roles = event && locked && r\.open \?", at), "open seats only on a locked event board"

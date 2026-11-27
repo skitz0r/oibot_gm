@@ -1354,9 +1354,13 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         return s[:1].upper() + s[1:]
 
     def board_reply(reg, ev):
+        """A board write's answer, which the page draws at once: open seats only on a locked roster, as the page load
+        sends them (event_view._part_view) — an officers' half-made board's empty places are not seats the lock leaves."""
         t = rc.run_team(reg, ev)
-        rosters = ev.all_rosters if ev.state != "open" and ev.all_rosters else rc.board_rosters(reg, ev, rc.board_layout(reg, ev), rc.run_size(reg, ev))
-        return {"board": board_json(reg, ev, rosters, rc.confirmations(reg, ev) if ev.all_rosters else []), "needs": rc.needs(reg, ev, t), "rev": rc.board_rev(reg, ev)}
+        locked = ev.state != "open" and bool(ev.all_rosters)
+        rosters = ev.all_rosters if locked else rc.board_rosters(reg, ev, rc.board_layout(reg, ev), rc.run_size(reg, ev))
+        return {"board": board_json(reg, ev, rosters, rc.confirmations(reg, ev) if ev.all_rosters else [], open_seats=locked),
+                "needs": rc.needs(reg, ev, t), "rev": rc.board_rev(reg, ev)}
 
     def stale(v, ev):
         return JSONResponse({"error": "Someone else changed this board a moment ago — it has been reloaded; check it and try again.", **board_reply(v.reg, ev)}, status_code=409)
