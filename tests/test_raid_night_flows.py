@@ -112,7 +112,8 @@ def test_raid_lock_preview_draws_the_roster_one_member_per_line_then_locks(reg, 
 
     async def go():
         await FLOWS["raid_lock"](h.command(), reg)
-        assert h.buttons() == ["Lock and auto-fill", "Back"], "nobody on the board: the lock as it stands is refused"
+        assert h.buttons() == ["Lock as it stands", "Lock and auto-fill", "Preview lock", "Back"], \
+            "nobody on the board: both locks offered, the as-it-stands one locks it empty (F3)"
         await h.press("Lock and auto-fill")
         assert h.buttons() == ["Lock and auto-fill", "Preview lock", "Back"]
         await h.press("Preview lock")
