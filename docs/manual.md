@@ -97,7 +97,10 @@ understands; it answers in the words below.
     sheet's opening and reminder DMs, instead of a lock time. A "could you come?" ask sent while the sheet is open
     stays open until the event starts, whether it went out before or after the lock time, and its DM says so. An officer's
     lock closes any still open; one nobody answered by the start counts as no, its card edited and one line in the
-    event's thread. The reminder, the officers' check and confirm-by keep their times. Switching it back on after the
+    event's thread. Moving the event, changing its lock time or switching Auto Lock moves every open ask's deadline
+    with it (the start with Auto Lock off, the lock time with it on), and each ask's card is edited to say the new time.
+    Once the event has started nobody can be asked to come any more: *"The event has already started, so nobody can be
+    asked to come before the lock."* The reminder, the officers' check and confirm-by keep their times. Switching it back on after the
     lock time locks the event within a minute, and the box says so first.
   - **Auto-fill on Auto Lock** — when Auto Lock locks the roster, the bot fills its open seats from those who joined,
     and everyone on the board keeps their place. With it off, that lock rosters exactly the names on the board, each in

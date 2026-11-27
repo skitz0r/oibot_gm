@@ -653,6 +653,8 @@ class RaidMixin:
         async with self.plan_lock(reg, ev.key):
             if ev.state not in ("open", "locked"):
                 raise RegistryError(f"{run_title(reg, ev)} is {ev.state}")
+            if ev.state == "open" and reg.now_local() >= ev.start:  # an Auto Lock off event still open: its asks would be born expired
+                raise RegistryError(rc.PRELOCK_STARTED)
             plan = rc.role_plan(reg, rs, ev)
             if not rev or rev != plan.rev:
                 # two officers pressed Ask on the same plan: the second is told who sent it, then sees the redrawn plan
@@ -1684,7 +1686,8 @@ class RaidMixin:
         for uid in mv.told:  # an outcome, never a DM (the DM rule): the Me page and /me view say it — one member save each
             reg.notify(uid, "moved", f"{name} now starts {when}." if moved else f"{name} now locks {locks}.", run=first.key)
         cards = "" if not edited else " · 1 open card shows the new time" if edited == 1 else f" · {edited} open cards show the new time"
-        timing_only = set(mv.timing) <= {"cutoff_hard_hours", "cutoff_soft_hours", "confirm_hours", "reminders", "autofill", "fill_ask_hours"} and not mv.splits
+        timing_only = set(mv.timing) <= {"cutoff_hard_hours", "cutoff_soft_hours", "confirm_hours", "reminders", "autofill", "fill_ask_hours",
+                                         "auto_lock", "auto_lock_fill"} and not mv.splits
         own = "sheet timing" if timing_only else "settings"
         line = (f"🕒 {name} moved by {by} to {when}" if moved else f"🕒 {name}: its own {own} set by {by}") + cards
         await self.post_run_update(reg, first, line)

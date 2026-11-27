@@ -375,6 +375,26 @@ def prelock_deadline(reg: Registry, ev: "RaidEvent", hard: datetime) -> datetime
     return min(hard, ev.start) if auto_lock(reg, ev) else ev.start
 
 
+# a pre-lock ask asked for once the event has started (an Auto Lock off event nobody locked): refused, nobody is DMed
+PRELOCK_STARTED = "The event has already started, so nobody can be asked to come before the lock."
+
+
+def restamp_prelock_asks(reg: Registry, ev: "RaidEvent") -> list["FillAsk"]:
+    """Every open pre-lock ask on `ev` (an open raid) given prelock_deadline again, from the event's start, lock time and
+    Auto Lock as they are now — called wherever those change (rc.reschedule: a move, a lock-time edit, Auto Lock On ↔
+    Off), so the ask closes when its card says. → the asks whose deadline changed (the caller saves `ev`)."""
+    if ev.state != "open":
+        return []
+    hard = ev.start - timedelta(hours=float(team_setting(run_team(reg, ev), "cutoff_hard_hours")))
+    deadline = prelock_deadline(reg, ev, hard).isoformat()
+    out = []
+    for a in ev.fill_asks:
+        if a.phase == "prelock" and a.pending and a.expires_at != deadline:
+            a.expires_at = deadline
+            out.append(a)
+    return out
+
+
 def run_team(reg: Registry, ev: "RaidEvent") -> dict:
     """The roster dict a run belongs to; a bare stand-in when the ephemeral roster is gone (cleanup, old files)."""
     if t := reg.config.team(ev.team):
@@ -1950,6 +1970,8 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
                   splits=splits, lock_moved=lock_moved, seating=first_come_now)
     if not save:
         return moved
+    for p in parts:  # an open pre-lock ask's deadline follows the start, the lock time and Auto Lock just set
+        restamp_prelock_asks(reg, p)
     what = [f"moved from {reg.local12(old)} to {reg.local12(new)} by {by}"] if delta else []
     if values:
         what.append(f"own timing set by {by}: " + ", ".join(f"{k} {v}" for k, v in values.items()))

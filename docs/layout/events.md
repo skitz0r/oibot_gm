@@ -106,7 +106,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        the sheet timing, confirm, first_come, weights, split_policy — named_split / split_changes, a raid's run FILE split_strategy;
                        issue 14: auto_lock, auto_lock_fill — stamped at open by ensure_run from the schedule or the one-off's open form, read
                        through auto_lock(reg, ev) / auto_lock_fill(reg, ev), a dict without them True; prelock_deadline(reg, ev, hard) = THE pre-lock
-                       ask deadline (the lock, or the start with Auto Lock off — send_plan stamps it, the DM card reads it); Moved.locks_now only with Auto Lock on);
+                       ask deadline (the lock, or the start with Auto Lock off — send_plan stamps it, the DM card reads it; restamp_prelock_asks(reg, ev) gives every open one it again — rc.reschedule runs it on each part, so a move,
+                       a lock-time edit and Auto Lock On ↔ Off all move it, and reschedule_event re-renders the cards; PRELOCK_STARTED =
+                       send_plan's refusal of a pre-lock ask once the start has passed); Moved.locks_now only with Auto Lock on);
                        AFTER_LOCK (fill_ask_hours, autofill) still change once locked, the rest is refused: TIMING_LOCKED, CONFIRM_LOCKED,
                        AUTO_LOCK_LOCKED, PRIORITY_LOCKED, consequences.STRATEGY_LOCKED; a lock-time change tells who answered (Moved.lock_moved, "<raid> now locks …");
                        run_weights = the run dict's own `weights` (stamped at open by ensure_run / _part_dict: fallback_weights; live_weights only

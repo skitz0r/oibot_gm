@@ -348,3 +348,91 @@ def test_the_one_offs_discord_screen_picks_auto_lock(reg, rs, officer):  # noqa:
     assert [o.default for o in opts] == [True, False, False] and AUTO_LOCK_PICKS["off"][0] is False
     assert [o.default for o in auto_lock_pick(False, False)] == [False, False, True]
 
+
+
+# ---------------------------------------------------------------- fix round 2: the deadline follows the event
+
+def _card(bot, a) -> str:
+    """The ask's DM card as it reads now: its last edit, else as sent."""
+    from test_raid_night import _view_text
+
+    msg = bot.cards[a.dm_message_id]
+    views = [e["view"] for e in msg.edits if e.get("view") is not None]
+    return _view_text(views[-1] if views else msg.payload)
+
+
+def _later(monkeypatch, when):
+    """rc's clock (expire_fill_asks reads datetime.now) set to `when`."""
+    class Later(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return when.astimezone(tz) if tz else when
+    monkeypatch.setattr(rc, "datetime", Later)
+
+
+def _hard(reg, ev):
+    from oibot_gm.raid_views import run_times
+
+    return run_times(reg, ev, rc.run_team(reg, ev))[1]
+
+
+def test_a_move_takes_the_prelock_asks_deadline_and_card_with_it(reg, rs, monkeypatch):
+    bot = NightBot(reg, rs)
+    ev = _short_night(reg, rs)
+    rc.reschedule(reg, rs, ev, timing={"auto_lock": False}, by="o")
+    sent = _ask_all(bot, reg, rs, ev)
+    old = ev.start
+    later = old + timedelta(days=1)
+    run(bot.reschedule_event(reg, rs, ev, start=later, by="o"))
+    assert all(a.expires_at == later.isoformat() for a in sent), "moved later: the deadline is the new start"
+    assert all(f"<t:{int(later.timestamp())}:R>" in _card(bot, a) and f"<t:{int(old.timestamp())}:R>" not in _card(bot, a) for a in sent)
+    _later(monkeypatch, old + timedelta(minutes=5))
+    rc.expire_fill_asks(reg, rs, ev)
+    assert all(a.answer is None for a in sent), "still open after the old start"
+    monkeypatch.undo()
+    earlier = later - timedelta(days=1, hours=2)
+    run(bot.reschedule_event(reg, rs, ev, start=earlier, by="o"))
+    assert all(a.expires_at == earlier.isoformat() and f"<t:{int(earlier.timestamp())}:R>" in _card(bot, a) for a in sent)
+    _later(monkeypatch, earlier + timedelta(minutes=1))
+    rc.expire_fill_asks(reg, rs, ev)
+    assert all(a.answer == "expired" for a in sent), "moved earlier: it closes at the new start"
+
+
+def test_switching_auto_lock_restamps_the_open_prelock_asks(reg, rs):
+    bot = NightBot(reg, rs)
+    ev = _short_night(reg, rs)
+    sent = _ask_all(bot, reg, rs, ev)  # Auto Lock on: the lock time
+    hard = _hard(reg, ev)
+    assert all(a.expires_at == min(hard, ev.start).isoformat() for a in sent)
+    assert all(f"<t:{int(hard.timestamp())}:R>" in _card(bot, a) and "built at lock" in _card(bot, a) for a in sent), \
+        "with Auto Lock on the card names the lock, when the ask really closes"
+    run(bot.reschedule_event(reg, rs, ev, timing={"auto_lock": False}, by="o"))
+    assert all(a.expires_at == ev.start.isoformat() for a in sent), "switched off: they run to the start"
+    assert all("No answer by the start" in _card(bot, a) and f"<t:{int(ev.start.timestamp())}:R>" in _card(bot, a) for a in sent)
+    run(bot.reschedule_event(reg, rs, ev, timing={"auto_lock": True}, by="o"))
+    assert all(a.expires_at == min(hard, ev.start).isoformat() for a in sent), "switched on: they close at the lock"
+    assert all("built at lock" in _card(bot, a) and f"<t:{int(hard.timestamp())}:R>" in _card(bot, a) for a in sent)
+    run(bot.reschedule_event(reg, rs, ev, timing={"lock_hours_before": 6}, by="o"))  # a lock-time edit: the live lock time
+    hard6 = _hard(reg, ev)
+    assert hard6 != hard and all(a.expires_at == min(hard6, ev.start).isoformat() for a in sent)
+    assert all(f"<t:{int(hard6.timestamp())}:R>" in _card(bot, a) for a in sent)
+
+
+def test_no_prelock_ask_goes_out_after_the_start(reg, rs, web_bot):  # noqa: F811
+    import pytest
+
+    from oibot_gm.registry import RegistryError
+
+    bot = web_bot.bot
+    ev = _short_night(reg, rs)
+    rc.reschedule(reg, rs, ev, timing={"auto_lock": False}, by="o")
+    ev.starts_at = (reg.now_local() - timedelta(minutes=10)).isoformat()  # still open past its start: nobody locked it
+    rs.save(ev, "started")
+    rev = rc.role_plan(reg, rs, ev).rev
+    with pytest.raises(RegistryError, match="already started"):  # every surface's send: RaidMixin.send_plan
+        run(bot.send_plan(reg, rs, ev, rev=rev, by="Jon"))
+    r = web_bot.c.post(f"/api/run/{ev.key}/fill", json={"rev": rev}, headers=H())  # the site, and MCP fill_seats over it
+    assert r.status_code == 400 and r.json()["error"] == rc.PRELOCK_STARTED
+    with pytest.raises(RegistryError, match="already started"):  # plain text's send
+        run(configops.apply_async(reg, ConfigOp(op="run_fill", target=ev.key, value="send"), "Jon", True, bot=bot, rev=rev))
+    assert not ev.fill_asks and not bot.cards, "no DM goes out"
