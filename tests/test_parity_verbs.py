@@ -175,8 +175,8 @@ def test_after_lock_the_board_is_the_roster(reg, rs):
     names = [m.display_name for m in ms]
     lock_with_board(reg, rs, ev, names[:5])
     line = run(bot.save_board(reg, rs, ev, [names[:4] + [names[5]]], by="Officer"))
-    assert f"asked {names[5]} to confirm" in line and f"freed {names[4]}" in line
-    assert ev.seat_of(names[5]) and not ev.seat_of(names[4])
+    assert line == f"{names[5]} is rostered now. {names[4]} is off the roster now."  # the quiet path (2026-11-27)
+    assert ev.seat_of(names[5]) and not ev.seat_of(names[4]) and bot.dms == {}
 
 
 # ---------------------------------------------------------------- call_out

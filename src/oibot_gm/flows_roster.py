@@ -930,7 +930,7 @@ class SetWizard(OfficerWizard):
     box (Wizard.decide_box over consequences.member_action_box, the site's row ⋮ box: who is told, and how — a notice,
     their open card edited, never a DM); a callout's note on its "with a note" button. The box's fp covers the member's
     state, so an answer changed since the screen was drawn is a fresh box under CONFIRM_WORDS["changed"]; what the write
-    would refuse (rc.SPEC_SEATED, no longer applies) is the refusal box, Back alone. Every write is
+    would refuse (a spec the character doesn't play, no longer applies) is the refusal box, Back alone. Every write is
     inbox.do_member_action → the verbs every surface shares."""
 
     def __init__(self, reg: Registry, rs, owner_id: int, member_id: int, what: str | None = None):
@@ -1081,13 +1081,13 @@ class SetWizard(OfficerWizard):
         await self.raid_step(interaction)
 
     def raid_parts(self) -> list:
-        """The raids a Join with a spec may be switched for alone (issue 15): an event of several raids before the lock,
-        each open raid they play (rc.raid_switch_refusal with the Join this press records: someone on Bench or with no
+        """The raids a Join with a spec may be switched for alone (issue 15): an event of several raids, open or locked
+        (2026-11-27), each raid they play (rc.raid_switch_refusal with the Join this press records: someone on Bench or with no
         answer joins AND is switched) where they would play something else — [] = no choice."""
         from . import raidcycle as rc
 
         m, ev = self.member(), self.run()
-        if m is None or ev is None or self.draft["action"] != "join" or ev.state != "open" or not rc.multi_raid(self.rs, ev):
+        if m is None or ev is None or self.draft["action"] != "join" or ev.state not in ("open", "locked") or not rc.multi_raid(self.rs, ev):
             return []
         first = rc.first_part(self.rs, ev)
         parts = [p for p in rc.event_parts(self.rs, first) if rc.raid_switch_refusal(self.reg, self.rs, p, m, status="in") is None]

@@ -75,7 +75,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        own switch it replaces: action_lines(replaces=)) = THE box of whatever an officer records for
                        someone (/raid set's SetWizard, POST /api/admin/action's preview / seen, the row ⋮ menu): action_lines under
                        MEMBER_ACTION_WORDS' title naming them + verb (answers keep "Answer for someone" / "Record answer"), never red;
-                       raises RegistryError for what the write refuses (no_longer_applies, a spec not played, rc.seated_switch_refusal);
+                       raises RegistryError for what the write refuses (no_longer_applies, a spec not played); after the lock an answer for
+                       someone is the quiet path (inbox.action_lines: QUIET_TOLD "Nobody gets a DM.", Join → "waits in Not rostered");
                        a seated Play another character of another role says the move first (inbox.action_lines), undo_box / undo_box_for (9),
                        the board's consequence("swap") after the lock (10), open_now_box (11) + open_box_for(reg, rid, p, here=) = THE box 11 from
                        rc.open_preview (/raid open and both open routes; rev = the occurrence; the later raids keep their own `starts`, as
@@ -84,6 +85,11 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        schedule_create_box / schedule_save_box / schedule_pause_box / schedule_resume_box / schedule_remove_box (13–17; 14 says
                        "keeps its timing" only for a time setting, "keeps its lineup" for lineup / rosters), regular_remove_box (18), raid_save_box
                        (19, open_events_of_raid), leave_box / leave_unsaved_sentence / LEAVE_TEMPLATE (20, /api/meta.leave); + raid_reset_box,
+                       the board after the lock (2026-11-27, the quiet path): _board / _release say what changes, QUIET_TOLD, QUIET_UNDO ("Undo
+                       puts the roster back as it was."), _off_word = the list someone taken off waits in; UNDO_LOCKED + undo_box_for's locked
+                       branch (the officer's one-step Undo); CLEAR_LOCKED / STRATEGY_LOCKED / PROPOSE_LOCKED name Unlock; switch_box(locked,
+                       swap) = Switch at once for someone rostered, Ask for someone not; raid_switch_box on a locked raid tells nobody; every
+                       switch's way back SWITCH_BACK_OWN / SWITCH_BACK_THEM ("until the event starts");
                        strategy_box (More › Split strategy, fp = rc.board_rev + the split the raid has now) and strategy_refusal = STRATEGY_LOCKED
                        after the lock on EVERY surface (the route, MCP, plain text's run_strategy in the diff and at apply); the final fix wave's
                        remind_box (POST /api/run/{key}/remind), unlock_box(reg, ev, rs) (issue 14: S1 open signup with the rosters on the board —

@@ -148,7 +148,7 @@ def action_lines(reg: Registry, ev, m: Member, key: str, character: str | None =
                  by_id: int | None = None, replaces=()) -> list[str]:
     """action_consequence's sentences as a list (the confirmation box, consequences.answer_box). `replaces` (a Join with
     a spec before the lock): the raids whose own switch for them this whole-event switch replaces — the last sentence."""
-    from .consequences import CONFIRM_DM
+    from .consequences import QUIET_TOLD
 
     name, run = m.display_name, rc.run_on(reg, ev)
     locked = ev.state == "locked"
@@ -156,7 +156,9 @@ def action_lines(reg: Registry, ev, m: Member, key: str, character: str | None =
     s = ev.signups.get(str(m.discord_id))
     char = character or (s.character if s else (m.main.label if m.main else "their main"))
     own = by_id is not None and int(by_id) == m.discord_id
-    told = [] if own else [_told(reg, ev, m, _has_card(reg, ev, m, key))]
+    # an officer's answer for someone after the lock is the quiet path (2026-11-27): no notice, no DM, no ask
+    quiet = locked and key in ("join", "bench", "no_thanks")
+    told = [] if own else [QUIET_TOLD] if quiet else [_told(reg, ev, m, _has_card(reg, ev, m, key))]
 
     def say(*lines: str) -> list[str]:
         return [*lines, *told]
@@ -167,7 +169,7 @@ def action_lines(reg: Registry, ev, m: Member, key: str, character: str | None =
         return say(f"{name} goes to No thanks for {run}.", "The bot records a callout and how late it came.")
     if key == "no_thanks":
         if locked and seated:
-            return say(f"{name} goes to No thanks for {run} and loses their seat.", rc.refill_sentence(reg, ev).removesuffix(".") + ", and no callout is recorded.")
+            return say(f"{name} goes to No thanks for {run} and loses their seat.", "No callout is recorded.")
         return say(f"{name} goes to No thanks for {run}.", "No callout is recorded.")
     if key == "join":
         if not locked:
@@ -180,23 +182,18 @@ def action_lines(reg: Registry, ev, m: Member, key: str, character: str | None =
             if own:
                 return [f"{name} is marked as joined, playing {plays}.", gone or "You can change the answer until the lock."]
             return [f"{name} is marked as joined, playing {plays}.", "They get a notice.", gone or "They can change the answer themselves."]
-        if seated:
+        if seated:  # the seat follows their answer at once (RaidMixin.set_answer → rc.reseat_parts)
             seat = ev.seat_of(m)[1]
             c = next((c for c in m.active() if c.label == char), None)
             plays = spec or (s.spec if s and s.character == char else c.spec if c else None)
             role = reg.profile.spec(c.cls, plays).role if c and plays else seat.role
-            if role != seat.role:  # Play another character of another role: the seat follows it, said first
-                return say(f"{name} plays {char} and moves from {seat.role} to {role} on the roster.")
+            if role != seat.role:  # another role: the seat follows it, said first
+                return say(f"{name} plays {char if not spec else plays} and moves from {seat.role} to {role} on the roster.")
+            if spec and spec != seat.spec:
+                return say(f"{name}'s seat on {run} plays {spec} now.")
             return say(f"{name} plays {char} on {run} and keeps their seat.")
-        free = any(len(r.selected) < rc.run_size(reg, ev) for r in ev.all_rosters)
-        if not free:
-            return say(f"{name} joins {run} as {char}.", "Every seat is taken, so an officer can move them in on the board.")
-        if not rc.run_confirms(reg, ev):
-            return say(f"{name} is rostered on {run} as {char}.", rc.no_confirm_sentence(reg, ev, "they aren't asked to confirm"))
-        if not rc.reachable(m):  # DMs off: the confirmation waits on the Me page (confirm_one's channel "web")
-            return [f"{name} is rostered on {run} as {char}.", "With DMs off, they confirm on their Me page."]
-        # DMs on: a seat taken means confirm_one sends the Confirm / Can't card — an ask they must act on, so say so
-        return [f"{name} is rostered on {run} as {char}.", f"They get {CONFIRM_DM}."]
+        # not rostered: their answer is recorded and they wait in Not rostered — an officer places them on the board
+        return [f"{name} joins {run} as {char} and waits in {rc.BANK_WORDS['locked']}.", *told, "You can put them on the roster from the board."]
     if key == "bench":
         if seated:
             return say(f"{name} goes to Bench for {run}.", "They stay rostered until set to No thanks.")
@@ -265,6 +262,9 @@ async def do_member_action(bot, reg: Registry, rs, ev, m: Member, key: str, *, c
 
 # ---------------------------------------------------------------- pins (D16): ONE write for every surface
 
+PIN_LOCKED = "The roster is already locked, and a pin only shapes the lock."
+
+
 def pin_write(reg: Registry, rs, ev, m: Member, pin: str | None, by: str) -> str:
     """THE pin write: rc.set_pin (the log line) + one save. `pin` = "in" | "out" | None (clear). Refuses someone who
     isn't on the sheet. Offline callers (plain text's `apply` with no bot) stop here; everyone else calls `pin_member`,
@@ -272,6 +272,8 @@ def pin_write(reg: Registry, rs, ev, m: Member, pin: str | None, by: str) -> str
     s = ev.signups.get(str(m.discord_id))
     if s is None:
         raise RegistryError(f"{m.display_name} isn't on this sheet")
+    if ev.state != "open":  # pins are read only by the lock (rc.lock_forces): after it they would change nothing
+        raise RegistryError(PIN_LOCKED)
     try:
         rc.set_pin(ev, m.discord_id, pin)  # by id: ids decide who is written, names are for reading
     except ValueError as e:

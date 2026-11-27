@@ -279,16 +279,16 @@ def test_the_box_sentences(reg, rs):
     b = cq.raid_switch_box(reg, rs, fev, nyx, "Nyx", "Holy")
     assert b["title"] == "Switch Nyx to Holy for Barrow Deeps?" and b["verb"] == "Switch"
     assert b["sentences"] == ["Nyx plays Holy for Barrow Deeps and stays Shadow for Hyjal Summit.",
-                              "They get a notice, and nobody gets a DM.", "You can switch them back until the lock."]
+                              "They get a notice, and nobody gets a DM.", "You can switch them back until the event starts."]
     own = cq.raid_switch_box(reg, rs, fev, nyx, "Nyx", "Holy", own=True)
-    assert own["sentences"] == ["You play Holy for Barrow Deeps and stay Shadow for Hyjal Summit.", "You can switch back until the lock."]
+    assert own["sentences"] == ["You play Holy for Barrow Deeps and stay Shadow for Hyjal Summit.", "You can switch back until the event starts."]
     alt = cq.raid_switch_box(reg, rs, fev, nyx, "Nyxpal", "Holy")
     assert alt["sentences"][0] == "Nyx plays Nyxpal, Holy for Barrow Deeps and stays Nyx, Shadow for Hyjal Summit."
     rc.set_raid_switch(reg, rs, fev, nyx, "Nyx", "Holy", by="Jon")
     back = cq.raid_switch_box(reg, rs, rs.events[fev.key], nyx, "Nyx", "Shadow")
     assert back["title"] == "Switch Nyx back to Shadow for Barrow Deeps?"
     assert back["sentences"] == ["Nyx plays Shadow again for Barrow Deeps, as they answered.", "They get a notice, and nobody gets a DM.",
-                                 "You can switch them again until the lock."]
+                                 "You can switch them again until the event starts."]
     with pytest.raises(RegistryError, match="already plays Holy for Barrow Deeps"):
         cq.raid_switch_box(reg, rs, rs.events[fev.key], nyx, "Nyx", "Holy")
     # the whole-event box says it replaces the switch for that raid
@@ -563,7 +563,7 @@ def test_a_bench_member_joins_and_is_switched_for_one_raid_on_every_surface(reg,
     rc.set_signup(reg, rs, rs.events[lead.key], nyx, None, "sub", source="test")
     b = cq.raid_switch_box(reg, rs, rs.events[fev.key], nyx, "Nyx", "Holy", status="in")
     assert b["sentences"] == ["Nyx joins as Shadow and plays Holy for Barrow Deeps.", "They get a notice, and nobody gets a DM.",
-                              "You can change both until the lock."]
+                              "You can change both until the event starts."]
     assert b["title"] == "Answer for Nyx and switch them to Holy for Barrow Deeps?"
     # the site / MCP route
     r = web_bot.c.post(f"/api/run/{lead.key}/set", json={"member": "Nyx", "status": "in", "spec": "Holy", "raid": "Barrow Deeps"}, headers=H())

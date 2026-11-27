@@ -106,15 +106,16 @@ def install_me_api(app: FastAPI, bot, *, who, body, find_live, resolve_member) -
     @app.post("/api/me/run/{key}/answer")
     async def me_answer(request: Request, key: str):
         """My own Join / Bench / No thanks on a sheet {status in|sub|out, character?}: RaidMixin.set_answer as myself (the
-        sheet button's verb). After lock a Join / Bench of my own is refused like the sheet refuses it (rc.LOCKED_JOIN).
-        Two devices: the last press wins and each reply is the receipt of the state at that moment."""
+        sheet button's verb). After lock every answer of my own is refused like the sheet refuses it (rc.LOCKED_JOIN,
+        2026-11-27: No thanks too) — my way out is Can't make it (POST /api/me/run/{key}/out). Two devices: the last
+        press wins and each reply is the receipt of the state at that moment."""
         v, d = await body(request)
         m = me_of(v)
         rs, ev = run_of(v, key)
         status = d.get("status")
         if status not in rc.STATUSES:
             return JSONResponse({"error": f"status must be one of {', '.join(rc.STATUSES)}"}, status_code=400)
-        if ev.state != "open" and status in ("in", "sub"):
+        if ev.state == "locked":
             return JSONResponse({"error": rc.LOCKED_JOIN}, status_code=400)
         try:
             line = await bot.set_answer(v.reg, rs, ev, m, status, (d.get("character") or None), m.display_name, by_id=v.uid)

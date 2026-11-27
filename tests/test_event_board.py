@@ -418,7 +418,7 @@ def test_no_autofill_starts_while_a_lock_solves(reg, rs):
     asyncio.run(go())
 
 
-def test_the_route_answers_at_once_and_refuses_a_locked_raid(reg, rs, monkeypatch, web_bot):
+def test_the_route_answers_at_once_and_refuses_a_locked_raid_with_nobody_to_place(reg, rs, monkeypatch, web_bot):
     from conftest import lock_with_board
 
     monkeypatch.setattr(rc, "_solve_run", in_order())
@@ -428,9 +428,11 @@ def test_the_route_answers_at_once_and_refuses_a_locked_raid(reg, rs, monkeypatc
     assert r.status_code == 200 and r.json()["message"] == PAGE_WORDS["autofill_done"] and ev.auto_placed, r.text
     r = web_bot.c.post(f"/api/run/{ev.key}/autofill", json={}, headers=H())
     assert r.status_code == 200 and r.json()["message"] == PAGE_WORDS["autofill_working"], "answered at once: the page shows the working words"
-    lock_with_board(reg, rs, ev, [s.display_name for s in ev.by_status("in")][:10])
-    r = web_bot.c.post(f"/api/run/{ev.key}/autofill", json={}, headers=H())
-    assert r.status_code == 400 and r.json()["error"] == PAGE_WORDS["autofill_locked"]
+    ev.auto_placed, ev.layout = [], None
+    lock_with_board(reg, rs, ev, [s.display_name for s in ev.by_status("in")])  # everyone rostered (2026-11-27: Auto-fill
+    r = web_bot.c.post(f"/api/run/{ev.key}/autofill", json={}, headers=H())  # works after the lock, on open seats only)
+    want = PAGE_WORDS["autofill_full"] if not rc.open_seat_count(reg, ev) else PAGE_WORDS["autofill_nobody_off"]
+    assert r.status_code == 400 and r.json()["error"] == want
 
 
 def test_autofill_with_nobody_joined_is_refused(reg, rs, web_bot):
@@ -505,7 +507,8 @@ def test_a_locked_event_draws_its_roster_and_never_solves(reg, rs, monkeypatch, 
     lock_with_board(reg, rs, ev, names)
     part = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()["parts"][0]
     assert part["board_state"] == "locked" and calls == [] and part["mine"] == [] and part["undo_box"] is None
-    assert part["autofill"] is None
+    assert part["autofill"] == {"working": False, "words": None, "failed": False}, "the officers keep Auto-fill groups after the lock"
+    assert part["footer"] == PAGE_WORDS["board_footer_locked"]
     assert sorted(n["display_name"] for r in part["sheet"]["board"]["rosters"] for g in r["groups"] for n in g) == sorted(names)
 
 
@@ -523,7 +526,7 @@ def test_a_locked_raid_counts_seats_and_undo_says_why_it_is_greyed(reg, rs, web_
     rc.set_signup(reg, rs, bd, ms[9], None, "sub", source="test")  # the lock seats someone from the Bench
     lock_with_board(reg, rs, bd, [s.display_name for s in bd.by_status("in")] + [bd.signups[str(ms[9].discord_id)].display_name])
     locked = web_bot.c.get(f"/api/event/{bd.key}", headers=H()).json()["parts"][0]
-    assert locked["placed_words"] is None and locked["undo_why"] is None
+    assert locked["placed_words"] is None and locked["undo_why"] == PAGE_WORDS["no_undo_locked"]
     assert locked["rostered_words"] == PAGE_WORDS["seats_of"].format(n=10, size=10)
 
 

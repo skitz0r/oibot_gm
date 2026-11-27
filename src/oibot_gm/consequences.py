@@ -1154,19 +1154,7 @@ def _clear(reg: Registry, ev: rc.RaidEvent) -> list[str]:
         if not on:
             return ["The board is already empty."]
         return [back_sentence(ev, on, "on the board"), "Nothing is sent before the lock."]
-    rostered = len(ev.seated())
-    if not rostered:
-        return ["The roster is already empty."]
-    where = "their Confirm card and their Me page" if rc.run_confirms(reg, ev) else "their Me page"
-    return [f"All {rostered} seats are released." if rostered > 1 else "The one seat is released.",
-            f"The {rostered} rostered see it on {where}." if rostered > 1 else f"Its holder sees it on {where}.",
-            rc.refill_sentence(reg, ev, "them" if rostered > 1 else "it")]
-
-
-def _seen(reg: Registry, ev: rc.RaidEvent) -> str:
-    """Where a member whose seat is released sees it (the DM rule: never a DM): their Confirm card is edited when the run
-    asks for confirmations (RaidMixin.seat_released), and the site's notice either way (rc.seat_gone)."""
-    return "their card and their Me page" if rc.run_confirms(reg, ev) else "their Me page"
+    return [CLEAR_LOCKED]  # clearing a published roster is Unlock's job (2026-11-27)
 
 
 def _release(reg: Registry, ev: rc.RaidEvent, name: str | None) -> list[str]:
@@ -1174,12 +1162,23 @@ def _release(reg: Registry, ev: rc.RaidEvent, name: str | None) -> list[str]:
         return closed
     if ev.state == "open":
         return [f"{name} comes off the board." if name else "The seat comes off the board.", "Nothing is sent before the lock."]
+    # after the lock: the quiet path (rc.apply_layout_locked) — their answer stays, so they wait in the list it names
     if name:
-        return [f"{name}'s seat is released.", f"They see it on {_seen(reg, ev)}.", rc.refill_sentence(reg, ev)]
-    return ["The seat is released.", f"Whoever held it sees it on {_seen(reg, ev)}.", rc.refill_sentence(reg, ev)]
+        return [f"{name} comes off the roster and waits in {_off_word(ev, name)}.", QUIET_TOLD, QUIET_UNDO]
+    return ["The seat comes off the roster, and its holder keeps their answer.", QUIET_TOLD, QUIET_UNDO]
 
 
 BEFORE_LOCK = "Nothing is sent before the lock."
+# an officer's edit of a locked roster (the quiet path, 2026-11-27): who is told, and the way back
+QUIET_TOLD = "Nobody gets a DM."
+QUIET_UNDO = "Undo puts the roster back as it was."
+
+
+def _off_word(ev: rc.RaidEvent, name: str) -> str:
+    """The list someone taken off a locked roster waits in: Bench for a Bench answer, else Not rostered. A name token
+    (consequences_json's OTHER_TOKEN) is no Bench answer: the board fills it for a joiner."""
+    sg = rc.signup_by_name(ev, name)
+    return rc.BANK_WORDS["bench"] if sg is not None and sg.status == "sub" else rc.BANK_WORDS["locked"]
 
 
 def _bank_word(ev: rc.RaidEvent, name: str) -> str:
@@ -1191,9 +1190,9 @@ def _bank_word(ev: rc.RaidEvent, name: str) -> str:
 
 def _board(verb: str, reg: Registry, ev: rc.RaidEvent, name: str, other: str, to: str) -> list[str]:
     """One move on the board (RaidMixin.board_move — a drag or Move to…). Before the lock the board is only the layout the
-    lock will use: nobody is told. After it the board IS the roster (rc.apply_layout_locked): moving between groups is
-    free, someone brought in from Not rostered is asked to confirm (confirm_one) and someone whose seat goes is released
-    (free_seat → their card edited and a notice — never a DM)."""
+    lock will use: nobody is told. After it the board IS the roster, edited through the quiet path
+    (rc.apply_layout_locked, 2026-11-27): nobody is asked to confirm, DMed or sent a notice; someone taken off keeps
+    their answer and waits in Not rostered or Bench; Undo puts it back."""
     if (closed := _closed(ev)):
         return closed
     if ev.state == "open":
@@ -1202,21 +1201,13 @@ def _board(verb: str, reg: Registry, ev: rc.RaidEvent, name: str, other: str, to
                 "swap": [f"{name} and {other} swap places.", BEFORE_LOCK],
                 "substitute": [f"{name} takes {other}'s place in {to}.", f"{other} goes back to {_bank_word(ev, other)}.", BEFORE_LOCK]}[verb]
     if verb == "move":
-        return [f"{name} moves to {to} and stays rostered.", "Nobody is told."]
+        return [f"{name} moves to {to} and stays rostered.", QUIET_TOLD, QUIET_UNDO]
     if verb == "swap":
-        return [f"{name} and {other} swap seats.", "Both see the change on the roster card.", "You can swap them back."]
-    confirms = rc.run_confirms(reg, ev)
+        return [f"{name} and {other} swap seats.", QUIET_TOLD, QUIET_UNDO]
     if verb == "roster":
-        if not confirms:
-            return [f"{name} takes an open seat in {to}.", rc.no_confirm_sentence(reg, ev, "the seat is theirs now")]
-        return [f"{name} takes an open seat in {to} and gets {CONFIRM_DM}.", "With DMs off it waits on their Me page.",
-                "The seat is theirs once they say yes."]
-    # substitute: the seat goes straight to the newcomer, so the bench is not asked for it
-    if not confirms:
-        return [f"{name} takes {other}'s seat in {to}.", "On a one-off event they aren't asked to confirm." if rc.run_kind(reg, ev) == "adhoc"
-                else "On this event they aren't asked to confirm.", f"{other} sees the seat was released on {_seen(reg, ev)}."]
-    return [f"{name} takes {other}'s seat in {to} and gets {CONFIRM_DM}.", "With DMs off it waits on their Me page.",
-            f"{other} sees the seat was released on {_seen(reg, ev)}."]
+        return [f"{name} takes an open seat in {to}.", QUIET_TOLD, QUIET_UNDO]
+    # substitute: the seat goes straight to the newcomer; the one it was taken from keeps their answer
+    return [f"{name} takes {other}'s seat in {to}, and {other} waits in {_off_word(ev, other)}.", QUIET_TOLD, QUIET_UNDO]
 
 
 def _remind(reg: Registry, ev: rc.RaidEvent) -> list[str]:
@@ -1334,7 +1325,8 @@ STRATEGY_DOES = {"balanced": "The rosters of {raid} are made equally strong.",
                  "rotation": "Whoever sat out or played the weaker roster last time moves up on {raid}."}
 STRATEGY_PICK = "Pick how the rosters of {raid} are split."
 STRATEGY_SAME = "That is already how {raid} is split."
-STRATEGY_LOCKED = "The roster is locked, so its split can't change."
+STRATEGY_LOCKED = "The roster is locked, so Unlock the event first to change its split."
+PROPOSE_LOCKED = "The roster is locked, so Unlock the event first to propose another roster."  # POST /split, plain text's run_propose
 STRATEGY_AFTER = ["Auto-fill groups and the lock split it this way from now on.", "You can change it until the lock."]
 
 
@@ -1529,16 +1521,24 @@ def undo_box(n: int, rev: str = "", bench: int = 0) -> dict:
     return box("Undo your moves?", [head, back], "Undo moves", rev=rev)
 
 
+UNDO_LOCKED = ["The roster goes back to how it was before your last change.", QUIET_TOLD]
+
+
 def undo_box_for(reg: Registry, ev: rc.RaidEvent, viewer: int | None) -> dict | None:
     """Box 9 for officer `viewer` on raid `ev`'s board: the count is THEIR moves as the server records them
-    (rc.own_moves), the fingerprint the board and those moves (rc.undo_rev). None when they have none."""
+    (rc.own_moves), the fingerprint the board and those moves (rc.undo_rev). None when they have none. On a locked
+    roster: their one-step Undo (rc.undo_record — the roster as it was before their last edit, nobody told)."""
+    if ev.state == "locked":
+        if rc.undo_record(reg, ev, viewer) is None:
+            return None
+        return box("Undo your last change?", list(UNDO_LOCKED), "Undo", rev=rc.undo_rev(reg, ev, viewer))
     mine = rc.own_moves(ev, viewer)
     bench = {s.display_name for s in ev.by_status("sub")}
     n = len(mine)
     return undo_box(n, rev=rc.undo_rev(reg, ev, viewer), bench=sum(1 for x in mine if x in bench)) if n else None
 
 
-CLEAR_LOCKED = "The roster is locked, so the board is the roster now and can't be cleared."
+CLEAR_LOCKED = "The roster is locked, so Unlock the event first to clear the board."
 CLEAR_EMPTY = "Nobody is placed on the board, so there is nothing to clear."
 CLEARED = "The board is clear, so nobody is placed in a group now."  # the Clear the board route's answer
 
@@ -1576,10 +1576,15 @@ def switch_box(reg: Registry, ev: rc.RaidEvent, m, character: str | None, spec: 
     raid alone stands (rc.raid_switches_of) — the whole-event switch replaces it, and the last sentence says so."""
     name = m.display_name
     where = rc.join_words([_raid(reg, r) for r in raids]) or _raid(reg, ev.instance)
-    if locked:
+    if locked and swap:  # after the lock a rostered person's switch is applied to their seat at once (2026-11-27)
+        seat = ev.seat_of(m) if ev.state == "locked" else None
+        was = seat[1].spec if seat else None
+        plays = f"{character}, {spec}" if seat and character and character != seat[1].character else spec
+        head = f"{name}'s seat plays {plays} for {where}, not {was}." if was and was != spec else f"{name}'s seat plays {plays} for {where}."
+        return box(f"Switch {name} to {spec}?", [head, QUIET_TOLD, SWITCH_BACK_THEM], "Switch", rev=rev)
+    if locked:  # someone not rostered: an offer of an open seat, as Fill seats sends one
         told = "They get a DM with Yes and No." if rc.reachable(m) else "It waits on their Me page."
         return box(f"Ask {name} to play {spec}?", [f"{name} is asked to play {spec} for {where}.", told,
-                                                  "Their seat changes only when they say yes." if swap else
                                                   "They take a seat only when they say yes."], "Ask", rev=rev)
     sg = ev.signups.get(str(m.discord_id))
     old_char = sg.character if sg else (m.main.label if m.main else None)
@@ -1593,13 +1598,13 @@ def switch_box(reg: Registry, ev: rc.RaidEvent, m, character: str | None, spec: 
             head = f"You play {spec} for {where}, not {old_spec}."
         else:
             head = f"You play {plays} for {where}."
-        tail = f"This replaces your switch for {rc.join_words([_raid(reg, r) for r in replaces])}." if replaces else "You can switch back until the lock."
+        tail = f"This replaces your switch for {rc.join_words([_raid(reg, r) for r in replaces])}." if replaces else SWITCH_BACK_OWN
         return box(f"Switch to {spec}?", [head, tail], "Switch", rev=rev)
     if character and old_char and character != old_char:
         head = f"{name} plays {character}, {spec} for {where}."
     else:
         head = f"{name} plays {spec} for {where}, not {old_spec}." if old_spec and old_spec != spec else f"{name} plays {spec} for {where}."
-    tail = f"This replaces their switch for {rc.join_words([_raid(reg, r) for r in replaces])}." if replaces else "You can switch them back until the lock."
+    tail = f"This replaces their switch for {rc.join_words([_raid(reg, r) for r in replaces])}." if replaces else SWITCH_BACK_THEM
     return box(f"Switch {name} to {spec}?", [head, "They get a notice.", tail], "Switch", rev=rev)
 
 
@@ -1613,6 +1618,7 @@ def raid_switch_box(reg: Registry, rs, part: rc.RaidEvent, m, character: str, sp
     if why:
         raise RegistryError(why)
     raid = _raid(reg, part.instance)
+    told = QUIET_TOLD if part.state == "locked" else RAID_SWITCH_TOLD  # after the lock nobody is told (2026-11-27)
     was = rc.first_part(rs, part).signups.get(str(m.discord_id))
     if status in ("in", "sub") and (was is None or was.status != status):
         # the press records their answer too (RaidMixin.set_raid_switch's `status`): both said in the first sentence
@@ -1624,28 +1630,28 @@ def raid_switch_box(reg: Registry, rs, part: rc.RaidEvent, m, character: str, sp
         if own:
             verb = "join" if status == "in" else "go to Bench"
             head = f"You {verb} as {ans}." if (joined, aspec) == (character, spec) else f"You {verb} as {ans} and play {plays} for {raid}."
-            return box(f"Answer and switch to {spec} for {raid}?", [head, "You can change both until the lock."], "Switch", rev=rev)
+            return box(f"Answer and switch to {spec} for {raid}?", [head, "You can change both until the event starts."], "Switch", rev=rev)
         verb = "joins" if status == "in" else "goes to Bench"
         head = (f"{m.display_name} {verb} as {ans}." if (joined, aspec) == (character, spec)
                 else f"{m.display_name} {verb} as {ans} and plays {plays} for {raid}.")
         return box(f"Answer for {m.display_name} and switch them to {spec} for {raid}?",
-                   [head, RAID_SWITCH_TOLD, "You can change both until the lock."], "Switch", rev=rev)
+                   [head, told, "You can change both until the event starts."], "Switch", rev=rev)
     sg = part.signups[str(m.discord_id)]
-    now = rc.plays_in(reg, part, sg)
+    now = rc.plays_now(reg, part, sg)
     if (now.character, now.spec) == (character, spec):
         raise RegistryError(rc.RAID_SWITCH_SAME.format(name=m.display_name, plays=rc._plays_words(character, spec, sg.character), raid=raid))
     name = "You" if own else m.display_name
     if (character, spec) == (sg.character, sg.spec):
         head = f"{name} play{'' if own else 's'} {spec} again for {raid}, as {'you' if own else 'they'} answered."
-        undo = "You can switch again until the lock." if own else "You can switch them again until the lock."
+        undo = "You can switch again until the event starts." if own else "You can switch them again until the event starts."
         title = f"Switch back to {spec} for {raid}?" if own else f"Switch {m.display_name} back to {spec} for {raid}?"
-        return box(title, [head] + ([] if own else [RAID_SWITCH_TOLD]) + [undo], "Switch", rev=rev)
+        return box(title, [head] + ([] if own else [told]) + [undo], "Switch", rev=rev)
     other = character != sg.character
     plays = f"{character}, {spec}" if other else spec
     stays = f"{sg.character}, {sg.spec}" if other else sg.spec
     # the other raids they play as they answered (another raid's own switch is that raid's)
     rest = [_raid(reg, p.instance) for p in rc.event_parts(rs, rc.first_part(rs, part))
-            if p.key != part.key and p.state == "open" and (x := p.signups.get(str(m.discord_id))) is not None
+            if p.key != part.key and p.state in ("open", "locked") and (x := p.signups.get(str(m.discord_id))) is not None
             and x.status in ("in", "sub") and x.display_name not in p.switched]
     verb, stay = ("play", "stay") if own else ("plays", "stays")
     head = f"{name} {verb} {plays} for {raid}."
@@ -1654,11 +1660,14 @@ def raid_switch_box(reg: Registry, rs, part: rc.RaidEvent, m, character: str, sp
         if len(head.split()) > 20:
             head = f"{name} {verb} {plays} for {raid} and {stay} {stays} for the other raids."
     title = f"Switch to {spec} for {raid}?" if own else f"Switch {m.display_name} to {spec} for {raid}?"
-    undo = "You can switch back until the lock." if own else "You can switch them back until the lock."
-    return box(title, [head] + ([] if own else [RAID_SWITCH_TOLD]) + [undo], "Switch", rev=rev)
+    undo = SWITCH_BACK_OWN if own else SWITCH_BACK_THEM
+    return box(title, [head] + ([] if own else [told]) + [undo], "Switch", rev=rev)
 
 
 RAID_SWITCH_TOLD = "They get a notice, and nobody gets a DM."
+# a role switch's way back (2026-11-27: officers may switch after the lock too, so it lasts until the event starts)
+SWITCH_BACK_OWN = "You can switch back until the event starts."
+SWITCH_BACK_THEM = "You can switch them back until the event starts."
 
 
 # what an officer records for someone (rc.member_actions' keys) → (title, verb); the three answers are box 8's own words
@@ -1679,8 +1688,8 @@ def member_action_box(reg: Registry, ev: rc.RaidEvent, m, key: str, character: s
     Answer for someone, POST /api/admin/action's preview / seen): inbox.action_lines' sentences under a title naming the
     person and the action's verb (MEMBER_ACTION_WORDS; the answers keep box 8's "Answer for someone" / "Record answer").
     Never red: each can be answered again. Raises RegistryError for what the write would refuse — an action that no
-    longer applies (inbox.no_longer_applies), a character they don't have, a spec it doesn't play (rc.spec_role), a spec
-    of another role on a seat of the locked roster (rc.seated_switch_refusal) — so every surface prints that refusal box."""
+    longer applies (inbox.no_longer_applies), a character they don't have, a spec it doesn't play (rc.spec_role) — so
+    every surface prints that refusal box."""
     from .inbox import action_lines, no_longer_applies
 
     if key not in {a["key"] for a in rc.member_actions(reg, ev, m)}:
@@ -1692,12 +1701,9 @@ def member_action_box(reg: Registry, ev: rc.RaidEvent, m, key: str, character: s
         if c is None:
             raise RegistryError(f"{m.display_name} has no character named {label}.")
         rc.spec_role(reg, c, spec)
-        refused = rc.seated_switch_refusal(reg, ev, m, c, spec)
-        if refused:
-            raise RegistryError(refused)
     # a whole-event switch replaces their switches for one raid (issue 15): the box says so (`rs` needed to see them)
     replaces = ([p.instance for p in rc.raid_switches_of(rs, rc.first_part(rs, ev), m)]
-                if rs is not None and spec and key == "join" and ev.state == "open" else [])
+                if rs is not None and spec and key == "join" and ev.state in ("open", "locked") else [])
     lines = action_lines(reg, ev, m, key, character, spec=spec, by_id=by_id, replaces=replaces)
     if key in ANSWER_KEYS:
         return box("Answer for someone", lines, "Record answer", rev=rev)

@@ -121,8 +121,14 @@ PAGE_WORDS = {
     "autofill_stopped_preview": "A lock preview started on this event while the groups were being filled, so the board stays as it was.",
     "autofill_same": "The groups are already filled the way the lock would fill them, so nothing changed.",
     "autofill_busy": "The bot is building a roster right now, so the groups can't be filled until it is done.",
-    "autofill_locked": "The roster is locked, so the board is the roster now.",
     "autofill_nobody": "Nobody has joined yet, so there is nobody to place.",
+    # Auto-fill groups on a LOCKED roster (2026-11-27): it fills only the open seats, from Not rostered then the Bench
+    "autofill_full": "Every seat on the roster is taken, so there is nothing to fill.",
+    "autofill_nobody_off": "Everyone who answered Join or Bench is rostered, so there is nobody to place.",
+    "autofill_none_fit": "Nobody off the roster fits the open seats, so the roster stays as it was.",
+    "board_footer_locked": "Auto-fill groups fills the open seats from Not rostered first, then the bench, and moves nobody already rostered.",
+    # Undo greyed out on a locked roster: this officer has no edit of theirs that still stands (also the route's refusal)
+    "no_undo_locked": "You have no change of your own on this roster to undo.",
     # Schedules (schedule_view): a pickup's Repeats, a schedule with no run times, no reminder, the regulars' words and
     # the next four weeks, and the empty Next events of a paused schedule
     # what a schedule repeats (the schedule editor's Repeats choice on the site, flows_schedule's select in Discord)

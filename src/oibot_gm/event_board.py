@@ -4,14 +4,17 @@ nothing is solved until an officer presses the button. One press = ONE run of th
 raid), written into that raid's board as placements (ev.auto_placed) — hand placements and kept-off pins kept. This
 module only decides WHEN it runs and what the page is told meanwhile.
 
-- `AutoFill` (one per bot: `autofill_of(bot)`), keyed (guild key, raid key). `start` refuses in one sentence (the raid
-  is locked, nobody joined, a lock-side solve is running) or starts ONE background task for the raid (a second press
+- `AutoFill` (one per bot: `autofill_of(bot)`), keyed (guild key, raid key). `start` refuses in one sentence (nobody
+  joined, a lock-side solve is running; on a locked raid every seat taken or nobody off the roster) or starts ONE background task for the raid (a second press
   while it works gets the same task) and answers at once; the page shows `state`'s working words until the board
   updates (the write publishes `run:<raid key>`; AUTOFILL_LISTENERS hear every end that writes nothing).
 - The solve runs on a dedicated PREVIEW_WORKERS executor, never on the event loop, over a SNAPSHOT of the event's raids
   taken on the loop (`snapshot` + `frozen`): the thread never reads a run the loop is writing.
+- A LOCKED raid (2026-11-27, officers' edits after the lock): the same press fills only its open seats
+  (rc.autofill_locked — nobody rostered moves, the roster count stands), written through the quiet path
+  (rc.apply_layout_locked: nobody asked, DMed or told).
 - The write: under the raid's board lock, only when what the solve read is unchanged (`inputs`: every raid's answers,
-  pins, board and split up to this one — rc.solve_inputs) and the raid is still open — else nothing is written and the
+  pins, board and split up to this one — rc.solve_inputs) and the raid is in the state it was — else nothing is written and the
   sentence says so (autofill_changed). An answer equal to the board already there writes nothing either
   (autofill_same). A failure keeps the solver's own sentence (rc.solver_error_text); each stays on the page while
   the board is unchanged.
@@ -96,9 +99,15 @@ class AutoFill:
         return {"working": False, "words": None, "failed": False}
 
     def refusal(self, reg: Registry, ev: "rc.RaidEvent") -> str | None:
-        if ev.state != "open":
-            return PAGE_WORDS["autofill_locked"]
-        if not ev.by_status("in"):
+        if ev.state == "locked":  # a locked roster (2026-11-27): only its open seats, from who is off the roster
+            if not rc.open_seat_count(reg, ev):
+                return PAGE_WORDS["autofill_full"]
+            seated = {rc.player_uid(ev, p) for p in ev.seated()}
+            if not any(s.status in ("in", "sub") and s.discord_id not in seated for s in ev.signups.values()):
+                return PAGE_WORDS["autofill_nobody_off"]
+        elif ev.state != "open":
+            return f"This event is already {rc.RUN_STATE_WORDS.get(ev.state, ev.state)}."
+        elif not ev.by_status("in"):
             return PAGE_WORDS["autofill_nobody"]
         if self.busy():
             return PAGE_WORDS["autofill_busy"]
@@ -122,7 +131,10 @@ class AutoFill:
         return task
 
     def _solve(self, reg: Registry, view, part: "rc.RaidEvent", stop: solver.Stop) -> tuple[list[list[str]], list[str]]:
-        """BLOCKING (the executor): who the raids before it will roster, then this raid's own lock solve."""
+        """BLOCKING (the executor): who the raids before it will roster, then this raid's own lock solve — on a locked
+        raid only its open seats (rc.autofill_locked: nobody rostered moves)."""
+        if part.state == "locked":
+            return rc.autofill_locked(reg, view, part, stop=stop)
         earlier = rc.earlier_counts(reg, view, part, stop=stop, complete_boards=True)
         return rc.autofill(reg, view, part, earlier=earlier, stop=stop)
 
@@ -169,12 +181,16 @@ class AutoFill:
             live = rs.events.get(key)
             if stop.stopped:
                 return getattr(stop, "why", None) or PAGE_WORDS["autofill_stopped"]
-            if live is None or live.state != "open" or inputs(reg, rs, live) != rev:
+            if live is None or live.state not in ("open", "locked") or inputs(reg, rs, live) != rev:
                 return PAGE_WORDS["autofill_changed"]
+            if live.state == "locked" and not auto:  # nobody off the roster fits an open seat
+                return PAGE_WORDS["autofill_none_fit"]
             if _same(rc.board_layout(reg, live), layout) and set(live.auto_placed) == set(auto):
                 return PAGE_WORDS["autofill_same"]
             live.log.append(f"{by}: auto-filled the board")
-            await bot._write_board(reg, rs, live, layout, by, via=via, auto=auto)
+            # a locked roster: the quiet path (rc.apply_layout_locked), the officer's one-step Undo included
+            await bot._write_board(reg, rs, live, layout, by, via=via, auto=auto if live.state == "open" else None,
+                                   by_id=by_id if live.state == "locked" else None)
         try:
             await ops_mod.audited(bot.ops, reg, by, f"auto-filled the board of {run_title(reg, live)}", via=via, by_id=by_id)
         except Exception:  # noqa: BLE001 — the board is written; an audit line that fails never undoes it
@@ -199,6 +215,8 @@ def inputs(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent") -> str:
     no = rc.part_no(ev)
     rows = [[p.key, p.state, rc.solve_inputs(p)] for p in rc.event_parts(rs, ev) if rc.part_no(p) <= no]
     rows.append(sorted(ev.auto_placed))
+    if ev.state == "locked":  # a locked raid's board is its roster, not ev.layout
+        rows.append(rc.board_layout(reg, ev))
     return hashlib.sha1(repr(rows).encode()).hexdigest()[:16]
 
 

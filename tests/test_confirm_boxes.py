@@ -199,12 +199,16 @@ def test_switch_and_answer_boxes(reg, rs):
     b = cq.switch_box(reg, ev, nyx, None, "Shadow", [HYJAL])
     assert (b["title"], b["verb"]) == (f"Switch {nyx.display_name} to Shadow?", "Switch")
     assert b["sentences"] == [f"{nyx.display_name} plays Shadow for Hyjal Summit, not Holy.", "They get a notice.",
-                              "You can switch them back until the lock."]
-    a = cq.switch_box(reg, ev, nyx, None, "Shadow", [HYJAL], locked=True)
+                              "You can switch them back until the event starts."]
+    # after the lock (2026-11-27): someone rostered is switched at once and told nothing; someone not rostered is asked
+    q = cq.switch_box(reg, ev, nyx, None, "Shadow", [HYJAL], locked=True, swap=True)
+    assert (q["title"], q["verb"]) == (f"Switch {nyx.display_name} to Shadow?", "Switch")
+    assert q["sentences"][1:] == ["Nobody gets a DM.", "You can switch them back until the event starts."]
+    a = cq.switch_box(reg, ev, nyx, None, "Shadow", [HYJAL], locked=True, swap=False)
     assert (a["title"], a["verb"]) == (f"Ask {nyx.display_name} to play Shadow?", "Ask")
-    assert a["sentences"][1:] == ["They get a DM with Yes and No.", "Their seat changes only when they say yes."]
+    assert a["sentences"][1:] == ["They get a DM with Yes and No.", "They take a seat only when they say yes."]
     nyx.dm_opt_out = True
-    assert cq.switch_box(reg, ev, nyx, None, "Shadow", [HYJAL], locked=True)["sentences"][1] == "It waits on their Me page."
+    assert cq.switch_box(reg, ev, nyx, None, "Shadow", [HYJAL], locked=True, swap=False)["sentences"][1] == "It waits on their Me page."
     tavi = ms[3]  # one character: the mockup's words
     ab = cq.answer_box(reg, ev, tavi, "join", tavi.main.label, "Fire", by_id=1)
     assert (ab["title"], ab["verb"]) == ("Answer for someone", "Record answer")
@@ -222,7 +226,7 @@ def test_the_swap_after_the_lock_reads_as_the_mockup(reg, rs):
     ev = one_off(reg, rs)
     ev.state = "locked"
     assert cq.consequence("swap", reg, ev, name="Anathema", other="Borin") == [
-        "Anathema and Borin swap seats.", "Both see the change on the roster card.", "You can swap them back."]
+        "Anathema and Borin swap seats.", "Nobody gets a DM.", "Undo puts the roster back as it was."]
 
 
 def test_open_the_sheet_now(reg, rs):

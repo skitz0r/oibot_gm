@@ -577,9 +577,9 @@ def test_officer_character_confirm_is_a_notice_not_a_dm():
     assert "Welcome aboard" not in text or "send_member_dm" not in text.split("Welcome aboard")[1][:400]
 
 
-def test_on_behalf_join_after_lock_says_the_confirm_dm_it_sends(reg, rs):
-    """Regression: an on-behalf Join on a locked confirming run with a free seat said '— no new DM', yet set_answer seats
-    them and confirm_one DMs the Confirm / Can't card. The sentence must match what is sent."""
+def test_on_behalf_join_after_lock_records_the_answer_and_says_nobody_gets_a_dm(reg, rs):
+    """An on-behalf Join on a locked run (2026-11-27, the quiet path): the answer is recorded and they wait in Not
+    rostered for an officer to place — no seat, no Confirm DM, no notice; the sentence says exactly that."""
     ev = open_test_run(reg, rs)  # a test run rehearses the confirmations
     roles = by_role(reg)
     seated = roles["tank"][:2] + roles["healer"][:3] + (roles["melee"] + roles["ranged"])[:4]  # 9 of 10: one seat free
@@ -588,17 +588,12 @@ def test_on_behalf_join_after_lock_says_the_confirm_dm_it_sends(reg, rs):
     m = next(x for x in reg.test_members() if x not in seated)
     assert rc.run_confirms(reg, ev) and not ev.seat_of(m)
     text = inbox.action_consequence(reg, ev, m, "join", by_id=1)
-    assert "They get the Confirm or Can't make it DM." in text and "no new DM" not in text, text
+    assert "waits in Not rostered" in text and "Nobody gets a DM." in text and "Confirm" not in text, text
     bot = NightBot(reg, rs)
+    notices = len(reg.notices(m.discord_id))
     run(inbox.do_member_action(bot, reg, rs, ev, m, "join", by="Jon", by_id=1))
-    assert ev.seat_of(m) and any(a["roster"] == ev.team and a.get("dm") for a in reg.members[m.discord_id].placement_asks), "the Confirm DM card went out"
-    other = next(x for x in reg.test_members() if x not in seated and x is not m)
-    other.dm_opt_out = True  # every seat is taken now: the sentence says the board can move them in, no DM promised
-    off = inbox.action_consequence(reg, ev, other, "join", by_id=1)
-    assert "Every seat is taken" in off and "DM" not in off, off
-    rc.free_seat(reg, rs, ev, m.discord_id, "officer")  # a seat free again: DMs off, they confirm on the Me page
-    off = inbox.action_consequence(reg, ev, other, "join", by_id=1)
-    assert "With DMs off, they confirm on their Me page." in off and "Confirm or Can't make it DM" not in off, off
+    assert not ev.seat_of(m) and ev.signups[str(m.discord_id)].status == "in"
+    assert not reg.members[m.discord_id].placement_asks and bot.dms == {} and len(reg.notices(m.discord_id)) == notices
 
 
 def test_a_members_plain_text_sheet_ask_posts_a_copy_and_never_moves_the_live_sheet(reg, rs):

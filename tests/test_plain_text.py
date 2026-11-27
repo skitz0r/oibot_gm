@@ -275,9 +275,9 @@ def test_run_board_locked(reg, rs):
     with pytest.raises(RegistryError, match="needs the bot"):
         configops.apply(reg, ConfigOp(op="run_board", target=ev.key, value=ms[0].display_name), "officer", is_owner=False, raids=rs)
     d = configops.describe(reg, ConfigOp(op="run_board", target=ev.key, value=", ".join(m.display_name for m in ms[1:6])))
-    assert f"asked to confirm: {ms[5].display_name}" in d and f"freed: {ms[0].display_name}" in d
+    assert f"rostered: {ms[5].display_name}" in d and f"off the roster, keeping their answer: {ms[0].display_name}" in d and "nobody gets a DM" in d
     out = run(configops.apply_async(reg, ConfigOp(op="run_board", target=ev.key, value=", ".join(m.display_name for m in ms[1:6])), "Officer", False, bot=bot))
-    assert out == f"Barrow Deeps {reg.local12(ev.start)}: asked {ms[5].display_name} to confirm; freed {ms[0].display_name}"
+    assert out == f"Barrow Deeps {reg.local12(ev.start)}: {ms[5].display_name} is rostered now. {ms[0].display_name} is off the roster now."
     assert bot.calls == [("after_board_change", ev.key, [ms[5].display_name], [ms[0].display_name], "Officer")]
     seated = {p.signup_name for p in rs.events[ev.key].seated()}
     assert ms[5].display_name in seated and ms[0].display_name not in seated
@@ -462,7 +462,7 @@ def test_run_strategy_is_refused_after_the_lock_as_every_other_surface_refuses_i
     lock_with_board(reg, rs, ev, [m.display_name for m in ms[:5]])
     op = ConfigOp(op="run_strategy", target=ev.key, value="first")
     assert STRATEGY_LOCKED in configops.describe(reg, op)
-    with pytest.raises(RegistryError, match="The roster is locked, so its split can't change."):
+    with pytest.raises(RegistryError, match="Unlock the event first to change its split"):
         configops.apply(reg, op, "officer", is_owner=False, raids=rs)
     assert rc.RaidStore(reg.store, reg.key).events[ev.key].split_strategy is None
 

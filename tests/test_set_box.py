@@ -1,7 +1,7 @@
 """Phase 5, Task 7: /raid set (flows_roster.SetWizard) prints the server's box — consequences.member_action_box, the one
 POST /api/admin/action's preview / seen answers for the site's row ⋮ menu — and Join / Bench pick the spec the
-character plays (the role switch). A switch on someone rostered on the locked roster is the rc.SPEC_SEATED refusal box,
-Back alone, nothing written. The client is test_raid_night's NightBot: the real RaidMixin verbs, nothing on Discord."""
+character plays (the role switch). After the lock a switch on someone rostered switches their seat at once, nobody told
+(2026-11-27). The client is test_raid_night's NightBot: the real RaidMixin verbs, nothing on Discord."""
 from __future__ import annotations
 
 import asyncio
@@ -58,8 +58,9 @@ def test_join_as_another_spec_switches_the_role_before_the_lock(reg, rs, officer
     assert (s.status, s.spec) == ("in", DPS)
 
 
-def test_a_spec_switch_on_a_seated_member_is_refused(reg, rs, officer):  # noqa: F811
-    """Review Focus 5: Join as a spec of another role, for someone rostered after the lock, is the SPEC_SEATED box."""
+def test_a_spec_switch_on_a_seated_member_is_applied_quietly(reg, rs, officer):  # noqa: F811
+    """After the lock (2026-11-27) Join as a spec of another role, for someone rostered, switches their seat at once:
+    the box says nobody gets a DM, the press writes the seat, nobody is told."""
     ev = open_real_run(reg, rs)
     pool = [healer(reg, k) for k in range(3)]
     join(reg, rs, ev, pool)
@@ -68,14 +69,15 @@ def test_a_spec_switch_on_a_seated_member_is_refused(reg, rs, officer):  # noqa:
     assert ev.seat_of(m)
     reg.add_character(m.discord_id, m.display_name, "Altpriest", "Priest", HEAL, DPS, False)
     m = reg.members[m.discord_id]
-    before = rc.member_state_rev(ev, m)
     h, bot = harness(reg, rs)
     run(FLOWS["raid_set"](h.command(), reg, member=_user(m), what="join"))
+    run(h.pick("Pick the character", m.main.label))
     run(h.pick("Plays which spec?", DPS))
-    assert h.buttons() == ["Back"]
-    assert rc.SPEC_SEATED.format(name=m.display_name, spec=DPS) in h.text
-    run(h.press("Back"))
-    assert rc.member_state_rev(ev, m) == before and ev.seat_of(m)[1].spec == HEAL, "nothing written"
+    assert h.buttons() == ["Record answer", "Back"] and cq.QUIET_TOLD in h.text, h.text
+    notices = len(reg.notices(m.discord_id))
+    run(h.press("Record answer"))
+    assert (ev.seat_of(m)[1].spec, ev.seat_of(m)[1].role) == (DPS, "ranged")
+    assert bot.dms == {} and len(reg.notices(m.discord_id)) == notices
 
 
 def test_a_callout_is_its_own_box_with_a_note(reg, rs, officer):  # noqa: F811
@@ -148,9 +150,9 @@ def seated_priest_with_druid(reg, rs):
 
 def test_a_same_role_spec_on_another_character_keeps_the_healer_seat(reg, rs, officer):  # noqa: F811
     ev, m = seated_priest_with_druid(reg, rs)
-    assert rc.seated_switch_refusal(reg, ev, m, next(c for c in m.active() if c.label == "Druidalt"), "Restoration") is None
     h, _bot = harness(reg, rs)
     run(FLOWS["raid_set"](h.command(), reg, member=_user(m), what="join"))
+    run(h.pick("Pick the character", "Druidalt"))
     run(h.pick("Plays which spec?", "Restoration"))
     assert h.buttons() == ["Record answer", "Back"], h.text
     assert "moves from" not in h.text
@@ -159,24 +161,22 @@ def test_a_same_role_spec_on_another_character_keeps_the_healer_seat(reg, rs, of
     assert (seat.character, seat.spec, seat.role) == ("Druidalt", "Restoration", "healer")
 
 
-def test_an_explicit_spec_of_another_role_is_refused(reg, rs, officer):  # noqa: F811
+def test_an_explicit_spec_of_another_role_switches_the_seat(reg, rs, officer):  # noqa: F811
+    """Bench with a spec of another role, for someone rostered after the lock: their answer and their seat follow it."""
     ev, m = seated_priest_with_druid(reg, rs)
-    want = rc.SPEC_SEATED.format(name=m.display_name, spec=DPS)
-    assert rc.seated_switch_refusal(reg, ev, m, m.main, DPS) == want
-    before = rc.member_state_rev(ev, m)
     h, _bot = harness(reg, rs)
     run(FLOWS["raid_set"](h.command(), reg, member=_user(m), what="bench"))
     run(h.pick("Plays which spec?", DPS))
-    assert h.buttons() == ["Back"] and want in h.text
-    assert rc.member_state_rev(ev, m) == before and ev.seat_of(m)[1].spec == HEAL, "nothing written"
-    with pytest.raises(rc.RegistryError, match="holds a seat"):
-        rc.set_signup(reg, rs, ev, m, None, "sub", spec=DPS)
+    assert h.buttons() == ["Record answer", "Back"], h.text
+    run(h.press("Record answer"))
+    assert ev.signups[str(m.discord_id)].status == "sub" and (ev.seat_of(m)[1].spec, ev.seat_of(m)[1].role) == (DPS, "ranged")
 
 
 def test_the_alts_own_spec_of_another_role_says_the_move_and_reseats(reg, rs, officer):  # noqa: F811
     ev, m = seated_priest_with_druid(reg, rs)
     h, _bot = harness(reg, rs)
     run(FLOWS["raid_set"](h.command(), reg, member=_user(m), what="join"))
+    run(h.pick("Pick the character", "Druidalt"))
     run(h.pick("Plays which spec?", "Feral"))
     box = cq.member_action_box(reg, ev, m, "join", "Druidalt", None, by_id=OFFICER_ID)
     assert box["sentences"][0] == f"{m.display_name} plays Druidalt and moves from healer to melee on the roster."
@@ -238,7 +238,7 @@ def test_bench_leaving_the_switched_spec_keeps_the_switch_on_an_open_run(reg, rs
     assert (s.status, s.spec, s.role) == ("sub", DPS, "ranged")
 
 
-def test_on_a_locked_run_the_switched_spec_passes_and_the_own_spec_of_another_role_is_refused(reg, rs, officer):  # noqa: F811
+def test_on_a_locked_run_a_switch_back_to_their_own_spec_follows_the_seat(reg, rs, officer):  # noqa: F811
     ev = open_real_run(reg, rs)
     pool = [healer(reg, k) for k in range(3)]
     join(reg, rs, ev, pool)
@@ -249,12 +249,7 @@ def test_on_a_locked_run_the_switched_spec_passes_and_the_own_spec_of_another_ro
     h, _bot = harness(reg, rs)
     run(FLOWS["raid_set"](h.command(), reg, member=_user(m), what="bench"))
     run(h.pick("Plays which spec?", HEAL))
-    assert h.buttons() == ["Back"] and rc.SPEC_SEATED.format(name=m.display_name, spec=HEAL) in h.text
-    run(h.press("Back"))
-    h, _bot = harness(reg, rs)
-    run(FLOWS["raid_set"](h.command(), reg, member=_user(m), what="bench"))
-    run(h.pick("Plays which spec?", DPS))
     assert h.buttons() == ["Record answer", "Back"], h.text
     run(h.press("Record answer"))
     s = ev.signups[str(m.discord_id)]
-    assert (s.status, s.spec, ev.seat_of(m)[1].spec) == ("sub", DPS, DPS)
+    assert (s.status, s.spec, ev.seat_of(m)[1].spec) == ("sub", HEAL, HEAL)

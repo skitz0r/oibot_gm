@@ -448,13 +448,16 @@ class RaidMixin:
         """The one path for setting someone's answer on a sheet — the member themself or an officer. `by` is a display
         name people read; `by_id` is the Discord id of whoever acts and DECIDES whose answer it is: the member's own when
         `by_id == m.discord_id` (never a name compare — nicks change, design §2.2). No `by_id` = an officer acting.
-        Open sheet: the signup + sheet refresh. Locked: Join seats them (if not already) and asks them to confirm;
-        No thanks frees a rostered seat (drop_seated: DM, thread line, fill); Bench is the signup only. `spec` (Join /
-        Bench: an officer's role switch, the Events page's Switch) = the spec the character plays — its spec, offspec or
-        a flex role's (rc.spec_role: "Nyx doesn't play Holy." otherwise); the signup's spec and role follow. Refused
-        (rc.SPEC_SEATED) once the run is locked and they hold a seat: that switch is an ask (send_plan). Answers live on
-        the first raid: sync_parts carries them to the later raids. A switch is written to the run's log with who made
-        it and to the ops feed through ops.audited (`via`: web | mcp | chat | discord). Returns a line."""
+        Open sheet: the signup + sheet refresh. Locked (2026-11-27, the lock closes the sheet to members, not to
+        officers): a member's own Join or Bench is refused (rc.LOCKED_JOIN — their way out is Can't make it, which frees
+        the seat through drop_seated as before); an officer's answer is the quiet path — Join records the answer (a
+        rostered seat follows a new character or spec at once, rc.reseat_parts; someone not rostered waits in Not
+        rostered for an officer to place), Bench is the answer only, No thanks frees the seat (quiet_drop) — nobody is
+        asked, DMed or sent a notice and no fill ask goes out. `spec` (Join / Bench: an officer's role switch, the Events
+        page's Switch) = the spec the character plays — its spec, offspec or a flex role's (rc.spec_role: "Nyx doesn't
+        play Holy." otherwise); the signup's spec and role follow. Answers live on the first raid: sync_parts carries
+        them to the later raids. A switch is written to the run's log with who made it and to the ops feed through
+        ops.audited (`via`: web | mcp | chat | discord). Returns a line."""
         if status not in rc.STATUSES:
             raise ValueError(f"status must be one of {rc.STATUSES}")
         mine = by_id is not None and int(by_id) == int(m.discord_id)
@@ -465,6 +468,9 @@ class RaidMixin:
             raise RegistryError(f"{run_title(reg, ev)} is a test event: only test members and the officer running it can answer it")
         label = run_label(reg, ev).replace("**", "")  # plain text: the line is shown in Discord replies and on the web alike
         who = "" if mine else f"{m.display_name}: "
+        quiet = not mine and sheet_state(ev) == "locked"  # an officer's answer after the lock tells nobody (2026-11-27)
+        if mine and sheet_state(ev) == "locked" and status in ("in", "sub"):
+            raise ValueError(rc.LOCKED_JOIN)  # the lock closes the sheet to members: only Can't make it is left to them
         released = status == "out" and await self.release_asks_of(reg, rs, ev, m, "answered No thanks")  # their ask covers nothing now
         if sheet_state(ev) == "open":
             s = rc.set_signup(reg, rs, ev, m, character, status, source=source, spec=spec if status != "out" else None, by=by if spec else None)
@@ -473,10 +479,12 @@ class RaidMixin:
                 await self.refresh_cards(reg, ev)
             line = f"✅ {who}{s.character} {rc.LABELS[s.status]} for {label}" + (f" — {s.note}" if s.note and s.status != status else "")
         elif status == "out":
-            if ev.seat_of(m):
-                if mine:  # the sheet's Can't make it after lock is a (late) callout: recorded like /raid out's
-                    rc.callout(reg, rs, ev, m, team, None)
-                await self.drop_seated(reg, rs, ev, team, m, "callout" if mine else "officer", None)
+            if ev.seat_of(m) and not mine:  # an officer's No thanks for someone rostered: the seat goes, nobody is told
+                await self.quiet_drop(reg, rs, ev, m, by)
+                line = f"✅ {who}No thanks for {label}, and their seat is open"
+            elif ev.seat_of(m):  # the sheet's Can't make it after lock is a (late) callout: recorded like /raid out's
+                rc.callout(reg, rs, ev, m, team, None)
+                await self.drop_seated(reg, rs, ev, team, m, "callout", None)
                 line = f"✅ {who or 'you are '}off the {label} roster — seat freed" + ("; the bot is looking for a replacement" if rc.team_setting(team, "autofill") else "")
             else:
                 rc.set_signup(reg, rs, ev, m, character, "out", source=source)
@@ -486,29 +494,20 @@ class RaidMixin:
                 await self.refresh_cards(reg, ev)
                 await self.refill_after_release(reg, rs, ev, released)
                 line = f"✅ {who}No thanks for {label} (wasn't rostered)"
-        elif status == "in":
+        elif status == "in":  # an officer's Join after the lock: the answer, and a rostered seat follows it
             s = rc.set_signup(reg, rs, ev, m, character, "in", source=source, spec=spec, by=by if spec else None)
-            seat = ev.seat_of(m)
-            if seat:
-                rc._reseat(ev, s, reg.key)  # a character swap keeps the seat
-                rs.save(ev, f"{m.display_name} seat updated")
-                line = f"✅ {who}{s.character} stays rostered for {label}"
+            if ev.seat_of(m):
+                rc.reseat_parts(reg, rs, rc.first_part(rs, ev), m)  # a character or spec change: the seat follows, every raid
+                line = f"✅ {who}{s.character} stays rostered for {label}" + (f", playing {s.spec}" if spec else "")
             else:
-                i = rc.seat_player(reg, ev, s)
-                if i is None:
-                    rs.save(ev, f"{m.display_name} in, no seat")
-                    line = f"✅ {who}{s.character} Join for {label} — every seat is taken, so not rostered (move them in on the board)"
-                else:
-                    rs.save(ev, f"{m.display_name} rostered by {by}")
-                    gi = next((k for k, g in enumerate(ev.all_rosters[i].groups) if s.display_name in g), 0)
-                    sent = await self.confirm_one(reg, ev, s, i, gi, by)
-                    asks = rc.run_confirms(reg, ev)
-                    await self.post_run_update(reg, ev, f"✏️ {by} rostered {m.display_name} ({s.character})" + ("" if not asks else " — asked to confirm" if sent else " — DMs off, the ask waits on the site" if m.dm_opt_out else ""))
-                    line = f"✅ {who}{s.character} rostered for {label}" + ("" if not asks else " — asked to confirm by DM" if sent else " — DMs off: the confirmation waits on the site" if m.dm_opt_out else "")
+                line = f"✅ {who}{s.character} Join for {label} — waits in Not rostered until an officer puts them on the roster"
+            await self.post_run_update(reg, ev, f"✏️ {by} set {m.display_name} to Join as {s.character}" + (f", playing {s.spec}" if spec else ""))
             await self.refresh_sheet(reg, ev)
             await self.refresh_cards(reg, ev)
-        else:  # sub after lock: the signup only; a rostered member keeps the seat until set out
+        else:  # sub after lock: the answer only; a rostered member keeps the seat until set out
             s = rc.set_signup(reg, rs, ev, m, character, "sub", source=source, spec=spec, by=by if spec else None)
+            if spec and ev.seat_of(m):
+                rc.reseat_parts(reg, rs, rc.first_part(rs, ev), m)
             await self.refresh_sheet(reg, ev)
             line = f"✅ {who}{s.character} Bench for {label}" + (" — still rostered; set No thanks to free the seat" if ev.seat_of(m) else "")
         if status == "in":  # Join while away: Join stays pure, the absence stands for the other sheets — the receipt says so
@@ -520,8 +519,8 @@ class RaidMixin:
             await ops_mod.audited(self.ops, reg, by, f"switched {m.display_name} to {s.spec} ({rc.LABELS[status]}) on {run_title(reg, ev)}", via=via, by_id=by_id)
         elif not mine:
             await self.ops.emit(reg.config, "info", f"{by} set {m.display_name} {status} on {run_title(reg, ev)}")
-        if not mine:
-            s = ev.signups.get(str(m.discord_id))  # B5: the member's notice (never a DM)
+        if not mine and not quiet:
+            s = ev.signups.get(str(m.discord_id))  # B5: the member's notice (never a DM); none after the lock (quiet)
             rc.on_behalf_notice(reg, ev, m.discord_id, f"set you to {rc.LABELS[status]}" + (f" as {s.character}" if s and status != "out" else "")
                                 + (f", playing {s.spec}" if spec and s and status != "out" else ""), by)
         return line
@@ -557,7 +556,7 @@ class RaidMixin:
         done = None if same else rc.set_raid_switch(reg, rs, part, m, character, spec, by)
         answer = f"set you to {rc.LABELS[status]} as {joined}" if joined else ""
         what = (f"switched you back to {plays}" if done == "cleared" else f"switched you to {plays}") if done else ""
-        if not mine:
+        if not mine and part.state != "locked":  # after the lock an officer's switch tells nobody (2026-11-27)
             rc.on_behalf_notice(reg, part, m.discord_id, " and ".join(x for x in (answer, what) if x), by)
         if done == "cleared":
             audit = f"switched {m.display_name} back to their answer, {plays}, for {raid} on {run_title(reg, part)}"
@@ -710,7 +709,9 @@ class RaidMixin:
                     rs.save(ev, "fill: complete")
                 return [], nd
             swaps = (approved_by is not None or rc.auto_swaps(reg, ev)) if swaps is None else swaps
-            batch = await asyncio.to_thread(rc.fill_batch, reg, rs, ev, team, swaps=swaps)
+            # the automatic asks leave alone the seats an officer's own edits left open (rc.RaidEvent.officer_open)
+            hold = min(int(ev.officer_open or 0), rc.open_seat_count(reg, ev)) if approved_by is None else 0
+            batch = await asyncio.to_thread(rc.fill_batch, reg, rs, ev, team, swaps=swaps, hold=hold)
             if ev.state != "locked":  # cancelled during the solve: nothing goes out for a cancelled run
                 return [], nd
             sent = await self._send_asks(reg, rs, ev, team, batch, phase="fill", approved_by=approved_by, deadline=rc.ask_deadline(reg, ev).isoformat())
@@ -1186,6 +1187,7 @@ class RaidMixin:
             ev.log.extend(trial.log[seen:])  # the solver's lines; lines written on the live run meanwhile stay
             ev.state, ev.locked_at, ev.confirm_by, ev.lock_error = "locked", rc.now(), confirm.isoformat() if confirms else None, None
             ev.placed_by, ev.drag_pins, ev.auto_placed, ev.placed_as, ev.played_as = {}, {}, [], {}, {}  # who placed whom was the board before the lock; the roster is the board now
+            ev.officer_open, ev.board_undo = 0, {}
             ev.lock_seats = [uid for r in ev.all_rosters for g in r.groups for n in g if (uid := rc.uid_of_name(ev, n)) is not None]
             ev.lock_fill = fill
             ev.log.append(f"locked by {by}" + ("" if fill else " as the board stood"))
@@ -1457,26 +1459,21 @@ class RaidMixin:
         return len(missing)
 
     async def after_board_change(self, reg, rs, ev, team, added, removed: list[str], by: str, via: str = "web") -> None:
-        """Officer edits on a locked board: substitutions get a confirmation DM, removals free the seat and ask the bench.
-        `via` = the surface the edit came through (web | mcp | chat | discord): the audit line's prefix, never part of the verb."""
-        for sg in added:
-            seat = ev.seat_of(sg.discord_id)
-            gi = next((k for k, g in enumerate(ev.all_rosters[seat[0]].groups) if sg.display_name in g), 0) if seat else 0
-            await self.confirm_one(reg, ev, sg, seat[0] if seat else 0, gi, by)
-        for name in removed:  # their Confirm card says the seat went (free_seat closed the ask and wrote the notice)
+        """An officer's edit of a locked roster (the quiet path, rc.apply_layout_locked — 2026-11-27): nobody is asked,
+        DMed or sent a notice and no fill ask goes out. A removed person whose open Confirm ask the edit closed has that
+        DM card EDITED to its final state (an edit, never a DM). One thread line, the sheet and cards redrawn, one audit
+        line naming the officer. `via` = the surface the edit came through (web | mcp | chat | discord): the audit line's
+        prefix, never part of the verb."""
+        for name in removed:
             uid = rc.uid_of_name(ev, name)
             m = reg.members.get(uid) if uid is not None else None
-            if m is not None:
-                await self.seat_released(reg, ev, m, "board")
+            ask = next((a for a in reversed(m.placement_asks) if a["roster"] == ev.team), None) if m is not None else None
+            if ask is not None and ask.get("answer") == "released":  # their open ask closed with the seat: the card says so
+                await self.seat_released(reg, ev, m, "officer")
         if added or removed:
-            asks = " (asked to confirm)" if rc.run_confirms(reg, ev) else ""  # confirmations off (ad hoc, D5): nobody is asked
-            await self.post_run_update(reg, ev, f"✏️ board by {by}: " + (f"in {', '.join(s.display_name for s in added)}{asks}" if added else "") + (" · " if added and removed else "") + (f"out {', '.join(removed)}" if removed else ""))
+            await self.post_run_update(reg, ev, f"✏️ board by {by}: " + (f"in {', '.join(s.display_name for s in added)}" if added else "") + (" · " if added and removed else "") + (f"out {', '.join(removed)}" if removed else ""))
         await self.refresh_sheet(reg, ev)
         await self.refresh_cards(reg, ev)
-        if removed and rc.team_setting(team, "autofill") and sheet_state(ev) == "locked":
-            sent, nd = await self.run_fill(reg, rs, ev, team, by=by)
-            if sent:
-                await self.post_run_update(reg, ev, "🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
         await ops_mod.audited(self.ops, reg, by, f"edited the {run_title(reg, ev)} board" + (f": +{len(added)}" if added else "") + (f" -{len(removed)}" if removed else ""), via=via)
 
     # ---- the board: one writer at a time per run, whoever writes (the site's drags, MCP, plain text)
@@ -1485,12 +1482,13 @@ class RaidMixin:
         Keyed (guild, run key)."""
         return self.__dict__.setdefault("_board_locks", {}).setdefault((reg.key, key), asyncio.Lock())
 
-    async def _write_board(self, reg, rs, ev, groups: list[list[str]], by: str, via: str = "web", auto: list[str] | None = None) -> str:
+    async def _write_board(self, reg, rs, ev, groups: list[list[str]], by: str, via: str = "web", auto: list[str] | None = None,
+                           by_id: int | None = None) -> str:
         """The one way a board is written (whole board, or the result of a single move); the caller holds board_lock.
-        Before lock the groups are the layout the lock will use; after lock they ARE the roster (someone brought in
-        from the bench is asked to confirm, someone taken out is freed and the fill engine asked). `auto` (Auto-fill
-        groups' write, event_board.AutoFill): the names it placed, recorded as ev.auto_placed."""
-        names = rc.board_names(ev)  # Join and Bench while open; Join and the rostered once locked
+        Before lock the groups are the layout the lock will use; after lock they ARE the roster, written through the
+        quiet path (rc.apply_layout_locked: nobody asked, DMed or told; `by_id` gets a one-step Undo). `auto` (Auto-fill
+        groups' write before the lock, event_board.AutoFill): the names it placed, recorded as ev.auto_placed."""
+        names = rc.board_names(ev)  # Join and Bench, plus the rostered once locked
         groups = [[n for n in g if n in names] for g in groups]
         if ev.state == "open":
             ev.layout = groups if any(groups) else None
@@ -1503,9 +1501,9 @@ class RaidMixin:
             return f"{run_title(reg, ev)}: board " + ("saved" if ev.layout else "cleared") + " (the lock uses it)"
         # on the loop, not a worker thread (stage C L3): a Can't make it, a fill yes or the scheduler's expiry changes the
         # same rosters on the loop, and a thread could put a seat freed meanwhile back; list work plus one batch commit
-        added, removed = rc.apply_layout_locked(reg, rs, ev, groups)
+        added, removed = rc.apply_layout_locked(reg, rs, ev, groups, by=by, by_id=by_id)
         await self.after_board_change(reg, rs, ev, rc.run_team(reg, ev), added, removed, by, via=via)
-        return ((f"asked {', '.join(s.display_name for s in added)} to confirm" if added else "") + (f"; freed {', '.join(removed)}" if removed else "")).lstrip("; ") or "groups updated"
+        return rc.board_line([s.display_name for s in added], removed)
 
     async def save_board(self, reg, rs, ev, groups: list[list[str]], *, rev: str | None = None, by: str, via: str = "web",
                          strategy: str | None = None) -> str:
@@ -1552,15 +1550,23 @@ class RaidMixin:
                 if to is not None and sg is not None and ev.pins.get(str(sg.discord_id)) == "out":
                     ev.pins.pop(str(sg.discord_id))  # placed in a group: no longer kept off
                 rc.record_moves(ev, name, at_before, groups, pins_before, by_id)
-            return await self._write_board(reg, rs, ev, groups, by, via=via)
+            return await self._write_board(reg, rs, ev, groups, by, via=via, by_id=by_id)
 
     async def undo_moves(self, reg, rs, ev, by_id: int, by: str, *, rev: str | None = None, via: str = "web") -> str:
         """Undo my moves (the Events board, before the lock): exactly what the officer `by_id`'s drags did and still
         stands is reversed — the names they placed leave the officers' layout, and each pin their drag changed goes back
         to what it was (rc.own_pins: only while the pin is still as the drag left it; a pin set from the ⋮ menu or in
         plain text is never touched). Everyone else's moves stay; the names undone go back to Not placed. `rev` =
-        rc.undo_rev the officer saw (the board and their moves): a changed one raises rc.BoardChanged, nothing written."""
+        rc.undo_rev the officer saw (the board and their moves): a changed one raises rc.BoardChanged, nothing written.
+        On a LOCKED roster it is one step (2026-11-27): the board goes back to what it was before this officer's last
+        edit (rc.undo_record — refused once anyone changed the board since), through the same quiet path."""
         async with self.board_lock(reg, ev.key):
+            if ev.state == "locked":
+                rec = rc.undo_record(reg, ev, by_id)
+                if rec is None or (rev and rev != rc.undo_rev(reg, ev, by_id)):
+                    raise rc.BoardChanged()
+                ev.board_undo.pop(str(by_id), None)
+                return await self._write_board(reg, rs, ev, [list(g) for g in rec["before"]], by, via=via)
             if ev.state != "open" or (rev and rev != rc.undo_rev(reg, ev, by_id)):
                 raise rc.BoardChanged()
             placed = {n for n, u in ev.placed_by.items() if int(u) == int(by_id)}
@@ -1750,6 +1756,23 @@ class RaidMixin:
             return False
         reason = RELEASE_WHY.get(why, why)
         return await self.edit_ask_card(reg, ask["dm"][0], ask["dm"][1], f"Your seat on {run_label(reg, ev)} was released ({reason}). If that's wrong, tell an officer.")
+
+    async def quiet_drop(self, reg, rs, ev, m, by: str) -> None:
+        """An officer's No thanks for someone rostered after the lock (the quiet path, 2026-11-27): their seat goes on
+        every raid of the event they hold one on (rc.free_seat: the answer is No thanks now), their open Confirm ask
+        closes and its DM card is edited to its final state — no notice, no DM, and no fill ask: each seat opened is
+        held from the automatic asks (RaidEvent.officer_open). One thread line per raid; sheet and cards redrawn."""
+        held = [ev] + ([p for p in rc.later_parts(rs, ev) if sheet_state(p) == "locked" and p.seat_of(m) is not None]
+                       if ev.followed_by and not rc.is_follow(ev) else [])
+        rc.free_seat(reg, rs, ev, m, "officer", notice=False)
+        await self.seat_released(reg, ev, m, "officer")
+        for p in held:
+            p = rs.events.get(p.key, p)
+            p.officer_open = min(rc.open_seat_count(reg, p), int(p.officer_open or 0) + 1)
+            rs.save(p, f"{m.display_name}'s seat held open ({by})")
+            await self.post_run_update(reg, p, f"↩️ {by} set {m.display_name} to No thanks — seat open")
+            await self.refresh_cards(reg, p)
+        await self.refresh_sheet(reg, ev)
 
     async def drop_seated(self, reg, rs, ev, team, m, why: str, note: str | None, announce: bool = True, *, notice: bool = True) -> None:
         """A rostered member is out after lock: free the seat, edit their ask card, post it, ask the bench to fill.

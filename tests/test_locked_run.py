@@ -39,6 +39,8 @@ def test_expire_confirmations_frees_unanswered_seats(reg, rs):
 
 
 def test_apply_layout_locked_substitution_and_removal(reg, rs):
+    """The quiet path (2026-11-27): a substitute is seated with their answer as it was, the one taken off keeps their
+    answer and waits in Not rostered; the roster count stands; group moves are free."""
     ev, seated = _locked_ten(reg, rs)
     bench = [p.signup_name for p in ev.roster.benched]
     dps_out = seated[-1].display_name
@@ -46,11 +48,11 @@ def test_apply_layout_locked_substitution_and_removal(reg, rs):
     layout = [[sub_in if n == dps_out else n for n in g] for g in ev.roster.groups]
     added, removed = rc.apply_layout_locked(reg, rs, ev, layout)
     assert [s.display_name for s in added] == [sub_in] and removed == [dps_out]
-    assert added[0].status == "in" and added[0].source == "officer"
+    assert added[0].status == "in" and added[0].source == "test", "their answer is not rewritten"
     out_sg = next(s for s in ev.signups.values() if s.display_name == dps_out)
-    assert out_sg.status == "out" and out_sg.source == "moved to bench"
+    assert out_sg.status == "in", "taken off by an officer: still Join"
     assert ev.seat_of(sub_in) and not ev.seat_of(dps_out) and len(ev.roster.selected) == 10
-    assert dps_out not in [p.signup_name for p in ev.roster.benched], "out of the run, not waiting on the bench"
+    assert dps_out in [p.signup_name for p in ev.roster.benched], "waiting in Not rostered"
     # a plain removal frees the seat and adds nobody
     layout2 = [[n for n in g if n != sub_in] for g in ev.roster.groups]
     added2, removed2 = rc.apply_layout_locked(reg, rs, ev, layout2)

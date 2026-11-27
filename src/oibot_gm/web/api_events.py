@@ -146,8 +146,10 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
         """Switch / Answer for them / Ask on one Role switches row: {uid, character, spec, part, seat, option, rev, seen?,
         preview?}. The row must still be on the list (rc.event_switches), else 409 with the fresh `switches` and nothing
         written. Before the lock → set_answer(Join, character, spec) on the first raid (the answer is one for the
-        evening; the member gets a notice, nobody a DM). After the lock → send_plan(rev, picks {seat: option}, seats
-        [seat]) on `part`: that one ask, a DM with Yes and No (or the Me page with DMs off). `preview` → {box}; `seen` =
+        evening; the member gets a notice, nobody a DM). After the lock a ROSTERED person's row switches their seat at
+        once and tells nobody (2026-11-27: set_raid_switch on `part` for an event of several raids, else set_answer
+        with their answer and the spec); a row for someone not rostered is an offer of an open seat → send_plan(rev,
+        picks {seat: option}, seats [seat]) on `part`: that one ask, a DM with Yes and No (or the Me page with DMs off). `preview` → {box}; `seen` =
         the box's fp → 409 with the fresh box when it changed. The switch is written to the run's log and the ops feed
         with who made it (ops.audited, `via`). Answers {message, switches}."""
         v, d = await body(request, officer=True)
@@ -224,6 +226,17 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
             return {"box": fresh}
         if d.get("seen") and str(d["seen"]) != fresh["fp"]:
             return JSONResponse({"error": CONFIRM_WORDS["changed"], "box": fresh}, status_code=409)
+        if opt[0].swap and part.seat_of(m) is not None:  # someone rostered: their seat switches at once, quietly (2026-11-27)
+            try:
+                if rc.multi_raid(rs, part):  # rows after the lock are a raid's own
+                    line = await bot.set_raid_switch(reg, rs, part, m, character, spec, v.name, by_id=v.uid, via=v.via)
+                else:
+                    sg = first.signups.get(str(m.discord_id))
+                    line = await bot.set_answer(reg, rs, first, m, sg.status if sg is not None and sg.status in ("in", "sub") else "in",
+                                                character, v.name, by_id=v.uid, spec=spec, via=v.via)
+            except (RegistryError, ValueError) as e:
+                return _refused(e)
+            return {"message": rc.site_words(reg, line), "switches": await fresh_switches()}
         try:
             sent, plan = await bot.send_plan(reg, rs, part, rev=plan.rev, by=v.name, picks={seat: option}, seats=[seat])
         except rc.PlanChanged as e:

@@ -185,19 +185,23 @@ def locked_short_two_healers(reg, rs):
     return ev, ms
 
 
-def test_switch_after_the_lock_sends_only_that_ask(web_bot, reg, rs):
-    """Locked with two short seats: POST /switch for seat 1 option 0 → exactly one FillAsk sent, for that person."""
+def test_switch_after_the_lock_switches_a_rostered_seat_and_tells_nobody(web_bot, reg, rs):
+    """Locked with two short seats (2026-11-27): a rostered person's row is Switch — POST /switch changes their seat at
+    once; no ask, no DM, no notice."""
     ev, ms = locked_short_two_healers(reg, rs)
     sw = rc.event_switches(reg, rs, ev)
     assert sw["short"] == [{"raid": "Barrow Deeps", "roles": {"healer": 2}, "why": None}]
     row = next(r for r in sw["rows"] if r["seat"] == 1 and r["option"] == 0)
-    assert row["box"]["verb"] == "Ask" and row["box"]["title"] == f"Ask {row['display_name']} to play Restoration?"
+    assert row["button"] == PAGE_WORDS["switch_button"]
+    assert row["box"]["verb"] == "Switch" and row["box"]["title"] == f"Switch {row['display_name']} to Restoration?"
+    assert "Nobody gets a DM." in row["box"]["sentences"]
+    notices = len(reg.notices(int(row["uid"])))
     body = {k: row[k] for k in ("uid", "character", "spec", "part", "seat", "option")} | {"rev": sw["revs"][ev.key], "seen": row["box"]["fp"]}
     r = post(web_bot, ev.key, body)
     assert r.status_code == 200, r.text
-    sent = [a for a in ev.fill_asks if a.pending]
-    assert len(sent) == 1 and str(sent[0].discord_id) == row["uid"] and sent[0].spec == "Restoration"
-    assert ev.signups[row["uid"]].spec != "Restoration", "the seat changes only on a yes"
+    assert not [a for a in ev.fill_asks if a.pending] and not any(web_bot.bot.dms.values())
+    seat = ev.seat_of(int(row["uid"]))[1]
+    assert (seat.spec, seat.role) == ("Restoration", "healer") and len(reg.notices(int(row["uid"]))) == notices
 
 
 def test_a_changed_plan_is_refused_with_the_fresh_switches(web_bot, reg, rs):
@@ -243,32 +247,23 @@ def test_member_action_carries_the_spec(web_bot, reg, rs):
 
 # ---------------------------------------------------------------- fix round 1
 
-def test_spec_is_refused_for_a_rostered_seat_after_the_lock_on_every_surface(web_bot, reg, rs):
-    """After the lock a seat's spec changes only on the member's yes (Switch sends that ask): set_answer(spec=) on a
-    rostered member is refused in one sentence on the site's /set, the on-behalf action, plain text and MCP's route."""
+def test_a_spec_switch_of_a_rostered_seat_after_the_lock_is_applied_on_every_surface(web_bot, reg, rs):
+    """After the lock an officer's switch of someone rostered is applied to their seat at once (2026-11-27): set_answer
+    (spec=), the site's /set (MCP set_answer) and plain text all write it; nobody is asked."""
     from oibot_gm import configops
     from oibot_gm.configops import ConfigOp
 
     ev, ms = locked_short_two_healers(reg, rs)
-    sham = ms[0]
-    want = rc.SPEC_SEATED.format(name="Sham", spec="Restoration")
-    with pytest.raises(RegistryError) as e:
-        asyncio.run(web_bot.bot.set_answer(reg, rs, ev, sham, "in", None, "o", by_id=1, spec="Restoration"))
-    assert str(e.value) == want
-    r = web_bot.c.post(f"/api/run/{ev.key}/set", json={"member": "Sham", "status": "in", "spec": "Restoration"}, headers=H())  # MCP set_answer
-    assert r.status_code == 400 and r.json()["error"] == want
-    r = web_bot.c.post("/api/admin/action", json={"run": ev.key, "member": "Sham", "action": "join", "spec": "Restoration"}, headers=H())
-    if r.status_code == 400 and "no longer applies" in r.json()["error"]:  # Join isn't offered to someone already joined
-        with pytest.raises(RegistryError, match="holds a seat"):
-            asyncio.run(inbox.do_member_action(web_bot.bot, reg, rs, ev, sham, "bench", spec="Restoration", by="o", by_id=1))
-    else:
-        assert r.status_code == 400 and r.json()["error"] == want
-    with pytest.raises(RegistryError, match="holds a seat on the locked roster"):
-        asyncio.run(configops.apply_async(reg, ConfigOp(op="run_answer", target=ev.key, member="Sham", value="join", field="Restoration"),
-                                          "Officer", True, bot=web_bot.bot, by_id=1))
-    seat = ev.seat_of(sham)[1]
-    assert (seat.spec, ev.signups[str(sham.discord_id)].spec) == ("Enhancement", "Enhancement"), "nothing written"
-    assert not ev.fill_asks
+    sham, bear = ms[0], ms[1]
+    asyncio.run(web_bot.bot.set_answer(reg, rs, ev, sham, "in", None, "o", by_id=1, spec="Restoration"))
+    assert (ev.seat_of(sham)[1].spec, ev.signups[str(sham.discord_id)].spec) == ("Restoration", "Restoration")
+    r = web_bot.c.post(f"/api/run/{ev.key}/set", json={"member": "Sham", "status": "in", "spec": "Enhancement"}, headers=H())  # MCP set_answer
+    assert r.status_code == 200, r.text
+    assert ev.seat_of(sham)[1].spec == "Enhancement"
+    asyncio.run(configops.apply_async(reg, ConfigOp(op="run_answer", target=ev.key, member="Bear", value="join", field="Restoration"),
+                                      "Officer", True, bot=web_bot.bot, by_id=1))
+    assert ev.seat_of(bear)[1].spec == "Restoration"
+    assert not ev.fill_asks and not any(web_bot.bot.dms.values())
 
 
 def test_a_short_raid_without_rows_says_why(reg, rs):
@@ -329,10 +324,10 @@ def test_every_row_carries_its_button_word(web_bot, reg, rs):
     assert by["Tavi"]["button"] == PAGE_WORDS["answer_button"] and by["Tavi"]["box"]["verb"] == "Record answer"
     mine = by["Boss"]
     assert mine["button"] == PAGE_WORDS["switch_button"] and mine["box"]["title"] == "Switch to Restoration?"
-    assert mine["box"]["sentences"] == ["You play Restoration for Hyjal Summit and Barrow Deeps, not Balance.", "You can switch back until the lock."]
+    assert mine["box"]["sentences"] == ["You play Restoration for Hyjal Summit and Barrow Deeps, not Balance.", "You can switch back until the event starts."]
     ev2, ms = locked_short_two_healers(reg, rs)
-    after = rc.event_switches(reg, rs, ev2, viewer=OWNER)["rows"]
-    assert after and {r["button"] for r in after} == {PAGE_WORDS["ask_button"]}
+    after = rc.event_switches(reg, rs, ev2, viewer=OWNER)["rows"]  # rostered people: their seat switches at once
+    assert after and {r["button"] for r in after} == {PAGE_WORDS["switch_button"]}
 
 
 def test_the_officers_own_row_is_left_out_after_the_lock(reg, rs):
@@ -382,32 +377,18 @@ def test_a_switch_is_logged_and_audited_with_the_officer_and_the_spec(web_bot, r
     assert audited and "[mcp]" in audited[-1], lines[-5:]
 
 
-def test_after_the_lock_with_dms_off_the_ask_waits_on_the_site_and_a_second_press_sends_nothing(web_bot, reg, rs):
+def test_after_the_lock_a_second_press_of_the_same_row_switches_nothing_more(web_bot, reg, rs):
     ev, ms = locked_short_two_healers(reg, rs)
     for m in ms:
         m.dm_opt_out = True
     sw = rc.event_switches(reg, rs, ev)
     row = next(r for r in sw["rows"] if r["seat"] == 0 and r["option"] == 0)
-    assert row["box"]["sentences"][1] == "It waits on their Me page."
     body = {k: row[k] for k in ("uid", "character", "spec", "part", "seat", "option")} | {"rev": sw["revs"][ev.key]}
     assert post(web_bot, ev.key, body).status_code == 200
-    sent = [a for a in ev.fill_asks if a.pending]
-    assert len(sent) == 1 and sent[0].channel == "web" and not any(web_bot.bot.dms.values())
+    specs = {p.signup_name: p.spec for p in ev.seated()}
     again = post(web_bot, ev.key, body)
     assert again.status_code == 409 and "switches" in again.json()
-    assert len([a for a in ev.fill_asks if a.pending]) == 1 and not any(web_bot.bot.dms.values())
-
-
-def test_the_same_seat_twice_with_dms_on_sends_one_dm(web_bot, reg, rs):
-    ev, ms = locked_short_two_healers(reg, rs)
-    sw = rc.event_switches(reg, rs, ev)
-    row = next(r for r in sw["rows"] if r["seat"] == 0 and r["option"] == 0)
-    body = {k: row[k] for k in ("uid", "character", "spec", "part", "seat", "option")} | {"rev": sw["revs"][ev.key]}
-    assert post(web_bot, ev.key, body).status_code == 200
-    dms = sum(len(v) for v in web_bot.bot.dms.values())
-    assert dms == 1
-    assert post(web_bot, ev.key, body).status_code == 409
-    assert sum(len(v) for v in web_bot.bot.dms.values()) == dms
+    assert {p.signup_name: p.spec for p in ev.seated()} == specs and not ev.fill_asks and not any(web_bot.bot.dms.values())
 
 
 def test_a_raid_whose_only_switch_needs_a_cover_points_at_suggest(reg, rs):

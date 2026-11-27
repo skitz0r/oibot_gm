@@ -139,20 +139,24 @@ understands; it answers in the words below.
   decided again at the lock once you answer Bench. When a place frees up later, you are among the first asked.
 - **The board** — an event's groups on the Events page, the one name for them (never "builder" or "bank"): before the lock
   it is the layout the lock will use (officers drag names into groups; a lock that fills places everyone else), after the lock it
-  *is* the roster. On the Events page it shows what officers placed; they shape it by dragging names (or a name's
+  *is* the roster. The lock closes the sheet to members, not to officers: after it officers keep editing the roster —
+  every change quiet, nobody asked to confirm, DMed or sent a notice. On the Events page it shows what officers placed; they shape it by dragging names (or a name's
   **⋮ › Move to…**), let the bot place the rest the way the lock would with **Auto-fill groups**, take their own moves
-  back with **Undo my moves**, empty it with **More › Clear the board**, and pick how a split is made in **Edit event**
+  back with **Undo my moves**, empty it with **More › Clear the board** (before the lock only), and pick how a split is made in **Edit event**
   (each raid's split). A test event's card on the Test bench keeps the older tools — **Place the rest**,
   **Propose roster / splits…**, **Clear** and its ⓘ legend; plain text and MCP keep them too.
 - **Not placed / Not rostered** — the board's list of joiners who hold no place: *Not placed* before the lock (still
   joined — the lock seats them, or leaves them out; dropping a name there only takes it out of its group), *Not
-  rostered* after it (joined, but not on the roster; dragging one into a group asks them to confirm). A pin icon on a
+  rostered* after it (joined, but not on the roster; dragging one into a group rosters them, with no confirmation asked and
+  no DM). A pin icon on a
   name is an officer's pin: *pinned* (the lock keeps them where they were put) or *kept off* (the lock leaves them off
   the roster — set from the name's **⋮ › Keep off the roster**, and on the Events page the word *kept off* is on their
-  line). Before the lock the Events page's board has a second list under *Not placed*: **Bench**, the Bench answers no
-  group holds (not shown when there are none). An officer may drag one into a group; dropping them back on either list
-  returns them to *Bench*. After the lock a Bench answer who isn't rostered is on neither list: once a seat opens the
-  bench is asked first — by the bot itself or from **More › Fill seats…**, as the event's *Automated Fill Requests* says.
+  line). The Events page's board has a second list under *Not placed* / *Not rostered*: **Bench**, the Bench answers no
+  group holds (not shown when there are none), before and after the lock. An officer may drag one into a group; dropping
+  them back on either list returns them to *Bench*. Someone an officer takes off a locked roster keeps their answer and
+  waits in *Not rostered* (or *Bench*, for a Bench answer). When a member gives a seat up the bench is asked first — by
+  the bot itself or from **More › Fill seats…**, as the event's *Automated Fill Requests* says; a seat an officer leaves
+  open on purpose is never asked for on its own (only **Fill seats…** asks for it).
 - **Leftovers** — the joiners a full roster left out at the lock (more joined than there are places, or the roles
   didn't fit). They head the *Not rostered* list and the lock card, with what another event would be short.
 - **Suggest… / Fill seats…** — the same screen under two names, on the site and in Discord: **Suggest…** before the
@@ -1211,10 +1215,16 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    otherwise rosters only the board. **More › Clear the board…** empties every group of the event (your placements and Auto-fill's alike,
    Bench answers too; pins stay) after the bot's box (*The 14 people on the board go back to Not placed.* — *… go back to
    Not placed or Bench, by their answer.* when Bench answers are among them · *Nobody is told.* · *Auto-fill groups can place
-   everyone again.*). A locked event's board is the roster: no drag, and **⋮ ›
+   everyone again.*). A locked event's board is the roster and stays the officers' to change until the event ends: a drag
+   or **⋮ ›
    Move to…** (a group, *Swap with …*, or back to *Not rostered*) shows the bot's box first — which move it is (*Move*,
-   *Swap*, *Put on the roster*, *Put in the seat*, *Take off the roster*) and what it does for the person — and the press
-   makes only that move; when the board changed while the box was open the new box comes back and waits again; *Placed* becomes *Rostered* (*10 of 10 seats*), who holds a
+   *Swap*, *Put on the roster*, *Put in the seat*, *Take off the roster*), what changes, *Nobody gets a DM.* and *Undo puts
+   the roster back as it was.* — and the press makes only that move. A Bench answer can be put on the roster too.
+   **Auto-fill groups** still sits beside *Not rostered*: it fills only the open seats, from *Not rostered* first, then the
+   bench, and moves nobody already rostered (*Every seat on the roster is taken, so there is nothing to fill.* when there
+   is none). **Undo my moves** takes back your last change on the locked roster (one step; refused once anyone changed it
+   since). **Clear the board** and the split strategy stay closed after the lock: *The roster is locked, so Unlock the event
+   first to clear the board.*; when the board changed while the box was open the new box comes back and waits again; *Placed* becomes *Rostered* (*10 of 10 seats*), who holds a
    seat now. A finished event shows **Board, as it was locked**. The
    page updates by itself when someone answers or another officer moves a name, never under a drag in progress, and
    the Role switches list stays folded or unfolded as you left it. **Activity · N lines** is the event's log, folded
@@ -1468,17 +1478,18 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    Discord outage), the lock card says *confirmations not yet sent* and within a minute the bot asks exactly the
    rostered who weren't asked — nobody twice. If a lock fails (the bot couldn't find a roster in time), the sheet's footer says
    *Lock failed <time> — the sheet stays open, retrying* and so does the site. With confirmations off (the one-off default) nobody is asked and
-   no seat expires: the sheet says "you're in — press Can't make it if that changes". After lock the board stays editable,
-   and every change — a drag or **Move to…** — asks first with one sentence from the bot: moving people between groups
-   (*"Nettle moves to Group 2 and stays rostered. Nobody is told."*) changes nothing else, and swapping two says who sees it
-   (*"Nettle and Ivy swap seats. Both see the change on the roster card. You can swap them back."*); bringing
-   someone in from *Not rostered* to an open seat asks them to confirm (*"Nettle takes an open seat in Group 2 and gets
-   the Confirm or Can't make it DM. With DMs off it waits on their Me page. The seat is theirs once they say yes."* — on
-   a one-off *"On a one-off event Join is the commitment, so the seat is theirs now."*); dropping them on someone is a
-   **substitution** — *"Nettle takes Ivy's seat in Group 2 and gets the Confirm or Can't make it DM. … Ivy sees the seat
-   was released on their card and their Me page."* (the bench isn't asked: the seat is taken); dragging someone out
-   releases the seat — they see it on their card and their Me page, never a DM — and the bench is asked to fill it when
-   Automated Fill Requests are on (paused or off, the sentence says the seat waits for **Fill seats**). A
+   no seat expires: the sheet says "you're in — press Can't make it if that changes". After lock the board stays the
+   officers' to edit — the lock closes the sheet to members, not to officers — and every change is quiet: nobody is
+   asked to confirm, DMed or sent a notice. A drag or **Move to…** asks first with the bot's box: *"Nettle moves to Group
+   2 and stays rostered. Nobody gets a DM. Undo puts the roster back as it was."*; *"Nettle and Ivy swap seats. …"*;
+   bringing someone in from *Not rostered* (or *Bench*) rosters them at once (*"Nettle takes an open seat in Group 2. …"*)
+   — they get no Confirm ask, so nothing expires for them; dropping them on someone is a **substitution** (*"Nettle takes
+   Ivy's seat in Group 2, and Ivy waits in Not rostered. …"*); dragging someone out takes them off the roster with their
+   answer kept (*"Nettle comes off the roster and waits in Not rostered. …"*). A removed person's open Confirm card is
+   edited to say the seat was released (an edit, never a DM); someone who had confirmed and is only moved keeps their
+   confirmation. A seat an officer opens is not asked for on its own: **Fill seats…** asks for it when you want. The
+   lock itself, a member's *Can't make it* and an expired confirmation work as before (their seat is asked for when
+   Automated Fill Requests are on). A
    drag started on the open board and dropped after the event locked is refused ("The event locked while you were
    dragging") and the board shows the roster — it is never applied as a change to the locked roster.
    A lock a person presses on a board that changed after the box was shown gets the new box first (*"This changed
@@ -1515,7 +1526,8 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
      they keep their place, and any other change of spec or character takes them off the board as usual. Locking again as it stands with nothing changed
      rosters exactly the same people in the same groups, as the same characters and specs.
    - **Who comes back.** Someone whose seat went after the lock without them saying so — their confirmation ran out, or an
-     officer dragged them off the roster — is a joiner again, in *Not placed*. Someone who pressed *Can't make it*,
+     officer took them off the roster (they kept their answer) — is a joiner again, in *Not placed* (a Bench answer in
+     *Bench*). Someone who pressed *Can't make it*,
      called out, is marked away, or whom an officer set to *No thanks* stays out. On a later raid of a lineup, someone an
      officer took off that raid alone stays out of it (the bot can't tell that apart from leaving early).
    - **Confirmations are kept.** An answer already given stays. An unanswered Confirm / Can't make it ask stays open and
@@ -1770,16 +1782,20 @@ Kestrel off the roster?*; an answer is *Answer for someone*), and its button say
 *Record the callout*, *Keep off*). If the member pressed something meanwhile, the press shows the box again under
 *"This changed while the box was open. Read it again before you press."* and writes nothing; press again to go
 ahead. What the bot would refuse — a
-spec the character doesn't play, a switch for someone rostered on the locked roster — is that one sentence with
+spec the character doesn't play, an action that no longer applies — is that one sentence with
 **Back** alone. On your own record it is your own answer, so the screen promises no notice. On
 the site every row of a sheet (joined, Bench, No thanks, and the *not answered* list) has a **⋮ menu** with the same
 list, and **Answer for someone** beside the event's headcount does it for anyone who hasn't answered yet (its Member list leaves out everyone with an answer on the sheet): the bot's box with *Member*, *Answer* (Join, Bench or No thanks) and *Character* (a character and the spec it plays), each pick shown in the bot's sentences before **Record answer**; a callout stays on the row's ⋮, in the same box with a *Note for the officers* field. Plain text ("Kestrel can't make it tonight,
 her baby is sick" is a callout; "set Kestrel to No thanks" is not) and MCP `set_answer` (`out` is a callout unless
 `callout=false`) do the same. Whatever an officer records for someone reaches them as a **notice** on their Me page and
 in `/me view` ("Jon set you to No thanks for Barrow Deeps Tue 7:30 PM"), and an open DM card of theirs is edited to
-*answered for you by Jon* — never a new DM. Pins are officers' planning: nobody is told. When an officer drags
-someone onto a locked board, the event's thread says they were asked to confirm only when the event asks for
-confirmations (a one-off with confirmations off just says *in*).
+*answered for you by Jon* — never a new DM. After the lock an answer recorded for someone is quiet (*Nobody gets a DM.*,
+and no notice): **Join** records their answer and they wait in *Not rostered* for you to put them on the board (a
+rostered person's seat follows a new character or spec at once), **Bench** is the answer only, and **No thanks** takes
+their seat with no callout recorded and no fill ask. **Record a callout** stays what it was: their seat is asked for
+like any *Can't make it*. Pins are officers' planning: nobody is told, and after the lock a pin is refused (*The roster
+is already locked, and a pin only shapes the lock.*). When an officer drags someone onto a locked board, the event's
+thread says *in* — nobody is asked to confirm.
 
 **Role switches (an officer picks the spec someone plays).** An event's page on the site has a **Role switches**
 section when one of its raids is short of a tank or healer minimum: *Hyjal Summit is short* with the role icon and how
@@ -1789,12 +1805,14 @@ helps beside it. The lines are the bot's own suggestions for those seats (the sa
 lock and **Fill seats…** after it), the suggestion first and then the alternates. Before the lock, **Switch** changes
 their answer: they are Join as that spec for the whole event — the answer is one for the evening, so every raid of it
 they stay for plays them as that spec (a raid they leave before is not changed). They get a notice, nobody gets a DM,
-and you can switch them back until the lock (*"Nyx plays Holy for Hyjal Summit and Barrow Deeps, not Shadow."*). On
+and you can switch them back until the event starts (*"Nyx plays Holy for Hyjal Summit and Barrow Deeps, not Shadow."*). On
 your own line the box speaks to you (*"You play Holy for Hyjal Summit, not Shadow."*). For someone who hasn't joined
 the button is **Answer for them**: it records their Join as that spec, as **Answer for someone** does. After the lock
-a switch needs the member to act, so the button is **Ask**: it sends that one ask for that raid — a DM with Yes and No,
-or a card on their Me page with DMs off — and their seat changes only when they say yes (your own line is left out
-then). A swap that needs someone else to cover the role it leaves is not on this list; it stays on **Suggest…** before
+a line for someone rostered is still **Switch**: their seat in that raid plays the new spec at once, and nobody is told
+(*"Sham's seat plays Restoration for Barrow Deeps, not Enhancement. Nobody gets a DM. You can switch them back until the
+event starts."*). A line for someone not rostered is **Ask** — an offer of an open seat, as **Fill seats…** sends: a DM
+with Yes and No, or a card on their Me page with DMs off, and they take a seat only when they say yes (your own line is
+left out then). A swap that needs someone else to cover the role it leaves is not on this list; it stays on **Suggest…** before
 the lock and **Fill seats…** after it. When a raid is short but no line can help, the section says why in one
 sentence: the regulars who haven't answered are counted as coming, the asks already out cover it, the only switches
 need a cover (**Suggest…** / **Fill seats…** shows them), or nobody free can play the role. If the list changed since
@@ -1802,13 +1820,12 @@ you opened it, the press is refused and the fresh list shows. The same line is i
 (*Switch: Holy*), so you can switch them from their own name without opening the list. The spec must be one the character plays (its spec, its
 offspec or an extra role's); anything else is refused (*"Nyx doesn't play Fire."*). In Discord, `/raid set` → *Join*
 (or *Bench*, or *Play another spec* for someone who joined) → **Plays which spec?** does it. Plain text ("set Nyx to Join as Holy"), **Answer for someone** and MCP
-`set_answer` with `spec` do the same before the lock; once the event is locked,
-someone who holds a seat is never switched to another role that way (*"Nyx holds a seat on the locked roster, so use Switch under the
-event's Role switches to ask them to play Holy."*) — `fill_seats` with `seats` sends one seat's ask instead. Every
-switch is in the event's log and the ops feed with who made it.
+`set_answer` with `spec` do the same, before and after the lock: once the event is locked, someone who holds a seat
+has that seat switched at once, quietly (no notice, no DM). Every switch is in the event's log and the ops feed with
+who made it.
 
 **A switch for one raid of the event.** On an event of several raids (a 20-man, then two 10-mans) an officer can
-switch someone for ONE raid before the lock: a Shadow priest heals the 10-mans as Holy and stays Shadow in the
+switch someone for ONE raid, before or after the lock: a Shadow priest heals the 10-mans as Holy and stays Shadow in the
 20-man. Their answer stays as it is for the other raids, and the switch counts wherever that raid's roster lands
 them — its board, what it is short of, Auto-fill groups, Preview lock and the lock itself, both with the fill and as
 the board stands. With the fill the switch is fixed: the lock may leave them out of that raid, never put them in
@@ -1829,14 +1846,14 @@ another spec there. They need a Join or Bench answer, not a place on the board. 
 - MCP: `set_answer` with `spec` and `raid` (its name or id; left out = the whole event).
 
 The box says what changes for that raid and what stays (*"Nyx plays Holy for Barrow Deeps and stays Shadow for Hyjal
-Summit."*), who is told (*"They get a notice, and nobody gets a DM."*) and that you can switch them back until the
-lock; on your own line it speaks to you. The member gets one notice on their Me page naming the raid and the spec,
+Summit."*), who is told (*"They get a notice, and nobody gets a DM."*; after that raid's lock *"Nobody gets a DM."*
+and no notice) and that you can switch them back until the event starts; on your own line it speaks to you. The member gets one notice on their Me page naming the raid and the spec,
 and their Me page row for that raid (and the members' event page) says *You play Holy for Barrow Deeps.*; the public
 signup sheet keeps showing their answer. Their own word wins: if they later answer with another character, or their
 answer becomes what the switch says, the switch is dropped with one line in the event's log; a Bench keeps it, a No
 thanks drops it. A later switch for the whole event replaces it, and its box says so (*"This replaces their switch
-for Barrow Deeps."*). A switch to another character puts that character on that raid's seat, and the loot records that character; if that character is later retired, moved to another member or no longer plays the spec, the switch is dropped with a line in the log. After the lock a
-switch is an ask for that raid, as above; after an **Unlock** the switch is back on the board with the event (if the
+for Barrow Deeps."*). A switch to another character puts that character on that raid's seat, and the loot records that character; if that character is later retired, moved to another member or no longer plays the spec, the switch is dropped with a line in the log. After that raid's lock the
+switch is written onto their seat there at once (the board's ⋮ still offers *Play as …*); after an **Unlock** the switch is back on the board with the event (if the
 locked seat was changed after the lock, the seat wins and the switch is dropped). A single-raid event has no such
 choice: a switch there is the whole event.
 
@@ -2503,9 +2520,11 @@ next unopened events, so "groups for tonight" and "open Saturday's alt night" st
   "undo the lock" (a locked event back to open signup, its rosters on the board — always reviewed first); "start
   tonight's raid now" / "we're starting" (a locked event starts this minute — always reviewed first).
 - *The board:* "move Ash to group 3" / "put Ash in 2.1" (roster 2, group 1) / "bench Ash" / "swap Ash and Dusk" —
-  one person, like a drag (after lock: in from *Not rostered* = asked to confirm, out to it = seat freed); "groups for
+  one person, like a drag (after lock: in from *Not rostered* = rostered, out to it = off the roster with their answer kept;
+  nobody gets a DM); "groups for
   bd-…: Ash, Bright, Cinder | Dusk, Ember" sets the whole board — the layout the lock will use, or after lock the roster
-  itself (names added are asked to confirm, names dropped are freed). "Propose a roster for tonight" (or "a rotation
+  itself (names added are rostered, names dropped wait in *Not rostered*; nobody is told). "Auto-fill the board" on a
+  locked event fills only its open seats. "Propose a roster for tonight" (or "a rotation
   split") shows the groups the bot would build — how a split's rosters compare (in words), who is left out, why there can't be more rosters, whether leftovers
   could make another — and leaves the board as it is; "another one" shows a different one, "use it" puts the last one on the board
   with its strategy in one step (what it showed you — also after a restart, and a preview you looked at on the site or
@@ -2515,7 +2534,7 @@ next unopened events, so "groups for tonight" and "open Saturday's alt night" st
   updates follow the new message); anyone else registered may ask too, in any channel where plain text acts on their own
   record, and gets a read-only copy — the live sheet stays where it is. The preview says which it will be. Pins stay as
   before ("pin Ash to the roster", "keep Dusk on the bench"); a seat on an event is someone's answer ("put Ash in for
-  tonight": before lock they join, after lock they are rostered and asked to confirm) or a board move.
+  tonight": before lock they join, after lock their answer is recorded and they wait in *Not rostered*) or a board move.
 - *Members:* "add Jon's alt Jonny, Mage Frost" (value is `Class Spec [Offspec]`; "… as his main" makes it the main in
   one step), "plan Jon's main as a Holy Priest" (a planned character with no name; replaces an earlier plan, keeping
   rank and roster placement), "delete Jon's alt Jonny" (gone outright; the diff names what it does beyond the record —

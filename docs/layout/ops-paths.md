@@ -89,7 +89,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        open_run(…, lineup=) (the later raids); reschedule_run(run, when, timing, preview, rev) and edit_lineup(run, lineup, preview,
                        rev) → POST /api/run/{key}/reschedule | /lineup (preview first and send its `rev` back; no actor — the bearer is the owner,
                        as lock_run / cancel_run). Phase 4: set_answer(spec=, raid=) (a role switch; `raid` = that raid of the event alone, issue 15,
-                       through POST /api/run/{key}/set's `raid`; SPEC_SEATED once seated on a locked roster),
+                       through POST /api/run/{key}/set's `raid`; after the lock a rostered seat switches at once, nobody told),
                        fill_seats(seats=) (one ask, as the Events page's Switch); set_strategy is refused after the lock (STRATEGY_LOCKED); no tool
                        sends `seen` (MCP writes go ahead as before the boxes)
 ```

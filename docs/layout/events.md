@@ -39,7 +39,16 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        schedule's own SCHEDULE_TIMING, weights) → occurrences/upcoming/schedule_starts/open_run(schedule=) (ephemeral run dict per raid
                        of a run, keyed by new_run_key — the key says nothing; a run is found by its stamps, see Identity below);
                        run_rosters(ev) = the schedule's expected rosters N (health/needs/sheet measure against N × size, the lock aims for N), Join/Bench/No thanks (in/sub/out), propose() at lock (weights, pins,
-                       the raid's minimums, splits into several rosters per slot), confirmations (placement asks on the run key), free_seat/seat_player/
+                       the raid's minimums, splits into several rosters per slot), confirmations (placement asks on the run key),
+                       THE QUIET PATH (2026-11-27, the lock closes the sheet to members, not to officers): apply_layout_locked(reg, rs, ev, layout,
+                       by=, by_id=) = every officer edit of a locked roster (a move, swap, substitute, take-off, a Bench answer put on, Auto-fill
+                       groups' open seats, an Undo, a whole-board write): exactly the seats asked change, the roster COUNT never changes (a split
+                       council's roster index stays valid), a newcomer keeps their answer and gets no Confirm ask, a removed person keeps their
+                       answer (unseat: their OPEN Confirm ask closes `released`, a yes stays) — no notice, DM or fill ask; RaidEvent.officer_open
+                       (open seats an officer's edits left open: the automatic asks hold them, fill_batch(hold=)) and board_undo {officer id →
+                       {before, after}} (undo_record = their one-step Undo while the board is the one their edit left; both emptied by unlock
+                       and the lock); board_line(added, removed) = the reply every surface shows; a member-caused opening (Can't make it, an
+                       expired ask, an absence) keeps free_seat's fan-out; free_seat/seat_player/
                        expire_confirmations, fill engine (after lock only: benched joiners + Bench first → pool → offspec → alt swaps, paired with a backfill
                        when the vacated role would go short; asks expire after fill_ask_hours). `nudge`/`nudge_hours_before`/`autofill`/`open_dm`
                        are the run dict's, seeded from its schedule at open (a run's own via reschedule). No LLM. Run states open | locked | done | cancelled; the member-facing word is "rostered", never "seated".
@@ -170,16 +179,17 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        The lock's placement without a lock: event_board_preview(reg, rs, first, parts=, stop=, counts=) = every OPEN raid through
                        _solve_run with the lock's strategy and budget, `earlier` = the earlier raids' locked or previewed rosters (PURE; a raid nobody
                        joined drawn empty) — behind earlier_counts(reg, rs, ev, stop=) (Preview lock and Auto-fill on a later raid); autofill(reg, rs,
-                       ev, earlier=, stop=) → (layout, auto names) = Auto-fill groups' solve (the lock's _solve_run, whatif off, on a copy whose board
+                       ev, earlier=, stop=) → (layout, auto names) = Auto-fill groups' solve (autofill_locked(reg, rs, ev, stop=) = the same press on a
+                       LOCKED raid: the solve on a copy whose board is the roster, only the names it ADDS kept, each into an open place — nobody
+                       rostered moves, the roster count stands) (the lock's _solve_run, whatif off, on a copy whose board
                        keeps only the HAND placements: ev.auto_placed taken off first; the solve's names in board_names kept, a Bench answer it
                        rosters included — the board shows what the lock would roster; PURE); RaidEvent.placed_by {name: officer}, drag_pins {uid:
                        {by, was, now}} and auto_placed [names Auto-fill placed] (all cleared at the lock) via record_moves (a move from another surface
                        clears whose it was; only the DRAGGED name leaves auto_placed, never one a swap displaced), own_moves / own_pins / undo_rev; open_seat_roles (a locked roster's).
-                       board_names(ev) = THE names a board may hold (task 5 of 2026-11-25): open = Join or Bench answers; locked = Join answers +
-                       every rostered name (a Bench answer the lock rostered survives an officer's drag) — prune_board, apply_move, autofill,
+                       board_names(ev) = THE names a board may hold (task 5 of 2026-11-25): Join or Bench answers, plus every rostered name once
+                       locked (2026-11-27: an officer may put a Bench answer on a locked roster too) — prune_board, apply_move, autofill,
                        RaidMixin._write_board and configops' run_move / run_board (configops._board_check, the one check) read it;
-                       NOT_ON_SHEET / NOT_ON_SHEET_MANY = the refusal of any other name (whole sentences), BENCH_LOCKED = a Bench answer off a
-                       locked roster (can't be put on the roster until an open seat is offered to them); configops.board_text lists the parser the
+                       NOT_ON_SHEET / NOT_ON_SHEET_MANY = the refusal of any other name (whole sentences); configops.board_text lists the parser the
                        unplaced Join answers ('not placed' / 'not rostered') and, apart, the unplaced Bench answers. An older build prunes a placed
                        Bench name at that run's next save (nothing is rewritten at start).
                        prune_board(ev) = in EVERY RaidStore.save of an open run: a placed name neither Join nor Bench, pinned out, or whose
@@ -221,9 +231,13 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        solver_error_text (a timeout checked before infeasible; never an exception's words; a stored sentence reads as itself).
                        Role switches: event_switches(reg, rs, first, viewer=) → {short [{raid, roles, why}], rows, revs} composed from each live raid's
                        role_plan (before the lock a row merges across raids — switch_raids —, after it is its raid's own, the officer's own row left
-                       out); switch_box_for → (box, button Switch | Answer for them | Ask); _short_why; spec_role; set_signup(spec=) refuses SPEC_SEATED
-                       through seated_switch_refusal(reg, ev, m, c, spec) = THE guard (member_action_box reads it too): an explicit spec of
-                       ANOTHER ROLE than the seat on the locked roster (same role allowed; another character's own spec = the reseat);
+                       out); switch_box_for → (box, button Switch | Answer for them | Ask — after the lock Switch for a ROSTERED row: the seat
+                       switches at once, nobody told; Ask only for someone not rostered, an offer of an open seat); _short_why; spec_role;
+                       set_signup(spec=) never refuses a seated switch any more (2026-11-27: SPEC_SEATED / seated_switch_refusal are gone) —
+                       after the lock RaidMixin.set_answer writes the seat through reseat_parts(reg, rs, first, m) (every locked raid where they
+                       hold a seat plays their answer now); a per-raid switch on a LOCKED raid is allowed (RAID_SWITCH_LOCKED gone) and
+                       set_raid_switch writes it onto that seat (_switch_seat; plays_now = the seat after the lock, else plays_in, for the
+                       "already plays" check); drop_raid_switches / raid_switches_of cover open AND locked raids;
                        no spec on the seated character keeps the signup's switched spec; a row whose box refuses is left out (every surface); pick_asks / send_batch(seats=); member_state_rev
                        A switch for ONE raid (issue 15): RaidEvent.switched {board name → RaidSwitch(character, spec, base = the answer's
                        character when made, by, at)} on that raid's own run file (keyed as the board keys names: move_on_runs re-keys it,
@@ -335,10 +349,16 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        every running Auto-fill (stop_all), a preview only its event's (stop_event) — wrapped so an auto-fill fault never touches the lock; board_move(…, by_id=) (before the lock
                        rc.apply_move on the officers' layout (names from rc.board_names): a drop on Not placed only un-places — no pin —, a place in a group lifts a kept-off pin;
                        recorded per officer; before the lock it awaits only RaidStore.save — the file and the synchronous git commit, no
-                       Discord edit —, after it _write_board's after_board_change awaits the confirm DM, the sheet and card edits and the fill
+                       Discord edit —, after it _write_board's after_board_change (the quiet path's tail: a closed Confirm card edited, one thread
+                       line, the sheet and cards, one audit line — no DM, notice or fill ask) awaits the sheet and card edits
                        before the route answers (measured in issue #12)); _write_board(…, auto=) (Auto-fill's write: ev.auto_placed; save_board records its Bench names in it — decided again at the lock — except a Bench name an officer dragged that the
                        write leaves in the same group, and its joiners as hand placements; keeps only rc.board_names); undo_moves(reg,
-                       rs, ev, by_id, by, rev=) = Undo my moves (only that officer's placements and the pins their drags changed, rc.undo_rev checked);
+                       rs, ev, by_id, by, rev=) = Undo my moves (only that officer's placements and the pins their drags changed, rc.undo_rev checked;
+                       on a LOCKED roster one step: rc.undo_record's board before their last edit, refused once the board changed since);
+                       quiet_drop(reg, rs, ev, m, by) = an officer's No thanks for someone rostered after the lock (free_seat "officer", no
+                       notice, the card edited, each opened seat counted in officer_open, no fill ask); set_answer refuses a member's own
+                       Join / Bench after the lock (rc.LOCKED_JOIN) and records an officer's quietly (no on_behalf notice);
+                       run_fill's automatic asks pass hold = officer_open to rc.fill_batch;
                        set_answer(…, spec=, via=) (a role switch: the spec on the answer for the whole evening, a notice, one audited line);
                        send_plan(…, seats=) (one ask: the Events page's Switch after the lock); open_run_and_post(…, lock_hours=, first_rosters=);
                        the lock's failure line names its conflict (escaped for Discord)
@@ -378,7 +398,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        answered, absence reasons, callout notes, pins, fill asks, the officers' board, role switches, the log, scores
   event_board.py       Auto-fill groups (§5.67, the owner's tweaks C): the Events board before the lock is the OFFICERS' layout and nothing
                        solves until the button. AutoFill (autofill_of(bot)), keyed (guild key, raid key): start(reg, rs, ev, by=, by_id=, via=) refuses
-                       in one sentence (PAGE_WORDS autofill_locked / autofill_nobody / autofill_busy while a lock-side solve runs) or starts ONE task
+                       in one sentence (PAGE_WORDS autofill_nobody / autofill_busy while a lock-side solve runs; a LOCKED raid: autofill_full /
+                       autofill_nobody_off — there it solves rc.autofill_locked, open seats only, written through the quiet path with the
+                       officer's one-step Undo; autofill_none_fit when nobody fits) or starts ONE task
                        (a second press gets it) → result None (written) | the sentence; solves on a PREVIEW_WORKERS 1 executor over snapshot / frozen
                        views taken on the loop (rc.earlier_counts then rc.autofill); writes under the raid's board lock only on the board it solved
                        from (inputs(): every raid's rc.solve_inputs up to it + auto_placed; else autofill_changed), when no lock or preview

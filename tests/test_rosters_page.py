@@ -250,19 +250,16 @@ def test_board_moves_before_the_lock_tell_nobody_on_either_kind_of_run(reg, rs, 
 
 
 def test_board_moves_after_the_lock_on_a_run_with_confirmations(reg, rs):
+    """After the lock every board move is the quiet path (2026-11-27): what changes, "Nobody gets a DM.", Undo."""
     ev, seated = locked_ten(reg, rs, asks=True)
-    assert said("move", reg, ev) == "Nettle moves to Group 2 and stays rostered. Nobody is told."
-    assert said("swap", reg, ev) == "Nettle and Ivy swap seats. Both see the change on the roster card. You can swap them back."
-    roster = said("roster", reg, ev)
-    assert roster == ("Nettle takes an open seat in Group 2 and gets the Confirm or Can't make it DM. With DMs off it waits on their Me page. "
-                      "The seat is theirs once they say yes.")
-    sub = said("substitute", reg, ev)
-    assert sub.startswith("Nettle takes Ivy's seat in Group 2 and gets the Confirm or Can't make it DM.")
-    assert sub.endswith("Ivy sees the seat was released on their card and their Me page.")
-    assert "bench is asked" not in sub and "Ivy is told" not in sub, "the substitute takes the seat: nobody else is asked, Ivy is never DMed"
-    assert "The bench is asked to fill it." in said("release", reg, ev)
-    ev.autofill_paused = True
-    assert "Automated Fill Requests are paused, so the seat waits for Fill seats." in said("release", reg, ev)
+    tail = "Nobody gets a DM. Undo puts the roster back as it was."
+    assert said("move", reg, ev) == f"Nettle moves to Group 2 and stays rostered. {tail}"
+    assert said("swap", reg, ev) == f"Nettle and Ivy swap seats. {tail}"
+    assert said("roster", reg, ev) == f"Nettle takes an open seat in Group 2. {tail}"
+    assert said("substitute", reg, ev) == f"Nettle takes Ivy's seat in Group 2, and Ivy waits in Not rostered. {tail}"
+    assert said("release", reg, ev) == f"Nettle comes off the roster and waits in Not rostered. {tail}"
+    for verb in ("roster", "substitute", "release"):
+        assert "Confirm" not in said(verb, reg, ev) and "bench is asked" not in said(verb, reg, ev)
     # Remind: who gets the card again, who waits on the site
     seated[0].dm_opt_out = True
     reg.save(seated[0], "dms off")
@@ -275,10 +272,7 @@ def test_board_moves_after_the_lock_on_an_ad_hoc_run_promise_no_dm(reg, rs):
     lock_with_board(reg, rs, ev, [m.display_name for m in reg.test_members()[:8]])
     roster, sub = said("roster", reg, ev), said("substitute", reg, ev)
     for text in (roster, sub):
-        assert "Confirm or Can't make it" not in text and "DM" not in text, text
-    assert roster == "Nettle takes an open seat in Group 2. On a one-off event Join is the commitment, so the seat is theirs now."
-    assert sub == ("Nettle takes Ivy's seat in Group 2. On a one-off event they aren't asked to confirm. "
-                   "Ivy sees the seat was released on their Me page.")
+        assert "Confirm or Can't make it" not in text and "Nobody gets a DM." in text, text
     assert said("remind", reg, ev) == "On a one-off event Join is the commitment, so there is nothing to remind."
     assert "card" not in said("release", reg, ev)
 

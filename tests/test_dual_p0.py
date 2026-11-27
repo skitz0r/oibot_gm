@@ -602,7 +602,7 @@ def test_a_renamed_member_who_re_answers_leaves_one_name_per_seat_and_no_ghost(r
     old = m.display_name
     reg.rename(m.discord_id, "Freshnick", "t")
     bot = SeatBot(reg, rs)
-    line = run(bot.set_answer(reg, rs, ev, m, "in", None, by="Freshnick", by_id=m.discord_id))  # their own Join, same character
+    line = run(bot.set_answer(reg, rs, ev, m, "in", None, by="Officer"))  # an officer's Join for them, same character (after the lock a member's own is refused)
     assert "stays rostered" in line, line
     seat = ev.seat_of(m)
     assert seat and seat[1].signup_name == "Freshnick" and ev.seat_of("Freshnick")[1] is seat[1] and ev.seat_of(old) is None
@@ -642,7 +642,7 @@ def test_every_caller_asks_seat_of_with_the_member_never_the_display_name(reg, r
     reg.rename(m.discord_id, "Freshnick", "t")
     assert ev.seat_of(m) and ev.seat_of(m.display_name) is None, "the run knows the old name only"
     text = configops.describe(reg, ConfigOp(op="run_answer", target=ev.key, member="Freshnick", value="out"))
-    assert "seat freed" in text, text
+    assert "seat open" in text, text
     text = configops.describe(reg, ConfigOp(op="run_answer", target=ev.key, member="Freshnick", value="sub"))
     assert "keeps the seat" in text, text
 

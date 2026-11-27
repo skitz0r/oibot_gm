@@ -942,10 +942,15 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         live = ev.state not in ("done", "cancelled")
         left = rc.leftovers(reg, ev, rosters) if live else []
         another = rc.another_run_hint(reg, ev, rosters, rc.run_split_reason(reg, ev)) if left else None
-        # before the lock, the Bench answers no group holds, in answer order (players_for's order): the bank's second
-        # section on the Events board; [] once locked (the bank is then the joiners the lock left out)
+        # the Bench answers no group holds, in answer order (players_for's order): the bank's second section on the
+        # Events board. Once locked (2026-11-27: an officer may put a Bench answer on the roster) the bank is the
+        # joiners who are not rostered NOW and the Bench section the Bench answers who are not — read from the answers,
+        # so someone taken off the roster waits in the list their answer names
         held = {m for r in rosters for g in r.groups for m in g}
-        benched = [p for p in rc.players_for(reg, ev) if p.status == "bench" and p.signup_name not in held] if ev.state == "open" else []
+        off = [p for p in rc.players_for(reg, ev) if p.signup_name not in held] if ev.state in ("open", "locked") else []
+        benched = [p for p in off if p.status == "bench"]
+        if ev.state == "locked":
+            bench = [p for p in off if p.status == "signed"]
         return {"n_groups": rc.groups_per_roster(reg, size), "group_size": int(reg.profile.comp_rules["group_size"]), "size": size,
                 "bank": [seat_json(p, conf, uids, signed) for p in bench], "bench": [seat_json(p, conf, uids, signed) for p in benched], "rosters": boards,
                 "balance": rc.balance_words([r.synergy_value for r in rosters]),  # a split's rosters compared in words (never the numbers)
@@ -1372,17 +1377,18 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         return JSONResponse({"error": "Someone else changed this board a moment ago — it has been reloaded; check it and try again.", **board_reply(v.reg, ev)}, status_code=409)
 
     def board_written(v, ev, was_open: bool, line: str) -> dict:
-        """The board after a write; after lock the line says who was asked / freed (before lock the drag speaks for itself)."""
+        """The board after a write; after lock the line says who is rostered / off the roster now (rc.board_line; before
+        lock the drag speaks for itself)."""
         return board_reply(v.reg, ev) if was_open else {**board_reply(v.reg, ev), "message": line}
 
     NO_MOVES = PAGE_WORDS["no_moves"]  # the page's greyed Undo my moves says the same (event_view `undo_why`)
-    NO_UNDO_LOCKED = "The roster is locked, so the board is the roster now and your moves are part of it."
 
     @app.post("/api/run/{key}/layout")
     async def run_layout(request: Request, key: str):
-        """The board after a drag: before lock it is saved as the layout the lock will use; after lock it is the roster
-        (group moves are free, someone dragged in from the bench is asked to confirm, someone dragged out is freed).
-        The write is RaidMixin.save_board — the verb MCP and plain text use; a stale `rev` is refused (409)."""
+        """The board after a drag: before lock it is saved as the layout the lock will use; after lock it is the roster,
+        written through the quiet path (rc.apply_layout_locked: nobody asked, DMed or told). The write is
+        RaidMixin.save_board — the verb MCP and plain text use; a stale `rev` is refused (409). `undo`: Undo my moves
+        before the lock, the officer's one-step Undo after it (consequences.undo_box_for says which)."""
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         groups = [[str(n) for n in g] for g in (d.get("groups") or [])]
@@ -1393,11 +1399,11 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         if d.get("undo") or d.get("preview") or d.get("seen"):
             # Undo my moves (§7b): the server counts the viewer's own moves (ev.placed_by) and drops exactly those; the
             # box's fingerprint covers the board and those moves, so a box shown before anyone moved again is refused
-            if not was_open:
-                return box_refused(NO_UNDO_LOCKED)
+            if ev.state not in ("open", "locked"):
+                return box_refused(cq._closed_sentence(ev.state))
             fresh = cq.undo_box_for(v.reg, ev, v.uid)
             if fresh is None:
-                return box_refused(NO_MOVES)
+                return box_refused(NO_MOVES if was_open else PAGE_WORDS["no_undo_locked"])
             if d.get("preview"):
                 return {"box": fresh}
             if (r := box_stale(d, fresh)) is not None:
@@ -1416,8 +1422,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     @app.post("/api/run/{key}/move")
     async def run_move(request: Request, key: str):
         """One drag, applied to the board as it is NOW: {member, to: {r, g, i} | null (= bank), state}. Two officers
-        dragging at once merge; nothing is overwritten. Same effects as a whole-board write after lock (confirm DM / seat
-        freed). `state` = the state the board was rendered in (open | locked): when the run's state differs (the
+        dragging at once merge; nothing is overwritten. After the lock it is the quiet path, as a whole-board write is
+        (nobody asked, DMed or told). `state` = the state the board was rendered in (open | locked): when the run's state differs (the
         scheduler locked it mid-drag) the move is refused with 409 + the current board, never applied as a post-lock
         roster edit (design B6). Before the lock a drop on the bank only un-places the name (RaidMixin.board_move: no pin).
         The officer is recorded per name moved, for Undo my moves. A LOCKED event's moves ask first (§7b): `preview` →
@@ -1547,7 +1553,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         if ev.state != "open":
-            return JSONResponse({"error": "already locked"}, status_code=400)
+            return JSONResponse({"error": cq.PROPOSE_LOCKED}, status_code=400)
         strategy = d.get("strategy") or ev.split_strategy or v.reg.raid_def(ev.instance)["split_policy"]
         if strategy not in SPLIT_POLICIES:
             return JSONResponse({"error": f"strategy must be one of {', '.join(SPLIT_POLICIES)}"}, status_code=400)
@@ -1640,8 +1646,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     @app.post("/api/run/{key}/set")
     async def run_set(request: Request, key: str):
-        """Officer sets someone's answer (Join / Bench / No thanks) or swaps their character — the board's verb, so
-        Join after lock seats them and asks them to confirm, No thanks after lock frees the seat and fills it. `raid`
+        """Officer sets someone's answer (Join / Bench / No thanks) or swaps their character — RaidMixin.set_answer: after
+        the lock the quiet path (Join records the answer and a rostered seat follows it, No thanks frees the seat;
+        nobody asked, DMed or told, no fill ask). `raid`
         (with `spec`, status in / sub; issue 15): a switch for that raid of the event alone (rc.event_raid names it:
         key, raid id or name) through RaidMixin.set_raid_switch — their answer stays for the other raids."""
         v, d = await body(request, officer=True)

@@ -73,17 +73,17 @@ def test_run_move_refuses_a_full_group_before_apply(reg, rs):
     assert "is full" in configops.describe(reg, ConfigOp(op="run_move", target=ev.key, member=names[6], value="g1"))
 
 
-def test_run_move_after_lock_confirms_or_frees(reg, rs):
+def test_run_move_after_lock_is_the_quiet_path(reg, rs):
     bot = Bot(reg, rs)
     ev, names = board_run(reg, rs)
     lock_with_board(reg, rs, ev, names[:4])
     d = configops.describe(reg, ConfigOp(op="run_move", target=ev.key, member=names[5], value="g1"))
-    assert "rostered and asked to confirm" in d
+    assert "rostered, nobody gets a DM" in d
     out = apply(reg, bot, ConfigOp(op="run_move", target=ev.key, member=names[5], value="g1"))
-    assert f"asked {names[5]} to confirm" in out and ev.seat_of(names[5])
-    assert "seat freed" in configops.describe(reg, ConfigOp(op="run_move", target=ev.key, member=names[0], value="bench"))
+    assert f"{names[5]} is rostered now." in out and ev.seat_of(names[5])
+    assert "off the roster, keeps their answer" in configops.describe(reg, ConfigOp(op="run_move", target=ev.key, member=names[0], value="bench"))
     out = apply(reg, bot, ConfigOp(op="run_move", target=ev.key, member=names[0], value="bench"))
-    assert f"freed {names[0]}" in out and not ev.seat_of(names[0])
+    assert f"{names[0]} is off the roster now." in out and not ev.seat_of(names[0]) and bot.dms == {}
 
 
 def test_board_ops_refuse_a_board_changed_since_the_preview(reg, rs):
@@ -188,7 +188,7 @@ def test_run_propose_previews_remembers_and_uses(reg, rs, monkeypatch):
     with pytest.raises(RegistryError, match="strategy is one of"):
         apply(reg, bot, ConfigOp(op="run_propose", target=ev.key, value="chaos"))
     lock_with_board(reg, rs, ev, names[:4])
-    assert "proposals shape an open event" in configops.describe(reg, ConfigOp(op="run_propose", target=ev.key))
+    assert "Unlock the event first to propose another roster" in configops.describe(reg, ConfigOp(op="run_propose", target=ev.key))
 
 
 def test_run_propose_memory_is_per_requester(reg, rs, monkeypatch):

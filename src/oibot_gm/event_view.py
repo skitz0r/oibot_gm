@@ -198,9 +198,10 @@ def _part_view(reg: Registry, rs, p: "rc.RaidEvent", sheet: Callable | None, vie
     BoardView's input. Before the lock the board is the OFFICERS' layout (the owner's tweaks C): who they placed, and
     everyone else who joined in Not placed — nothing is solved here; `board_state` open, `autofill` = the Auto-fill
     groups line for it (`autofill(p)` = event_board.AutoFill.state: {working, words, failed}). A locked or finished
-    raid's board is its roster as it stands (`board_state` locked, `autofill` None); open seats are drawn only there.
-    `mine` = the names the viewer placed by hand, `undo_box` their Undo my moves box, `layout` the officers'
-    placements."""
+    raid's board is its roster as it stands (`board_state` locked); open seats are drawn only there. A LOCKED raid keeps
+    the officers' tools (2026-11-27): `autofill` (its open seats only), `undo_box` (their one-step Undo) or `undo_why`,
+    and `footer` (the sentence under the board); a finished raid has none. `mine` = the names the viewer placed by hand
+    before the lock, `undo_box` their Undo my moves box, `layout` the officers' placements."""
     name = reg.raid_def(p.instance).get("name", p.instance) if p.instance in reg.profile.raids else str(p.instance)
     locked = p.state != "open" and bool(p.all_rosters)
     joined = p.by_status("in")
@@ -212,7 +213,9 @@ def _part_view(reg: Registry, rs, p: "rc.RaidEvent", sheet: Callable | None, vie
     from_bench = sum(1 for n in on_board if n in benched)  # Bench names on the officers' board: Placed counts them apart
     n = len(p.all_rosters) if locked else rc.run_rosters(reg, p)
     live = p.state == "open"
+    editable = p.state in ("open", "locked")  # the lock closes the sheet to members, not to officers (2026-11-27)
     mine = rc.own_moves(p, viewer) if live else []
+    undo = cq.undo_box_for(reg, p, viewer) if (mine or p.state == "locked") else None
     seated = state == "locked"  # the roster stands: count seats (the lock may seat someone from the Bench), not joiners
     return {"key": p.key, "raid": p.instance, "raid_name": name, "label": f"{reg.local12(p.start, '%I:%M %p')} · {name}",
             "rosters_words": PAGE_WORDS["rosters_of"].format(n=n, size=rc.run_size(reg, p)),
@@ -223,9 +226,11 @@ def _part_view(reg: Registry, rs, p: "rc.RaidEvent", sheet: Callable | None, vie
             # open seats only on a locked roster: an officers' half-made board's empty places are not seats the lock leaves open
             "sheet": sheet(p, None, seated) if sheet is not None else None,
             "board_state": state, "mine": mine,
-            "autofill": (autofill(p) if autofill is not None else {"working": False, "words": None, "failed": False}) if live else None,
-            "undo_box": cq.undo_box_for(reg, p, viewer) if mine else None,
-            "undo_why": PAGE_WORDS["no_moves"] if live and not mine else None,
+            "autofill": (autofill(p) if autofill is not None else {"working": False, "words": None, "failed": False}) if editable else None,
+            "undo_box": undo,
+            "undo_why": None if undo else PAGE_WORDS["no_moves"] if live else PAGE_WORDS["no_undo_locked"] if p.state == "locked" else None,
+            # the sentence under the board: what Auto-fill groups does on this raid now
+            "footer": PAGE_WORDS["board_footer"] if live else PAGE_WORDS["board_footer_locked"] if p.state == "locked" else None,
             "layout": rc.board_layout(reg, p) if live else None,
             # More › Split strategy… (before the lock): the strategy this raid splits by now (rc.run_strategy)
             "strategy": rc.run_strategy(reg, p) if p.state == "open" else None}

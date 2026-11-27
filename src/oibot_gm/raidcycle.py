@@ -229,6 +229,13 @@ class RaidEvent(BaseModel):
     # (set_raid_switch), dropped when it no longer makes sense (prune_switches) or by a whole-event switch; kept through
     # the lock so an Unlock finds it again. Read only through plays_in. Older files have none (extra="ignore" elsewhere)
     switched: dict[str, "RaidSwitch"] = Field(default_factory=dict)
+    # after the lock (2026-11-27, officers' edits after the lock): how many open seats an officer's own board edits left
+    # open — the automatic asks leave that many alone (fill_batch's `hold`); a seat a member gives up is asked for as
+    # before. Kept by apply_layout_locked, emptied by unlock. Older files have none (0)
+    officer_open: int = 0
+    # after the lock, each officer's last board edit, for their one-step Undo: officer id → {before: the board before it,
+    # after: board_rev after it}. A board that changed since (anyone's move, a Can't make it) refuses that Undo
+    board_undo: dict[str, dict] = Field(default_factory=dict)
     split_strategy: Optional[str] = None  # balanced | first | rotation chosen for this run (default: the raid's split_policy)
     cards: dict[str, int] = Field(default_factory=dict)  # officer cards in the roster channel: "health" | "lock:<i>" -> message id
     cards_channel_id: Optional[int] = None
@@ -2911,34 +2918,12 @@ def spec_role(reg: Registry, c: RegisteredCharacter, spec: str) -> str:
     return reg.profile.spec(c.cls, spec).role
 
 
-# a role switch for someone rostered on a locked run is an ask they answer (Switch on the event's Role switches,
-# RaidMixin.send_plan), never a write over their seat: set_signup refuses `spec` there on every surface
-SPEC_SEATED = "{name} holds a seat on the locked roster, so use Switch under the event's Role switches to ask them to play {spec}."
-
-
-def seated_switch_refusal(reg: Registry, ev: RaidEvent, m: Member, c: RegisteredCharacter, spec: str | None) -> str | None:
-    """THE seated-switch guard (set_signup and consequences.member_action_box read it): SPEC_SEATED when `m` holds a
-    seat on the locked roster and the EXPLICIT `spec` for `c` plays another ROLE than that seat (spec_role; its
-    RegistryError for a spec `c` doesn't play). None for no spec, a spec of the seat's role, an open run, no seat, or
-    another character's own spec (Play another character: the reseat, its role change said in the box)."""
-    if not spec or ev.state == "open":
-        return None
-    seat = ev.seat_of(m)
-    if seat is None:
-        return None
-    p = seat[1]
-    role = spec_role(reg, c, spec)
-    if spec == c.spec and c.label != p.character:
-        return None
-    return None if role == p.role else SPEC_SEATED.format(name=m.display_name, spec=spec)
-
-
 def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character: str | None, status: str, source: str = "member", note: str | None = None,
                *, spec: str | None = None, by: str | None = None, respec: bool = False) -> Signup:
     """THE answer write on a first part. `spec` (an officer's role switch): the spec the character plays tonight — its
     own, its offspec or a flex role's (spec_role, refused otherwise); the signup's spec and role follow, its own spec
-    becomes the offspec (as a yes to a switch ask leaves it). Refused (seated_switch_refusal: SPEC_SEATED) once the run
-    is locked and they hold a seat whose ROLE it would change: that switch is an ask. No `spec` for the character
+    becomes the offspec (as a yes to a switch ask leaves it). After the lock an officer's switch of someone rostered is
+    applied to their seat by the caller (RaidMixin.set_answer → reseat_parts, 2026-11-27). No `spec` for the character
     already on a seat of a locked run keeps the signup's spec (a switch stays on Bench as on the seat). `by`: who
     switched them, for the run's log. `respec` (after_character_change's rewrite): the character's own spec changed,
     so the signup always follows it — a swap of spec and offspec is never read as a switch."""
@@ -2954,9 +2939,6 @@ def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character
     # no curated-roster demotion here (roster redesign Phase 0): it keyed on the run key, which lock used to fill with
     # the seated, so a member's own Join after lock was stored as Bench and then seated anyway
     role = spec_role(reg, c, spec) if spec else None
-    refused = seated_switch_refusal(reg, ev, m, c, spec)
-    if refused:
-        raise RegistryError(refused)
     old = ev.signups.get(str(m.discord_id))
     s = carry_joined(old, _signup(reg, m, c, status, source, note))
     if spec and spec != c.spec:
@@ -2967,7 +2949,7 @@ def set_signup(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, character
         # a respec of the character (its own spec changed) is not a switch: the signup follows the new spec
     ev.signups[str(m.discord_id)] = s
     bench_again(ev, old, s)
-    later = drop_raid_switches(rs, ev, m, by) if spec and by and ev.state == "open" else []  # a whole-event switch: one truth
+    later = drop_raid_switches(rs, ev, m, by) if spec and by and ev.state in ("open", "locked") else []  # a whole-event switch: one truth
     ev.log.append(f"{m.display_name} {status} as {c.label}" + (f", {s.spec}" if spec else "") + f" ({source}" + (f", switched by {by})" if by else ")"))
     rs.save(ev, f"{m.display_name} {status}")
     for p in later:  # a whole-event switch: their per-raid switches on the later raids are gone too (one truth)
@@ -2996,10 +2978,10 @@ def bench_again(ev: RaidEvent, old: Signup | None, new: Signup) -> None:
 
 
 # ---------------------------------------------------------------- a role switch for one raid (issue 15)
-# Before the lock an officer may switch someone for ONE raid of an event of several: stored on that raid
-# (RaidEvent.switched) and read through plays_in; their answer stays for the other raids. Refusals, whole sentences:
+# An officer may switch someone for ONE raid of an event of several: stored on that raid (RaidEvent.switched) and read
+# through plays_in before the lock; after it the switch is also written onto their seat there (2026-11-27). Their answer
+# stays for the other raids. Refusals, whole sentences:
 RAID_SWITCH_ONE = "{raid} is the event's only raid, so a switch there is for the whole event."
-RAID_SWITCH_LOCKED = "{raid} is locked, so a switch there is an ask under the event's Role switches."
 RAID_SWITCH_CLOSED = "{raid} has ended or was cancelled, so nobody can switch roles on it."
 RAID_SWITCH_LEAVING = "{name} leaves before {raid}, so they don't play it."
 RAID_SWITCH_NO_ANSWER = "{name} hasn't joined {raid}, so record their answer first."
@@ -3039,7 +3021,7 @@ def event_raid(reg: Registry, rs: "RaidStore", ev: RaidEvent, ref: str) -> RaidE
 def raid_switch_refusal(reg: Registry, rs: "RaidStore", part: RaidEvent, m: Member, character: str | None = None,
                         spec: str | None = None, *, status: str | None = None) -> str | None:
     """THE guard of a per-raid switch (set_raid_switch and every surface's box read it): an event of several raids,
-    this raid open, `m` with a Join or Bench answer there (not leaving before it) — or `status` ("in" | "sub"), the
+    this raid open or locked (not ended or cancelled), `m` with a Join or Bench answer there (not leaving before it) — or `status` ("in" | "sub"), the
     answer the same press records first —, and when given a character of theirs and a spec it plays (spec_role's "Nyx
     doesn't play Fire."). None when it may go ahead."""
     raid = _raid_name(reg, part.instance)
@@ -3047,8 +3029,6 @@ def raid_switch_refusal(reg: Registry, rs: "RaidStore", part: RaidEvent, m: Memb
         return RAID_SWITCH_ONE.format(raid=raid)
     if part.state in ("done", "cancelled") or part.dropped:
         return RAID_SWITCH_CLOSED.format(raid=raid)
-    if part.state != "open":
-        return RAID_SWITCH_LOCKED.format(raid=raid)
     if m.discord_id in part.leaving:
         return RAID_SWITCH_LEAVING.format(name=m.display_name, raid=raid)
     sg = part.signups.get(str(m.discord_id))
@@ -3077,19 +3057,56 @@ def set_raid_switch(reg: Registry, rs: "RaidStore", part: RaidEvent, m: Member, 
         raise RegistryError(why)
     sg = part.signups[str(m.discord_id)]
     raid = _raid_name(reg, part.instance)
-    now_ = plays_in(reg, part, sg)
+    now_ = plays_now(reg, part, sg)
     if (now_.character, now_.spec) == (character, spec):
         raise RegistryError(RAID_SWITCH_SAME.format(name=m.display_name, plays=_plays_words(character, spec, sg.character), raid=raid))
     part.played_as.pop(sg.display_name, None)
     if (character, spec) == (sg.character, sg.spec):
         part.switched.pop(sg.display_name, None)
         part.log.append(f"{sg.display_name} plays {spec} again for {raid} (switched back by {by})")
+        _switch_seat(reg, part, sg)
         rs.save(part, f"{sg.display_name} plays {spec} again (by {by})")
         return "cleared"
     part.switched[sg.display_name] = RaidSwitch(character=character, spec=spec, base=sg.character, by=by, uid=m.discord_id)
     part.log.append(f"{sg.display_name} plays {_plays_words(character, spec, sg.character)} for {raid} (switched by {by})")
+    _switch_seat(reg, part, sg)
     rs.save(part, f"{sg.display_name} plays {spec} for {raid} (by {by})")
     return "set"
+
+
+def _switch_seat(reg: Registry, part: RaidEvent, sg: Signup) -> bool:
+    """A per-raid switch on a LOCKED raid (2026-11-27): their seat there plays what the switch says (or their answer
+    again), at once and quietly — character, class, spec, role. True when a seat changed."""
+    if part.state != "locked" or (hit := part.seat_of(sg.discord_id)) is None:
+        return False
+    i, p = hit
+    x = _plays(reg, part, sg)
+    if (p.character, p.cls, p.spec) == (x.character, x.cls, x.spec):
+        return False
+    p.character, p.cls, p.spec, p.role, p.offspec = x.character, x.cls, x.spec, x.role, x.offspec
+    part.all_rosters[i].role_counts = {r: sum(1 for q in part.all_rosters[i].selected if q.role == r) for r in ROLES}
+    on_roster_change(reg.key, part, changed=[sg.discord_id])
+    return True
+
+
+def reseat_parts(reg: Registry, rs: "RaidStore", first: RaidEvent, m: Member) -> list[str]:
+    """An officer's whole-event answer or switch for `m` after the lock (2026-11-27): every locked raid of the event where
+    they hold a seat plays their answer now (_reseat: character, spec, role), quietly. One save per raid changed. → the
+    raid keys reseated."""
+    done = []
+    for p in event_parts(rs, first):
+        sg = p.signups.get(str(m.discord_id))
+        if p.state == "locked" and sg is not None and sg.status != "out" and p.seat_of(m.discord_id) is not None:
+            hit = p.seat_of(m.discord_id)
+            was = (hit[1].character, hit[1].spec)
+            _reseat(p, sg, reg.key)
+            if (hit[1].character, hit[1].spec) != was:
+                r = p.all_rosters[hit[0]]
+                r.role_counts = {role: sum(1 for q in r.selected if q.role == role) for role in ROLES}
+                p.log.append(f"{sg.display_name}'s seat plays {_plays_words(sg.character, sg.spec, was[0])} now")
+            rs.save(p, f"{sg.display_name} seat updated")
+            done.append(p.key)
+    return done
 
 
 def join_character(m: Member, sg: Signup | None, character: str) -> str:
@@ -3110,7 +3127,7 @@ def raid_switch_options(reg: Registry, rs: "RaidStore", part: RaidEvent, m: Memb
     c = next((c for c in m.active() if c.label == sg.character), None)
     if c is None:
         return []
-    now_ = plays_in(reg, part, sg)
+    now_ = plays_now(reg, part, sg)
     out = []
     for spec in specs_of(reg, c):
         if (now_.character, now_.spec) == (c.label, spec):
@@ -3174,12 +3191,12 @@ def drop_stale_switches(reg: Registry, rs: "RaidStore", m: Member) -> list[RaidE
 
 
 def drop_raid_switches(rs: "RaidStore", first: RaidEvent, m: Member, by: str) -> list[RaidEvent]:
-    """An officer's whole-event switch replaces `m`'s per-raid switches (one truth): taken off every open raid of the
-    event, one log line on each. The caller saves the first raid; → the LATER raids changed, for the caller to save."""
+    """An officer's whole-event switch replaces `m`'s per-raid switches (one truth): taken off every open or locked raid
+    of the event, one log line on each. The caller saves the first raid; → the LATER raids changed, for the caller to save."""
     out = []
     for p in event_parts(rs, first):
         sg = p.signups.get(str(m.discord_id))
-        if p.state == "open" and sg is not None and p.switched.pop(sg.display_name, None) is not None:
+        if p.state in ("open", "locked") and sg is not None and p.switched.pop(sg.display_name, None) is not None:
             p.log.append(f"{sg.display_name}'s switch for this raid gave way to {by}'s switch for the whole event")
             if p.key != first.key:
                 out.append(p)
@@ -3187,8 +3204,9 @@ def drop_raid_switches(rs: "RaidStore", first: RaidEvent, m: Member, by: str) ->
 
 
 def raid_switches_of(rs: "RaidStore", first: RaidEvent, m: Member) -> list[RaidEvent]:
-    """The open raids of `first`'s event where `m` has a per-raid switch (a whole-event switch's box says it replaces them)."""
-    return [p for p in event_parts(rs, first) if p.state == "open" and (sg := p.signups.get(str(m.discord_id))) is not None
+    """The open or locked raids of `first`'s event where `m` has a per-raid switch (a whole-event switch's box says it
+    replaces them)."""
+    return [p for p in event_parts(rs, first) if p.state in ("open", "locked") and (sg := p.signups.get(str(m.discord_id))) is not None
             and sg.display_name in p.switched]
 
 
@@ -3814,12 +3832,13 @@ def fill_candidates(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict | No
     return role_plan(reg, rs, ev, team, swaps=swaps).asks
 
 
-def fill_batch(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict | None = None, *, swaps: bool = True) -> list[FillAsk]:
+def fill_batch(reg: Registry, rs: RaidStore, ev: RaidEvent, team: dict | None = None, *, swaps: bool = True, hold: int = 0) -> list[FillAsk]:
     """The next asks the fill engine sends now: shortfall + FILL_OVERASK, capped so at most FILL_MAX_OPEN are
-    outstanding — never cutting a tied swap from its backfill."""
+    outstanding — never cutting a tied swap from its backfill. `hold`: open seats the automatic asks leave alone (the
+    seats an officer's own edits left open, RaidEvent.officer_open): the shortfall is that much smaller."""
     open_asks = [a for a in ev.fill_asks if a.pending and not parallel_shadowed(ev, a)]  # a parallel twin is not a second ask out
     nd = needs(reg, ev, team)
-    want = nd["headcount"] + sum(nd["roles"].values())
+    want = nd["headcount"] + sum(nd["roles"].values()) - max(0, int(hold or 0))
     if want <= 0:
         return []
     room = max(0, min(want + FILL_OVERASK, FILL_MAX_OPEN) - len(open_asks))
@@ -3908,7 +3927,9 @@ def switch_box_for(reg: Registry, rs: "RaidStore", part: RaidEvent, m: Member, c
     `scope` (before the lock, issue 15) a raid's key | "event" ("raid" = `part`'s): where switch_scopes offers the choice
     for the raids the row helps (`helps`, default `part`), the box carries it as `scope` {label, value, options
     [{value: each raid's key, label: its name}, {value: "event", label: SCOPE_EVENT}]} and a raid's key is a switch for
-    that raid alone (consequences.raid_switch_box); "event" (or no choice offered) is the whole-event box above."""
+    that raid alone (consequences.raid_switch_box); "event" (or no choice offered) is the whole-event box above.
+    After the lock (2026-11-27) a rostered person's row is Switch (their seat switches at once, nobody told); a row for
+    someone not rostered stays Ask (an offer of an open seat, as Fill seats sends)."""
     from . import consequences as cq
     from .constants import PAGE_WORDS
 
@@ -3932,8 +3953,9 @@ def switch_box_for(reg: Registry, rs: "RaidStore", part: RaidEvent, m: Member, c
                                 "options": [{"value": p.key, "label": _raid_name(reg, p.instance)} for p in choices]
                                 + [{"value": "event", "label": SCOPE_EVENT}]}}
         return b, PAGE_WORDS["switch_button"]
-    box = cq.switch_box(reg, part, m, character, spec, [part.instance], locked=True, swap=swap, rev=plan_rev + member_state_rev(part, m))
-    return box, PAGE_WORDS["ask_button"]
+    seated = swap and part.seat_of(m) is not None  # rostered: their seat switches at once, quietly (2026-11-27)
+    box = cq.switch_box(reg, part, m, character, spec, [part.instance], locked=True, swap=seated, rev=plan_rev + member_state_rev(part, m))
+    return box, PAGE_WORDS["switch_button" if seated else "ask_button"]
 
 
 def _plays_words(character: str, spec: str, base: str | None) -> str:
@@ -3970,8 +3992,8 @@ def event_switches(reg: Registry, rs: "RaidStore", first: RaidEvent, *, viewer: 
     alone), so a row is per raid, and the officer's own row is left out (it would ask themselves). Ordered by role, then
     suggestions before alternates. `from` / `to`: 'Shadow', 'Nyx, Shadow' when the character changes, PAGE_WORDS
     no_answer_yet (or Bench) without a Join. `answered` = they joined; `button` = the press's word from the server:
-    Switch (a joined member's answer, or the officer's own, before the lock) · Answer for them (anyone else before the
-    lock) · Ask (after the lock)."""
+    Switch (a joined member's answer, or the officer's own, before the lock; a rostered person's seat after it) ·
+    Answer for them (anyone else before the lock) · Ask (someone not rostered, after the lock)."""
     from .constants import PAGE_WORDS
 
     first = first_part(rs, first)
@@ -4421,6 +4443,22 @@ def plays_in(reg: Registry, ev: RaidEvent, s: Signup) -> Signup:
     players_for); the public sheet keeps the answer itself."""
     if ev.state != "open" or s.status not in ("in", "sub"):
         return s
+    return _plays(reg, ev, s)
+
+
+def plays_now(reg: Registry, ev: RaidEvent, s: Signup) -> Signup:
+    """What `s` plays in raid `ev` right now for a per-raid switch's "already plays" check: their seat on a locked raid
+    (the seat is the truth after the lock), else plays_in."""
+    hit = ev.seat_of(s.discord_id) if ev.state == "locked" else None
+    if hit is None:
+        return plays_in(reg, ev, s)
+    p = hit[1]
+    return s.model_copy(update={"character": p.character or s.character, "cls": p.cls, "spec": p.spec, "role": p.role})
+
+
+def _plays(reg: Registry, ev: RaidEvent, s: Signup) -> Signup:
+    """plays_in's reading whatever the raid's state: the per-raid switch, else the unlocked offspec seat, else `s`
+    (_switch_seat writes it onto a locked raid's seat)."""
     sw = ev.switched.get(s.display_name)
     if sw is not None:
         cls = s.cls if sw.character == s.character else None
@@ -5255,19 +5293,17 @@ def record_moves(ev: RaidEvent, name: str, at_before: dict, groups: list[list[st
 
 NOT_ON_SHEET = "{name} hasn't answered Join or Bench on this event."  # apply_move's and plain text's run_move refusal
 NOT_ON_SHEET_MANY = "These names haven't answered Join or Bench on this event: {names}."  # plain text's run_board refusal
-# a Bench answer off a locked roster: they can't be dragged on; an open seat is offered to the bench first (by the
-# automatic asks or More › Fill seats…, as the event's Automated Fill Requests say)
-BENCH_LOCKED = "{name} answered Bench, so they can't be put on the roster until an open seat is offered to them."
 
 
 def board_names(ev: RaidEvent) -> set[str]:
-    """THE names a run's board may hold (design §3 of 2026-11-25-member-events-and-bench): while open, everyone who
-    answered Join or Bench (a Bench name an officer or Auto-fill places is a hand / auto placement the lock keeps);
-    once locked, everyone who answered Join plus every rostered name (a Bench answer the lock rostered stays on the
-    roster through an officer's drag). prune_board, apply_move, autofill and RaidMixin._write_board read it."""
+    """THE names a run's board may hold (design §3 of 2026-11-25-member-events-and-bench): everyone who answered Join or
+    Bench (a Bench name an officer or Auto-fill places is a hand / auto placement the lock keeps; after the lock an
+    officer may put a Bench answer on the roster too — 2026-11-27, the lock closes the sheet to members, not to
+    officers), plus, once locked, every rostered name (a seat whose answer changed since stays draggable).
+    prune_board, apply_move, autofill and RaidMixin._write_board read it."""
+    out = {s.display_name for s in ev.signups.values() if s.status in ("in", "sub")}
     if ev.state == "open":
-        return {s.display_name for s in ev.signups.values() if s.status in ("in", "sub")}
-    out = {s.display_name for s in ev.signups.values() if s.status == "in"}
+        return out
     for p in ev.seated():
         out.add(p.signup_name)
         uid = player_uid(ev, p)
@@ -5361,6 +5397,9 @@ def undo_rev(reg: Registry, ev: RaidEvent, by_id: int | None) -> str:
     RaidMixin.undo_moves' check: a board, or a set of moves, that changed since the box was shown is refused."""
     import hashlib
 
+    if ev.state == "locked":  # the one-step Undo of a locked roster: the board and whether this officer's last edit stands
+        rec = undo_record(reg, ev, by_id)
+        return board_rev(reg, ev) + hashlib.sha1(repr(rec["before"] if rec else None).encode()).hexdigest()[:8]
     return board_rev(reg, ev) + hashlib.sha1("\n".join(own_moves(ev, by_id)).encode()).hexdigest()[:8]
 
 
@@ -5385,11 +5424,10 @@ def apply_move(reg: Registry, ev: RaidEvent, name: str, to: tuple[int, int] | No
     """One drag applied to the CURRENT board (so concurrent officers merge instead of overwriting each other):
     `to` = (flat group index, position) or None for the bank. Dropping on someone swaps (they take the mover's old
     place, or go to the bank when the mover came from it). Raises ValueError when the group is full or the name
-    is not one the board may hold (board_names: NOT_ON_SHEET; a Bench answer off a locked roster: BENCH_LOCKED).
+    is not one the board may hold (board_names: NOT_ON_SHEET).
     Returns the new flat layout; the caller saves it the way a whole-board write would be."""
     if name not in board_names(ev):
-        sg = signup_by_name(ev, name)
-        raise ValueError((BENCH_LOCKED if sg is not None and sg.status == "sub" else NOT_ON_SHEET).format(name=name))
+        raise ValueError(NOT_ON_SHEET.format(name=name))
     layout = board_layout(reg, ev)
     gsize = int(reg.profile.comp_rules["group_size"])
     origin = next(((gi, g.index(name)) for gi, g in enumerate(layout) if name in g), None)
@@ -5727,58 +5765,170 @@ def autofill(reg: Registry, rs: RaidStore, ev: RaidEvent, earlier: dict[int, int
     return layout, sorted({x for g in layout for x in g} - by_hand)
 
 
-def apply_layout_locked(reg: Registry, rs: RaidStore, ev: RaidEvent, layout: list[list[str]]) -> tuple[list[Signup], list[str]]:
-    """After lock the board is the roster: group moves are free; someone dragged in from the bench is a substitution
-    (returned so the caller asks them to confirm); someone dragged out has their seat freed. One commit."""
+def autofill_locked(reg: Registry, rs: RaidStore, ev: RaidEvent, earlier: dict[int, int] | None = None,
+                    stop=None) -> tuple[list[list[str]], list[str]]:
+    """Auto-fill groups on a LOCKED roster (2026-11-27): the lock's own solve once on a copy whose board is the roster as
+    it stands (every rostered name a fixed placement), and only the people it adds are kept — each into an OPEN place,
+    in the roster and group the solve put them in when that has room, else the first place with room in that roster,
+    else any roster's. Nobody rostered moves and the roster count never changes; the solve's own order picks who (Not
+    rostered first, then the Bench — its Bench-last rule). PURE (BLOCKING: a thread). → (the whole board, the names
+    added); the caller writes it through the quiet path (apply_layout_locked)."""
+    board = board_layout(reg, ev)
+    k = groups_per_roster(reg, run_size(reg, ev))
+    gsize = int(reg.profile.comp_rules["group_size"])
+    size = run_size(reg, ev)
+    trial = ev.model_copy(deep=True)
+    trial.state, trial.rosters = "open", []
+    trial.layout = [list(g) for g in board] if any(board) else None
+    trial.auto_placed, trial.switched, trial.played_as = [], {}, {}
+    _players, rosters, _ = _solve_run(reg, rs, trial, time_limit=SOLVE_TIME_LIMIT_S, whatif=False, earlier=earlier, stop=stop)
+    on = {n for g in board for n in g}
+    allowed = board_names(ev)
+    picks: list[tuple[int, str]] = []  # (the solve's flat group, name) for each name it adds, in its order
+    for ri, r in enumerate(rosters):
+        for gi, g in enumerate(r.groups):
+            picks += [(ri * k + gi, x) for x in g if x not in on and x in allowed]
+    layout = [list(g) for g in board]
+    n_rosters = len(layout) // k if k else 1
+    seated = [sum(len(layout[ri * k + g]) for g in range(k)) for ri in range(n_rosters)]
+
+    def room(gi: int) -> bool:
+        return 0 <= gi < len(layout) and len(layout[gi]) < gsize and seated[gi // k] < size
+
+    added: list[str] = []
+    for gi, x in picks:
+        if x in added:
+            continue
+        ri = gi // k
+        spot = gi if room(gi) else next((ri * k + g for g in range(k) if ri < n_rosters and room(ri * k + g)), None)
+        if spot is None:
+            spot = next((g for g in range(len(layout)) if room(g)), None)
+        if spot is None:
+            break  # every seat is taken
+        layout[spot].append(x)
+        seated[spot // k] += 1
+        added.append(x)
+    return layout, added
+
+
+def apply_layout_locked(reg: Registry, rs: RaidStore, ev: RaidEvent, layout: list[list[str]], *, by: str = "an officer",
+                        by_id: int | None = None) -> tuple[list[Signup], list[str]]:
+    """THE quiet path (2026-11-27, the lock closes the sheet to members, not to officers): an officer's edit of a locked
+    roster — a move, a swap, a substitute, a take-off, Auto-fill groups' open-seat fill, an Undo, a whole-board write.
+    Exactly the seats asked change, across every roster, and the roster COUNT never changes (a split council's roster
+    index stays valid; an emptied roster stays, its places to drop into). Nobody is told: a newcomer keeps their answer
+    (Join or Bench) and gets no Confirm ask (so nothing expires for them); a removed person keeps their answer and waits
+    in Not rostered / Bench (unseat: their OPEN Confirm ask closes, a yes stays); no notice, no DM, no fill ask — and the
+    seats an officer leaves open are held from the automatic asks (`officer_open`). `by_id` (the site's officer) gets a
+    one-step Undo of this edit (`board_undo`). One commit. → (the signups put on the roster, the names taken off)."""
     with rs.store.batch(f"{rs.key}: raid {ev.key}: board updated"):
-        return _apply_layout_locked(reg, rs, ev, layout)
+        return _apply_layout_locked(reg, rs, ev, layout, by, by_id)
 
 
-def _apply_layout_locked(reg: Registry, rs: RaidStore, ev: RaidEvent, layout: list[list[str]]) -> tuple[list[Signup], list[str]]:
+def _apply_layout_locked(reg: Registry, rs: RaidStore, ev: RaidEvent, layout: list[list[str]], by: str,
+                         by_id: int | None) -> tuple[list[Signup], list[str]]:
     # the board is names (what people drag); seats are keyed by member id, so a name is resolved once (uid_of_name: the
     # signup, else the seat still carrying the name from before a nick change) and the groups are rewritten with the
     # current names
     n = groups_per_roster(reg, run_size(reg, ev))
+    if not ev.rosters:
+        ev.rosters.append(RosterResult(selected=[], benched=[], groups=[[] for _ in range(n)], group_reports=[], objective=0, synergy_value=0, role_counts={}, advisories=[]))
+    k = len(ev.rosters)  # the roster count stands: a layout reaching past the last roster is cut there
+    board_before = board_layout(reg, ev)
+    open_before = open_seat_count(reg, ev)
     before = {player_uid(ev, p): p for p in ev.seated()}
     players = {player_uid(ev, p): p for p in players_for(reg, ev)}
-    layout_uids = [[u for u in (uid_of_name(ev, m) for m in g) if u is not None and u in players] for g in layout]
+    seen: set = set()
+    layout_uids = []
+    for g in list(layout)[:k * n]:
+        row = []
+        for m in g:
+            u = uid_of_name(ev, m)
+            if u is None or u in seen or (u not in players and u not in before):
+                continue
+            seen.add(u)
+            row.append(u)
+        layout_uids.append(row)
     after = {u for g in layout_uids for u in g}
     removed_uids = [u for u in before if u not in after]
     removed = [before[u].signup_name for u in removed_uids]
     for u in removed_uids:
-        free_seat(reg, rs, ev, u, "moved to bench")
-    players = {player_uid(ev, p): p for p in players_for(reg, ev)}  # after the frees: a freed signup is out, not on the bench
+        unseat(reg, rs, ev, u, by, save=False)
     added: list[Signup] = []
-    for i in range(max(len(ev.all_rosters), -(-len(layout_uids) // n))):
+    keep = {u: p for x in ev.rosters for p in x.selected if (u := player_uid(ev, p)) in after}  # a seat moved keeps its Player (its spec)
+    for i in range(k):
         guids = layout_uids[i * n:(i + 1) * n] + [[] for _ in range(n - len(layout_uids[i * n:(i + 1) * n]))]
-        groups = [[players[u].signup_name for u in g] for g in guids]
-        if i >= len(ev.rosters):
-            ev.rosters.append(RosterResult(selected=[], benched=[], groups=groups, group_reports=[], objective=0, synergy_value=0, role_counts={}, advisories=[]))
         r = ev.rosters[i]
-        r.groups = groups
         want = [u for g in guids for u in g]
-        keep = {player_uid(ev, p): p for p in r.selected if player_uid(ev, p) in want}
+        seats = []
         for u in want:
-            if u not in keep:
-                sg = ev.signups.get(str(u))
-                if sg and u not in before:
-                    added.append(sg)
-                keep[u] = players[u]
-            elif keep[u].signup_name != players[u].signup_name:  # the groups were just written with the signup's name: the kept seat follows
-                keep[u].signup_name = players[u].signup_name
-        r.selected = [keep[u] for u in want]
+            p = keep.get(u) or players.get(u)
+            if p is None:
+                continue
+            if u not in before and (sg := ev.signups.get(str(u))) is not None:
+                added.append(sg)
+            if (sg := ev.signups.get(str(u))) is not None and p.signup_name != sg.display_name:
+                p.signup_name = sg.display_name  # one name per seat: the groups are written with the signup's name
+            seats.append(p)
+        by_uid = {player_uid(ev, p): p for p in seats}
+        r.groups = [[by_uid[u].signup_name for u in g if u in by_uid] for g in guids]
+        r.selected = seats
         r.role_counts = {role: sum(1 for p in r.selected if p.role == role) for role in ROLES}
-    ev.rosters = [r for r in ev.rosters if r.selected or r is ev.rosters[0]]
     seated = {player_uid(ev, p) for p in ev.seated()}
+    players = {player_uid(ev, p): p for p in players_for(reg, ev)}
     ev.rosters[0].benched = [p for u, p in players.items() if u not in seated and p.status == "signed"]
-    for sg in added:
-        sg.joined_at = sg.order_at if sg.status == "in" else now()
-        sg.benched_at = None
-        sg.status, sg.source, sg.updated_at = "in", "officer", now()
-    ev.log.append("board: " + (f"+{', '.join(s.display_name for s in added)} " if added else "") + (f"-{', '.join(removed)}" if removed else "") or "board: groups moved")
+    open_after = open_seat_count(reg, ev)
+    ev.officer_open = min(open_after, max(0, int(ev.officer_open or 0) + open_after - open_before))
+    ev.log.append(f"board ({by}): " + ((f"+{', '.join(s.display_name for s in added)} " if added else "") + (f"-{', '.join(removed)}" if removed else "")).strip()
+                  if added or removed else f"board ({by}): groups moved")
+    if by_id is not None:
+        ev.board_undo[str(by_id)] = {"before": board_before, "after": board_rev(reg, ev)}
     rs.save(ev, "board updated")
-    on_roster_change(rs.key, ev, added=[s.discord_id for s in added])  # the removed were told by free_seat
+    on_roster_change(rs.key, ev, added=[s.discord_id for s in added])  # the removed: unseat told the listeners
     return added, removed
+
+
+def unseat(reg: Registry, rs: RaidStore, ev: RaidEvent, who, by: str, *, save: bool = True) -> Player | None:
+    """An officer takes someone off a locked roster (the quiet path, apply_layout_locked): the seat opens and their answer
+    stays what it was — Join or Bench — so they wait in Not rostered (or Bench) and can be put back. Their OPEN Confirm
+    ask closes (`released`: an old card's press is refused; the caller edits the card to its final state); a yes they
+    gave stays, so a drag back or an Undo finds them confirmed. No notice, no fill ask, no later raid touched (each raid's
+    board is its own). `who`: a Member, a Discord id or a display name (ev.seat_of). → the seat's Player, None when they
+    held none."""
+    hit = ev.seat_of(who)
+    if not hit:
+        return None
+    i, p = hit
+    uid = player_uid(ev, p)
+    r = ev.all_rosters[i]
+    r.selected = [x for x in r.selected if x is not p]
+    r.groups = [[n for n in g if n != p.signup_name and (uid is None or uid_of_name(ev, n) != uid)] for g in r.groups]
+    sg = ev.signups.get(str(uid)) if uid is not None else None
+    ev.log.append(f"off the roster: {sg.display_name if sg else p.signup_name} (by {by})")
+    if uid is not None:
+        reg.close_placement_ask(uid, ev.team, "released", by)
+    if save:
+        rs.save(ev, f"off the roster {p.signup_name}")
+    on_roster_change(rs.key, ev, removed=[uid if uid is not None else p.signup_name], roster_of={uid if uid is not None else p.signup_name: i})
+    return p
+
+
+def board_line(added: list[str], removed: list[str]) -> str:
+    """What an officer's edit of a locked roster did, as the reply every surface shows (the site's toast, plain text, MCP):
+    'Kestrel is rostered now. Brann is off the roster now.' — or that only the groups moved."""
+    def who(names: list[str], verb: str) -> str:
+        return f"{join_words(names)} {'is' if len(names) == 1 else 'are'} {verb}."
+    out = ([who(added, "rostered now")] if added else []) + ([who(removed, "off the roster now")] if removed else [])
+    return " ".join(out) or "The groups are moved, and everyone keeps their seat."
+
+
+def undo_record(reg: Registry, ev: RaidEvent, by_id: int | None) -> dict | None:
+    """Officer `by_id`'s one-step Undo on a locked roster (ev.board_undo), while the board is still the one their last
+    edit left (board_rev); else None."""
+    if by_id is None or ev.state != "locked":
+        return None
+    rec = ev.board_undo.get(str(by_id))
+    return rec if rec and rec.get("after") == board_rev(reg, ev) else None
 
 
 # ---------------------------------------------------------------- after lock: confirmations and freed seats
@@ -6198,6 +6348,7 @@ def unlock(reg: Registry, rs: RaidStore, ev: RaidEvent, by: str, *, fills: bool 
         p.lock_seats, p.confirmations_sent_at, p.lock_fill = None, None, None
         p.autofill_paused, p.autofill_paused_by, p.fill_state = False, None, "idle"
         p.reminded_at, p.reminded_by, p.health_posted = None, None, True
+        p.officer_open, p.board_undo = 0, {}  # the officers' edits after the lock are the board now
         if fills:
             out.fills += withdraw_fill_asks(p, by)
         p.log.append(f"unlocked by {by}: back to open signup with its rosters on the board")
@@ -7287,8 +7438,8 @@ def member_actions(reg: Registry, ev: RaidEvent, m: Member) -> list[dict]:
     site's row ⋮ menu read this one list): Confirm / Can't make it for their open Confirm ask · Confirm / No to their
     open fill ask · Record a callout (with an optional note; before lock it is No thanks + the callout) · Join (as
     <alt>) · Bench · No thanks (an answer change: no callout record) · Pin to roster / Keep off the roster / Unpin (open
-    sheet, on it). Each: {key, label, needs, characters?: [labels], respec?: True — a joined member's Join that picks
-    another spec before the lock: a surface with no spec field (a board's ⋮, which offers rc.raid_switch_options) leaves it out}."""
+    sheet, on it). Each: {key, label, needs, characters?: [labels], respec?: True — a joined (or, after the lock,
+    rostered) member's Join that picks another spec: a surface with no spec field (a board's ⋮, which offers rc.raid_switch_options) leaves it out}."""
     if ev.state not in ("open", "locked"):
         return []
     s = ev.signups.get(str(m.discord_id))
@@ -7308,9 +7459,9 @@ def member_actions(reg: Registry, ev: RaidEvent, m: Member) -> list[dict]:
         add("fill_no", label=f"No to their {'swap' if ask.swap else 'fill'}")
     if seat or s is None or s.status != "out":  # a callout for someone who told an officer they can't come (answered or not)
         add("callout", "note")
+    cur = next((c for c in m.active() if s is not None and c.label == s.character), None)
+    respec = cur is not None and len(specs_of(reg, cur)) > 1  # a joined character with another spec
     if ev.state == "open" or not seat:
-        cur = next((c for c in m.active() if s is not None and c.label == s.character), None)
-        respec = ev.state == "open" and cur is not None and len(specs_of(reg, cur)) > 1  # a joined character with another spec
         if s is None or s.status != "in":
             add("join", "character" if len(chars) > 1 else None, characters=chars)
         elif respec:  # the role switch before the lock ("Plays which spec?"; issue 15: for the whole event or one raid)
@@ -7318,6 +7469,9 @@ def member_actions(reg: Registry, ev: RaidEvent, m: Member) -> list[dict]:
                 characters=[s.character] + [c for c in chars if c != s.character], respec=True)
         elif len(chars) > 1:
             add("join", "character", label="Join as another character", characters=[c for c in chars if c != s.character])
+    elif respec:  # rostered after the lock: the seat switches at once, quietly (2026-11-27; set_answer → reseat_parts)
+        add("join", "character", label="Play another spec or character" if len(chars) > 1 else "Play another spec",
+            characters=[s.character] + [c for c in chars if c != s.character], respec=True)
     elif len(chars) > 1:  # rostered: a character swap keeps the seat (set_answer reseats)
         add("join", "character", label="Play another character", characters=[c for c in chars if c != (s.character if s else None)])
     if s is None or s.status != "sub":

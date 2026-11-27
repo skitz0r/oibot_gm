@@ -2036,8 +2036,7 @@ def _joined_name(ev, m) -> str:
 
     sg = ev.signups.get(str(m.discord_id))
     if sg is None or sg.display_name not in rc.board_names(ev):
-        bench = sg is not None and sg.status == "sub"
-        raise RegistryError((rc.BENCH_LOCKED if bench else rc.NOT_ON_SHEET).format(name=sg.display_name if bench else m.display_name))
+        raise RegistryError(rc.NOT_ON_SHEET.format(name=m.display_name))
     return sg.display_name
 
 
@@ -2105,10 +2104,10 @@ def _move_plan(reg: Registry, ev, op: ConfigOp) -> tuple[str, tuple[int, int] | 
         raise RegistryError(str(e))
     locked = ev.state != "open"
     effect = ""
-    if locked and origin is None and to is not None:
-        effect = " — rostered and asked to confirm" + (f"; {swap} goes to the bench and their seat is freed" if swap else "")
+    if locked and origin is None and to is not None:  # the quiet path (rc.apply_layout_locked): nobody asked or told
+        effect = " — rostered, nobody gets a DM" + (f"; {swap} comes off the roster and keeps their answer" if swap else "")
     elif locked and origin is not None and to is None:
-        effect = " — seat freed, the fill engine looks for cover"
+        effect = " — off the roster, keeps their answer, nobody gets a DM"
     elif not locked:
         effect = " (the layout the lock will use)"
     head = f"swap {name} ({_group_words(reg, ev, origin)}) with {swap}" if swap and origin is not None else f"move {name}: {_group_words(reg, ev, origin)} → {where}"
@@ -2208,7 +2207,9 @@ def _propose_args(reg: Registry, ev, op: ConfigOp) -> tuple[str, str | None]:
     from .registry import SPLIT_POLICIES
 
     if ev.state != "open":
-        raise RegistryError(f"{run_words(reg, ev)} is {ev.state} — proposals shape an open event's board (move people instead)")
+        from .consequences import PROPOSE_LOCKED
+
+        raise RegistryError(PROPOSE_LOCKED if ev.state == "locked" else f"{run_words(reg, ev)} is {ev.state}, so nothing can be proposed for it.")
     f = (op.field or "").strip().lower().replace("fresh", "").replace("new", "")
     f = {"again": "another", "different": "another", "apply": "use", "use it": "use", "use this": "use"}.get(f, f)
     if f not in PROPOSE_FIELDS:
@@ -3111,8 +3112,10 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         now = f"now {rc.LABELS[cur.status]} as {cur.character}" if cur else "hasn't answered"
         spec = (op.field or "").strip() if want != "out" else ""
         char = (f" as {op.character}" if op.character else "") + (f", playing {spec}" if spec else "")
-        effect = {"in": " — rostered and asked to confirm" if ev.state == "locked" else "", "sub": " — keeps the seat until set No thanks" if ev.state == "locked" and ev.seat_of(m) else "",
-                  "out": " — seat freed, the fill engine looks for cover" if ev.state == "locked" and ev.seat_of(m) else ""}[want]
+        locked, seat = ev.state == "locked", ev.seat_of(m) if ev.state == "locked" else None  # the quiet path after the lock
+        effect = {"in": (" — keeps the seat, nobody gets a DM" if seat else " — waits in Not rostered, nobody gets a DM") if locked else "",
+                  "sub": " — keeps the seat until set No thanks, nobody gets a DM" if seat else " — nobody gets a DM" if locked else "",
+                  "out": " — seat open, nobody gets a DM" if seat else ""}[want]
         note = (op.reason or "").strip()
         if want == "out" and note:  # a callout with its reason (RaidMixin.call_out): the note is for the officers only
             effect += f" — a callout; note for the officers: “{note}”"
@@ -3209,8 +3212,11 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
             raise RegistryError(why)
         return f"{label}: split strategy {ev.split_strategy or reg.raid_def(ev.instance).get('split_policy', 'balanced')} → {v} (Auto-fill groups and the lock split it this way)"
     if op.op == "run_autofill":
+        if ev.state == "locked":  # a locked roster (2026-11-27): only its open seats, the quiet path
+            return (f"{label}: auto-fill the {rc.open_seat_count(reg, ev)} open seat(s) from Not rostered, then the bench — "
+                    "nobody rostered moves and nobody gets a DM")
         if ev.state != "open":
-            raise RegistryError("already locked — move people on the board instead")
+            raise RegistryError(f"{label} is {ev.state}, so there is no board to fill.")
         placed = sum(len(g) for g in (ev.layout or []))
         return f"{label}: auto-fill the board — the bot builds the groups, placing the {len(ev.by_status('in'))} joined around the {placed} already placed (nothing is locked or sent)"
     if op.op == "run_board":
@@ -3222,7 +3228,9 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         before = {p.signup_name for p in ev.seated()}
         after = {n for g in layout for n in g}
         added, removed = sorted(after - before), sorted(before - after)
-        return f"{label}: roster → {groups}" + (f"; asked to confirm: {', '.join(added)}" if added else "") + (f"; freed: {', '.join(removed)}" if removed else "") + ("" if added or removed else " (group moves only)")
+        # after the lock: the quiet path (rc.apply_layout_locked) — nobody asked, DMed or told
+        return (f"{label}: roster → {groups}" + (f"; rostered: {', '.join(added)}" if added else "") + (f"; off the roster, keeping their answer: {', '.join(removed)}" if removed else "")
+                + ("" if added or removed else " (group moves only)") + " — nobody gets a DM")
     raise RegistryError(f"unsupported op {op.op}")
 
 
@@ -3429,8 +3437,10 @@ def apply(reg: Registry, op: ConfigOp, by: str, is_owner: bool, policy_store=Non
         from . import raidcycle as rc
 
         rs, ev = _live_event(reg, op.target, raids)
+        if ev.state == "locked":
+            raise RegistryError(f"run_autofill on a locked event {NEEDS_BOT}")
         if ev.state != "open":
-            raise RegistryError("already locked — move people on the board instead")
+            raise RegistryError(f"{run_words(reg, ev)} is {ev.state}, so there is no board to fill.")
         try:  # the lock's own solve (a later raid reads who the raids before it will roster, as its lock does)
             layout, auto = rc.autofill(reg, rs, ev, earlier=rc.earlier_counts(reg, rs, ev))
         except Exception as e:  # noqa: BLE001 — infeasible, a conflict, timed out: the solver's sentence
@@ -3991,7 +4001,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         said = await autofill_of(bot).start(reg, rs, ev, by=by, by_id=by_id, via=via)
         if said is not None:  # a drag during the solve wins (the fill writes nothing), a lock stops it, a failure says why
             raise RegistryError(said)
-        layout = [g for g in (ev.layout or []) if g]
+        layout = [g for g in rc.board_layout(reg, ev) if g]
         return f"{run_words(reg, ev)}: board auto-filled ({sum(len(g) for g in layout)} rostered in {len(layout)} groups)"
     # run_strategy, run_fill preview: registry/store only
     if op.op == "run_fill":

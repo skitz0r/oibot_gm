@@ -397,14 +397,14 @@ def test_a_benched_player_with_the_lead_seat_bonus_never_takes_a_joiners_seat_on
 
 # ---------------------------------------------------------------- the board keeps Bench names (task 5)
 
-def test_board_names_are_join_and_bench_while_open_and_join_plus_the_roster_once_locked(reg, rs):
+def test_board_names_are_join_and_bench_before_and_after_the_lock(reg, rs):
     ev, joiners, core, raider, trial = case_one(reg, rs)
     out = people(reg, 1, DPS)[0]
     join(reg, rs, ev, [out], "out")
     assert rc.board_names(ev) == names(joiners) | names([core, raider, trial])
     rc.propose(reg, rs, ev, save=False)
-    ev.state = "locked"
-    assert rc.board_names(ev) == names(joiners) | {core.display_name, raider.display_name}
+    ev.state = "locked"  # an officer may put a Bench answer on the locked roster too (2026-11-27)
+    assert rc.board_names(ev) == names(joiners) | names([core, raider, trial])
 
 
 def test_a_bench_name_can_be_placed_and_survives_a_save(reg, rs):
@@ -486,13 +486,13 @@ def test_a_name_with_no_join_or_bench_is_refused_on_the_board(reg, rs):
         rc.apply_move(reg, ev, "Nobody here", (0, 0))
 
 
-def test_a_bench_answer_off_a_locked_roster_is_refused_on_the_board_in_its_own_words(reg, rs):
+def test_a_bench_answer_off_a_locked_roster_can_be_put_on_it(reg, rs):
+    """2026-11-27: the lock closes the sheet to members, not to officers — an officer may drag a Bench answer on."""
     ev, joiners, core, raider, trial = case_one(reg, rs)
     rc.propose(reg, rs, ev, save=False)
     ev.state = "locked"
-    with pytest.raises(ValueError) as e:
-        rc.apply_move(reg, ev, trial.display_name, (0, 0))
-    assert str(e.value) == rc.BENCH_LOCKED.format(name=trial.display_name)
+    layout = rc.apply_move(reg, ev, trial.display_name, (0, 0))  # dropped on someone: a substitute
+    assert trial.display_name in layout[0]
     rc.apply_move(reg, ev, core.display_name, None)  # a rostered Bench answer moves like anyone rostered
 
 
@@ -679,7 +679,7 @@ def test_the_board_refusals_are_whole_sentences(reg, rs):
     from oibot_gm import consequences as cq
     from oibot_gm.configops import ConfigOp
 
-    for s in (rc.NOT_ON_SHEET.format(name="Bqzz"), rc.NOT_ON_SHEET_MANY.format(names="Bqzz"), rc.BENCH_LOCKED.format(name="Bqzz")):
+    for s in (rc.NOT_ON_SHEET.format(name="Bqzz"), rc.NOT_ON_SHEET_MANY.format(names="Bqzz")):
         assert s.endswith(".") and len(s.split()) <= 20, s
     ev, joiners, core, raider, trial = case_one(reg, rs)
     out = people(reg, 1, DPS)[0]

@@ -83,9 +83,11 @@ def test_cancel_clear_and_release_consequences_follow_the_state(reg, rs):
         reg.add_placement_ask(m.discord_id, ev.team, m.display_name, "t")
     cancel = consequences.consequence("cancel", reg, ev)
     assert cancel[:2] == ["This event is cancelled.", "The 5 rostered see it on their cards, and nobody gets a DM."]
-    assert consequences.consequence("clear", reg, ev)[:2] == ["All 5 seats are released.", "The 5 rostered see it on their Confirm card and their Me page."]
-    assert consequences.consequence("release", reg, ev, name="Jonny")[:2] == ["Jonny's seat is released.", "They see it on their card and their Me page."]
-    assert consequences.consequence("release", reg, ev)[0] == "The seat is released."
+    # after the lock (2026-11-27): Clear is Unlock's job; a release is the quiet path — nobody gets a DM, Undo puts it back
+    assert consequences.consequence("clear", reg, ev) == [consequences.CLEAR_LOCKED]
+    assert consequences.consequence("release", reg, ev, name="Jonny") == ["Jonny comes off the roster and waits in Not rostered.",
+                                                                          "Nobody gets a DM.", "Undo puts the roster back as it was."]
+    assert consequences.consequence("release", reg, ev)[0] == "The seat comes off the roster, and its holder keeps their answer."
     assert consequences.consequence("lock", reg, ev) == ["This event is already locked."]
     assert consequences.consequence("nonsense", reg, ev) == []
     assert set(consequences.consequences_json(reg, ev)) == set(consequences.VERBS) | {"release_named"}

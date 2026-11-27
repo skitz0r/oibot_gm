@@ -1376,6 +1376,10 @@ def box_cases(reg, rs, runs, ms, dump):
     add("raid_switch_box", "the way back", cq.raid_switch_box(reg, rs, bd, nyx, "Nyxe", "Shadow"))
     add("raid_switch_box", "the way back, the officer's own", cq.raid_switch_box(reg, rs, bd, nyx, "Nyxe", "Shadow", own=True))
     add("raid_switch_box", "another raid while one is switched", cq.raid_switch_box(reg, rs, rc.event_parts(rs, three)[2], nyx, "Nyxe", "Holy"))
+    third = rc.event_parts(rs, three)[2]
+    third.state = "locked"  # a switch for one raid after its lock (2026-11-27): written onto the seat, nobody told
+    add("raid_switch_box", "a locked raid", cq.raid_switch_box(reg, rs, third, nyx, "Nyxe", "Holy"))
+    third.state = "open"
     add("switch_box", "the whole event replaces a raid's switch", cq.switch_box(reg, three, nyx, None, "Holy", [hy, RID], replaces=[RID]))
     add("switch_box", "the officer's own, replacing a raid's switch", cq.switch_box(reg, three, nyx, None, "Holy", [hy, RID], own=True, replaces=[RID]))
     add("member_action_box", "a Join with a spec replacing a raid's switch",
@@ -1386,6 +1390,9 @@ def box_cases(reg, rs, runs, ms, dump):
     member_action_boxes(reg, rs, ev, lk, ms, add)
     for n in (1, 4):
         add("undo_box", f"{n} moves", cq.undo_box(n))
+    lk.board_undo[str(OFFICER_ID)] = {"before": rc.board_layout(reg, lk), "after": rc.board_rev(reg, lk)}  # 2026-11-27
+    add("undo_box", "the officer's last change on a locked roster", cq.undo_box_for(reg, lk, OFFICER_ID))
+    lk.board_undo = {}
     add("strategy_box", "nothing picked yet", cq.strategy_box(reg, quiet, None))
     for st in ("balanced", "first", "rotation"):
         add("strategy_box", f"to {st}", cq.strategy_box(reg, quiet, st))
