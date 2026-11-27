@@ -482,10 +482,10 @@ def night_actions_row(reg: Registry, ev: rc.RaidEvent):
     rc.start_now_refusal is None — `ev` answers for itself, the card holds no store; the decide screen prints
     consequences.start_now_box), Unlock (before the event's first raid starts and while no loot council is open on this raid —
     boss_progress, the same session files rc.loot_open_on reads; the decide screen prints consequences.unlock_box or its
-    refusal), End the run (after the scheduled start; LootMixin.end_run). One order always; what does not apply is
+    refusal), End the run (after the event's start — its first raid's, rc.end_refusal; LootMixin.end_run). One order always; what does not apply is
     disabled in place. Discord's five buttons a row: this row is full."""
     ui = discord.ui
-    started = datetime.now(ev.start.tzinfo) >= ev.start
+    started = rc.end_refusal(ev) is None  # the event has started when its FIRST raid has (issue 14)
     remind_no = rc.remind_refusal(reg, ev) if rc.run_confirms(reg, ev) else rc.NO_CONFIRMATIONS
     prog = boss_progress(reg, ev)  # this raid's loot council(s), None without one
     down = bool((prog or {}).get("all_down"))  # the last boss is down: End is the next thing to press (L12)

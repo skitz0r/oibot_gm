@@ -79,7 +79,7 @@ function RunCard({ meta, run, onState, goItems, reload }: { meta: Meta; run: Loo
   const [ask, dialog] = useConfirm();
   const [askBox, boxDialog] = useConfirmBox(["run:", "loot"]);
   const [busy, setBusy] = useState(false);
-  /** Start now (issue 14): End's refusal before the start has the way on beside it — the SERVER's box
+  /** Start now (issue 14): before the start, the line saying it hasn't started has the way on beside it — the SERVER's box
    *  (consequences.start_now_box, as Events › More and the sheet card print it), its fp sent back as `seen`. */
   async function startNow() {
     const url = `/api/run/${encodeURIComponent(run.key)}/start`;
@@ -117,7 +117,7 @@ function RunCard({ meta, run, onState, goItems, reload }: { meta: Meta; run: Loo
           {run.state !== "locked" && <Badge variant="outline" color="gray">{run.state}</Badge>}
         </Group>} />
       {run.councils.length === 0 && run.state === "locked" && <Text size="sm" c="dimmed" p="md">No council yet. Opening one makes a thread in the officer channel{run.rosters > 1 ? ` — one per roster (${run.rosters})` : ""}.</Text>}
-      {/* End before the start, with no council open: the server's refusal, and Start now beside it while it is offered */}
+      {/* before the start, with no council open: the server's one sentence that it hasn't started, and Start now beside it while offered */}
       {run.end_note && <Group gap="xs" px="md" pb="md" wrap="wrap"><Text size="sm" c="dimmed">{run.end_note}</Text>{run.may_start && <Button size="xs" variant="default" onClick={startNow}>{meta.run_labels.start}</Button>}</Group>}
       <Stack gap={0}>
         {run.councils.map((c) => <CouncilBlock key={c.id} meta={meta} run={run} c={c} onState={onState} goItems={goItems} many={run.councils.length > 1} />)}

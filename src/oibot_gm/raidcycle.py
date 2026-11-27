@@ -1998,6 +1998,7 @@ START_NOW_OPEN = "This event is still open for signup, so lock it before startin
 START_NOW_DONE = "This event has ended, so it can't start again."
 START_NOW_CANCELLED = "A cancelled event can't start."
 START_NOW_STARTED = "This event has already started, so there is nothing to start."
+STARTED_NOTICE = "{raid} has started, at {when} instead of {was}."  # the `moved` notice of a Start now (Me page, /me view)
 
 
 def start_now_refusal(reg: Registry, rs: "RaidStore | None", ev: "RaidEvent", at: datetime | None = None) -> str | None:
@@ -5489,11 +5490,33 @@ def on_roster_change(guild_key: str | None, ev: RaidEvent, added=(), removed=(),
             log.exception("roster listener failed")
 
 
+ENDED_ASK = "{label} has ended, so this question is closed."  # an open Confirm ask's DM card at End (issue 14, Task 6)
+
+
+def close_asks_at_end(reg: Registry, ev: RaidEvent) -> list[tuple[int, int]]:
+    """No ask outlives its raid (issue 14, Task 6 fix round 1): every Confirm / Can't ask still open on `ev`'s roster
+    closes as `expired` ("no answer in time": the raid happened without one) — no seat is freed and nobody gets a
+    notice, the raid being over. A Start now keeps the confirm deadline, so it can fall after the End. → the DM cards
+    (channel id, message id) for the caller to edit to their final state (ENDED_ASK)."""
+    cards = []
+    for m in reg.members.values():
+        open_ = [a for a in m.placement_asks if a["roster"] == ev.team and a.get("answer") is None]
+        for a in open_:
+            a["answer"], a["answered_at"], a["answered_by"] = "expired", now(), "end"
+            if a.get("dm"):
+                cards.append((a["dm"][0], a["dm"][1]))
+        if open_:
+            reg.save(m, f"{m.display_name}'s confirmation for {ev.team} closed: the raid ended")
+    return cards
+
+
 def end_run(reg: Registry, rs: RaidStore, ev: RaidEvent, by: str) -> bool:
     """A run is over: `done` (LootMixin.end_run and the scheduler's close come here). Idempotent; a cancelled run stays
-    cancelled. Returns True when it changed."""
+    cancelled. Every Confirm ask still open on it closes (close_asks_at_end; the callers edit the cards — read them
+    with open_placement_rows first). A Reopen leaves them closed and asks nobody again. Returns True when it changed."""
     if ev.state in ("done", "cancelled"):
         return False
+    close_asks_at_end(reg, ev)
     ev.prev_state, ev.state, ev.closed_at = ev.state, "done", now()
     ev.log.append(f"done ({by})")
     rs.save(ev, f"done ({by})")
@@ -6336,17 +6359,20 @@ def log_rows(reg: Registry, ev: RaidEvent) -> list[dict]:
 
 
 def end_refusal(ev: RaidEvent, at: datetime | None = None) -> str | None:
-    """Why "End the run now" can't go (the lock card, the SheetCard): only a locked run, and only after its scheduled
-    start — before then, Cancel is the verb. None = it may."""
+    """Why "End the run now" can't go (the lock card, the SheetCard): only a locked run, and only after its event's
+    start — its FIRST raid's (a later raid of a started event ends whenever it is done; ev.starts is its offset, kept by
+    every move) — before then, Cancel is the verb. None = it may."""
     if ev.state != "locked":
         return (f"This event is already {RUN_STATE_WORDS[ev.state]}." if ev.state in ("done", "cancelled") else
                 "End is for a locked event, and this sheet is still open.")
-    if (at or datetime.now(ev.start.tzinfo)) < ev.start:
+    first_start = ev.start - timedelta(minutes=int(ev.starts or 0)) if is_follow(ev) else ev.start
+    if (at or datetime.now(ev.start.tzinfo)) < first_start:  # an event has started when its FIRST raid has (issue 14)
         return END_NOT_STARTED
     return None
 
 
 END_NOT_STARTED = "The event hasn't started yet. Before the start, use Cancel instead."  # every surface offers Start now beside it
+NOT_STARTED_YET = "This event hasn't started yet."  # Loot › Tonight's line beside Start now: that page has no End and no Cancel
 
 
 # ---------------------------------------------------------------- character changes ripple into runs (design §3.3, D24)

@@ -89,7 +89,11 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        raid decides; rs None = the card renderer, `ev` answers for itself) and start_now(reg, rs, ev, by, save=True) → Moved:
                        the start becomes this minute through reschedule(…, keep_confirm=True) — every confirm-by stays (the owner's ruling:
                        no unanswered confirmation expires, no seat is freed); END_NOT_STARTED = end_refusal's "hasn't started" sentence,
-                       the one every surface puts Start now beside.
+                       the one every surface puts Start now beside; end_refusal reads the FIRST raid's start (an event has started when
+                       its first raid has: a later raid's start less ev.starts). NOT_STARTED_YET = Loot › Tonight's line. STARTED_NOTICE =
+                       Start now's `moved` notice. end_run closes every Confirm ask still open on the raid (close_asks_at_end: `expired`,
+                       no seat freed, no notice → the DM cards; callers edit them to ENDED_ASK via RaidMixin.end_ask_cards); Reopen
+                       leaves them closed.
                        open_when/which_run/open_preview (THE open-time resolver, DST-safe); spec_switches / regulars_not_rostered / fill_state_text /
                        asks_on_site / log_rows (RaidEvent.log_at stamped by RaidStore.save) for ev_json; upcoming_rows (each active schedule's next three runs whatever the horizon, can_open + open_row_refusal's why) / short_why (a run card's short clause) — §5.56; FillAsk.channel dm|web (a failed DM = web)
                        Identity (§5.67 phase 3): a run's key is new_run_key(reg, rs, raid) = '<abbr>-<6 of KEY_ALPHABET>' (no 0/1/i/l/o/r), the run
@@ -247,7 +251,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        card's Unlock, /raid unlock), configops run_unlock, MCP unlock_run.
                        start_now(reg, rs, ev, by, by_id=None, *, via, seen=None) = THE Start now verb (seen as unlock_run's): every raid's board_lock, rc.start_now, then
                        _after_move (shared with reschedule_event: refresh_sheet, every live raid's cards, open Confirm / fill-ask cards via
-                       edit_live_card, the `moved` notice to Moved.told), one thread line, one audit line, no DM. Callers: POST
+                       edit_live_card, the `moved` notice to Moved.told — `notice` = rc.STARTED_NOTICE), one thread line, one audit line, no DM. Callers: POST
                        /api/run/{key}/start, raid_buttons.start_decide, configops run_start, MCP start_now.
                        after_placement_answer on an OPEN event (an ask kept by an unlock): a Can't sets the answer out (source declined), off the board.
                        unlock_run refuses while the lock still posts (_lock_posting: the flip's cards, asks, notices and lock line; or

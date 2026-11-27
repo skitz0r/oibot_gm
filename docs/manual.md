@@ -1526,24 +1526,30 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    once it has started (*"This event has already started, so there is nothing to start."*), ended or cancelled.
    - **Where.** **Start now** in the event's **More** menu on the Events page (once, right under the greyed **End the
      event** whose note says it hasn't started) and beside that greyed **End the event** on the sheet card; on Loot ›
-     Tonight beside End's refusal for a locked event with no council open; on the Discord lock card's second row (greyed
+     Tonight beside *"This event hasn't started yet."* for a locked event with no council open; on the Discord lock card's second row (greyed
      once the event has started), on **End the event**'s *"The event hasn't started yet…"* screen (a **Start now** button
      beside Back) and `/raid start` (it asks which event when several are locked); plain text *"start tonight's raid
      now"*, *"we're starting"* or *"start the raid"* (always reviewed first; *"start a sheet"* still opens a signup sheet
      and *"start the loot council"* still opens the council); MCP `start_now`.
-   - **It asks first**, the same box everywhere, titled *Start the Wed 9 Dec 10:20 PM event now?*: *"The start moves to
-     this minute."* (an event of several raids: *"The start moves to this minute, and the later raids move by the same
-     amount."*), then *"The 10 who answered each get a notice, and nobody gets a DM."* — or, while confirmations are
-     unanswered, *"The 10 who answered each get a notice, and 3 confirmation asks keep their deadline."* —, then *"A
-     started event can't be moved back or edited."* If anything it counts changes while the box is open, the fresh box
-     is shown instead.
+   - **It asks first**, the same box everywhere, titled *Start the Wed 9 Dec 10:20 PM event now?*: *"The event starts
+     this minute and ends by itself at Thu 26 Nov 11:56 PM."* (an event of several raids: *"The event starts this
+     minute, later raids move up, and it ends by itself at …"*) — an early Start now brings that end forward by the same
+     amount —, then *"The 10 who answered each get a notice, and nobody gets a DM."* — or, while confirmations are
+     unanswered, *"The 10 who answered each get a notice, and 3 confirmation asks keep their deadline."* —, then *"The
+     event cannot be rescheduled or edited afterwards."* If anything it counts changes while the box is open, the fresh
+     box is shown instead.
    - **Confirmations stay open.** The confirmation deadline does not move, so an unanswered Confirm / Can't make it ask
-     keeps the deadline it had and nobody loses a seat because of Start now.
-   - **Who is told.** Everyone who answered gets the same *moved* notice a Reschedule sends (Me page, `/me view`); the
-     sheet, the lock cards and every open Confirm or fill-ask card are edited in place to the new time. Nobody gets a DM.
-     One line in the event's thread and one audit line say who started it.
-   - **Afterwards** the event has started like any other: **End the event** works, **Reschedule**, **Edit event** and
-     **Unlock** are closed, and a new fill ask closes at once because its deadline is the start.
+     keeps the deadline it had and nobody loses a seat because of Start now. No ask outlives its raid: when the raid
+     ends — **End the event** or the bot's own close — every Confirm ask still unanswered closes as *no answer in
+     time*, its card edited to *"Barrow Deeps on Wed 9 Dec has ended, so this question is closed."* No seat is freed and
+     nobody gets a notice or a DM. A **Reopen** within the hour leaves those asks closed and asks nobody again.
+   - **Who is told.** Everyone who answered gets a notice on the Me page and `/me view`: *"Barrow Deeps has started, at
+     Thu 26 Nov 8:56 PM instead of Wed 9 Dec 10:20 PM."*; the sheet, the lock cards and every open Confirm or fill-ask
+     card are edited in place to the new time. Nobody gets a DM. One line in the event's thread and one audit line say
+     who started it.
+   - **Afterwards** the event has started like any other: **End the event** works — on every raid of the event, since
+     an event has started when its first raid has —, **Reschedule**, **Edit event** and **Unlock** are closed, and a new
+     fill ask closes at once because its deadline is the start.
 5. **Confirmation deadline** — `confirm_hours_before` [6 h] before the slot, anyone who hasn't answered
    counts as out; their seat is released and their confirmation card is edited to say so (never a new DM). Only someone who
    was actually asked can time out: a seat whose confirmation never went out (an interrupted lock) is never freed for
@@ -3002,10 +3008,12 @@ the summary in the thread (the awards, the overrides and anything left undecided
 never distributed, awards still waiting for a reason — so nothing anyone decided disappears), turns the card into the
 summary, archives the thread, marks the raid done and redraws its sheet and lock card closed. On every surface only a
 locked event ends (*"No locked event to end."*), and not while a Distribute is judging (*"Distributing already (…) — wait
-for it, or retry End"*). A locked event with no council open ends only after its scheduled start, on every surface —
+for it, or retry End"*). A locked event with no council open ends only after its start — its first raid's, so a later
+raid of a started event ends whenever it is done — on every surface —
 the lock card, `/raid end`, the site, Loot › Tonight, plain text and MCP `end_loot` alike (*"The event hasn't started yet.
-Before the start, use Cancel instead."*, with **Start now** beside it); with a council open End works before the start
-too. The bot ends a council by itself only after its raid's scheduled end, once it has been idle
+Before the start, use Cancel instead."*, with **Start now** beside it; Loot › Tonight, which has no End or Cancel there,
+says only *"This event hasn't started yet."* beside **Start now**); with a council open End works before the start
+too. Ending a raid closes every Confirm ask still unanswered on it (*no answer in time*, the card edited, no seat freed). The bot ends a council by itself only after its raid's scheduled end, once it has been idle
 for 30 minutes with no pick waiting for Confirm and no drop nobody judged — after one *"closing in 15 min"* notice with
 **Keep open**. If picks or drops still wait, it says so once in the thread and leaves the council open for an officer;
 the raid itself is over either way (no more fill asks, nobody shows as rostered on it).

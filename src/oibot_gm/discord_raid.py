@@ -221,6 +221,12 @@ class RaidMixin:
             ch = None
         return getattr(ch, "name", None) if ch is not None else None
 
+    async def end_ask_cards(self, reg, ev, cards: list[tuple[int, int]]) -> int:
+        """The Confirm asks an End closed (rc.close_asks_at_end): each DM card edited to its final state (rc.ENDED_ASK),
+        never a new DM. LootMixin.end_run and the scheduler's close call it. → cards edited."""
+        text = rc.ENDED_ASK.format(label=run_label(reg, ev))
+        return sum([await self.edit_ask_card(reg, cid, mid, text) for cid, mid in cards])
+
     async def edit_ask_card(self, reg, channel_id: int | None, message_id: int | None, text: str) -> bool:
         """Edit an ask's DM card to its final state — `text` (what happened, nothing to do) and no buttons. The DM rule's
         other half: an outcome reaches the person as the card edited, never as a new DM. False when the card is unknown
@@ -1835,11 +1841,12 @@ class RaidMixin:
         await ops_mod.audited(self.ops, reg, by, what, via=via, by_id=by_id)
         return [f"{name} now starts {when}." if moved else f"{name} keeps its start. Its own {own} {'is' if timing_only else 'are'} saved."]
 
-    async def _after_move(self, reg, rs, first, parts, mv, moved: bool) -> int:
+    async def _after_move(self, reg, rs, first, parts, mv, moved: bool, notice: str | None = None) -> int:
         """What a moved start (or a re-timed run) tells, shared by reschedule_event and start_now: the sheet edited in
         place (same message), every live raid's officer cards, every card still in play — an open Confirm / Can't ask
         and an open fill ask — edited to the new time with its buttons (edit_live_card: the ask stands, nobody answers
-        again), and the `moved` notice (Me page, /me view) to everyone in `mv.told`. Nobody is DMed. → cards edited."""
+        again), and the `moved` notice (Me page, /me view) to everyone in `mv.told` — `notice` its words when given (Start
+        now's: the event has started), else the new start or lock. Nobody is DMed. → cards edited."""
         name = reg.raid_def(first.instance).get("name", first.instance)
         when = reg.local12(first.start)
         live = [p for p in parts if p.state in ("open", "locked")]
@@ -1860,7 +1867,7 @@ class RaidMixin:
                     edited += await self.edit_live_card(reg, a.dm_channel_id, a.dm_message_id, fill_layout(reg, p, team, self.ico, a))
         locks = reg.local12(first.start - timedelta(hours=float(rc.team_setting(rc.run_team(reg, first), "cutoff_hard_hours"))))
         for uid in mv.told:  # an outcome, never a DM (the DM rule): the Me page and /me view say it — one member save each
-            reg.notify(uid, "moved", f"{name} now starts {when}." if moved else f"{name} now locks {locks}.", run=first.key)
+            reg.notify(uid, "moved", notice or (f"{name} now starts {when}." if moved else f"{name} now locks {locks}."), run=first.key)
         return edited
 
     async def start_now(self, reg, rs, ev, by: str, by_id: int | None = None, *, via: str = "discord", seen: str | None = None) -> str:
@@ -1886,9 +1893,10 @@ class RaidMixin:
             mv = rc.start_now(reg, rs, first, by)
         name = reg.raid_def(first.instance).get("name", first.instance)
         when = reg.local12(first.start)
-        edited = await self._after_move(reg, rs, first, parts, mv, True)
+        was = reg.local12(old)
+        edited = await self._after_move(reg, rs, first, parts, mv, True, notice=rc.STARTED_NOTICE.format(raid=name, when=when, was=was))
         cards = "" if not edited else " · 1 open card shows the new time" if edited == 1 else f" · {edited} open cards show the new time"
-        await self.post_run_update(reg, first, f"▶️ {name} started now by {by}, at {when} (was {reg.local12(old)})" + cards)
+        await self.post_run_update(reg, first, f"▶️ {name} has started: {by} started it at {when}, earlier than its planned {was}" + cards)
         await ops_mod.audited(self.ops, reg, by, f"started {name} now: moved from {reg.local12(old)} to {when}", via=via, by_id=by_id)
         told = "Everyone who answered sees a notice. " if mv.told else ""
         return f"{name} started now, at {when}. {told}Nobody was DMed."

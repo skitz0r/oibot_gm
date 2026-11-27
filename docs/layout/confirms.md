@@ -84,7 +84,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        "The whole event…" with several raids; S2 _unlock_told: "Nobody gets a DM", then the fill asks it withdraws, else the
                        confirmation asks that stay open — unlock_facts reads both BEFORE the unlock, the fill side as distinct people; S3 UNLOCK_AGAIN; verb UNLOCK_VERB; rc.unlock_refusal
                        → the refusal box; POST /api/run/{key}/unlock, unlock_decide, run_unlock's review), start_now_box(reg, ev, rs) (issue 14
-                       Task 6: S1 the start moves to this minute — the later raids by the same amount with several; S2 _start_now_told: who
+                       Task 6: S1 START_NOW_HEAD — the event starts this minute (later raids move up) and ends by itself at
+                       start_now_close (the latest run_close_at moved by the same amount; left out of the fp, it moves each minute); S2 _start_now_told: who
                        answered gets a notice, then the confirmation asks that keep their deadline, else "nobody gets a DM" — start_now_facts
                        reads them BEFORE; S3 START_NOW_FIXED; verb START_NOW_VERB; rc.start_now_refusal → the refusal box; POST
                        /api/run/{key}/start, start_decide, run_start's review), end_box (LootMixin.end_box builds it from end_sentences, its fp covering the councils; POST /api/loot/{run}/end) and

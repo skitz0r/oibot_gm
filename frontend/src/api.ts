@@ -802,7 +802,7 @@ export interface LootCouncil {
   closing: { notice_label: string; keep_open_label: string }; last_change: string | null; opened_by: string | null; opened_label: string; batch_rev: string; drops_rev: string;
 }
 export interface LootRun { key: string; title: string; when: string; state: string; instance: string; test: boolean; rosters: number; councils: LootCouncil[]; end_consequence: string;
-  /** End's refusal before the start with no council open (rc.end_refusal), and whether Start now is offered beside it */
+  /** before the start with no council open: "This event hasn't started yet." (rc.NOT_STARTED_YET), and whether Start now is offered beside it */
   end_note?: string | null; may_start?: boolean }
 export interface Companion { character: string; client?: string; state: "live" | "quiet" | "disconnected"; last_seen_label: string; events?: number; routes_to?: string | null }
 export interface LootLogState { state: "off" | "channel" | "no_channel"; channel_id: string | null; text: string }

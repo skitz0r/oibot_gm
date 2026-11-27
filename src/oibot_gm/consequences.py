@@ -1424,7 +1424,20 @@ def unlock_box(reg: Registry, ev: rc.RaidEvent, rs) -> dict:
 
 
 START_NOW_VERB = "Start now"
-START_NOW_FIXED = "A started event can't be moved back or edited."
+START_NOW_FIXED = "The event cannot be rescheduled or edited afterwards."
+# what changes, with the time the event now ends by itself (rc.run_close_at moved by the same amount — an early Start now
+# brings it forward): one raid, several raids
+START_NOW_HEAD = {False: "The event starts this minute and ends by itself at {close}.",
+                  True: "The event starts this minute, later raids move up, and it ends by itself at {close}."}
+
+
+def start_now_close(reg: Registry, ev: rc.RaidEvent, rs) -> datetime:
+    """When the event would end by itself after a Start now this minute: its live raids' latest rc.run_close_at, moved by
+    the same amount as the start (rc.start_now's minute)."""
+    first = rc.first_part(rs, ev)
+    delta = reg.now_local().replace(second=0, microsecond=0) - first.start
+    parts = [p for p in rc.event_parts(rs, first) if p.state not in ("done", "cancelled")] or [first]
+    return max(rc.run_close_at(reg, p) for p in parts) + delta
 
 
 def start_now_facts(reg: Registry, ev: rc.RaidEvent, rs) -> tuple[int, int, int]:
@@ -1449,17 +1462,18 @@ def _start_now_told(told: int, asks: int) -> str:
 
 def start_now_box(reg: Registry, ev: rc.RaidEvent, rs) -> dict:
     """Start a locked event now (issue 14; RaidMixin.start_now): what changes (the start moves to this minute, the later
-    raids by the same amount), who is told (_start_now_told: the moved notice, the confirmation asks that keep their
+    raids by the same amount, and when the event now ends by itself — START_NOW_HEAD, start_now_close), who is told (_start_now_told: the moved notice, the confirmation asks that keep their
     deadline), what can't be undone (START_NOW_FIXED: a started event is never moved or edited). Not red. Refused
     (rc.start_now_refusal: still open, started, ended, cancelled) → the refusal box, Back alone. Its fp carries
     rc.event_rev and the counts it printed."""
     if (why := rc.start_now_refusal(reg, rs, ev)) is not None:
         return refusal_box_for(why)
     raids, told, asks = start_now_facts(reg, ev, rs)
-    head = ("The start moves to this minute, and the later raids move by the same amount." if raids > 1
-            else "The start moves to this minute.")
-    return box(f"Start the {event_title(reg, ev)} event now?", [head, _start_now_told(told, asks), START_NOW_FIXED], START_NOW_VERB,
-               rev=f"{rc.event_rev(reg, rs, ev)}|{told}|{asks}")
+    head = START_NOW_HEAD[raids > 1]
+    title, rest = f"Start the {event_title(reg, ev)} event now?", [_start_now_told(told, asks), START_NOW_FIXED]
+    # the fp leaves the end time out: it moves with the clock each minute, which is not a change someone made
+    b = box(title, [head, *rest], START_NOW_VERB, rev=f"{rc.event_rev(reg, rs, ev)}|{told}|{asks}")
+    return {**b, "sentences": [head.format(close=reg.local12(start_now_close(reg, ev, rs))), *rest]}
 
 
 BOARD_MOVE_TITLES = {"move": "Move {name}?", "roster": "Put {name} on the roster?", "swap": "Swap {name} and {other}?",

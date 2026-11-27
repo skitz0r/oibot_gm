@@ -175,7 +175,9 @@ class RaidSchedulerMixin:
         may = getattr(self, "loot_may_close", None)
         if may is not None and not await may(reg, rs, ev, now):
             return
-        rc.end_run(reg, rs, ev, "scheduler")
+        cards = [(a["dm"][0], a["dm"][1]) for _m, a in rc.open_placement_rows(reg, ev) if a.get("dm")]
+        if rc.end_run(reg, rs, ev, "scheduler") and cards:  # no Confirm ask outlives its raid: each card edited, never a DM
+            await self.end_ask_cards(reg, ev, cards)
         exhausted_posted.discard((reg.key, ev.key))
         await self.refresh_sheet(reg, ev)
         await self.ops.emit(reg.config, "info", f"{rc.run_words(reg, ev)}: closed")

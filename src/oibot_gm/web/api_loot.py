@@ -36,7 +36,7 @@ from fastapi.responses import JSONResponse, Response
 from .. import appeals
 from .. import ops as ops_mod
 from ..raid_views import run_title
-from ..raidcycle import end_refusal, is_test_run, start_now_refusal
+from ..raidcycle import NOT_STARTED_YET, end_refusal, is_test_run, start_now_refusal
 from ..loot.session import DISENCHANT, LootBusy, LootChanged
 from ..loot_ops import LOG_MAX, award_is_members, log_row, log_rows
 from ..loot_ops import log_day as day
@@ -187,8 +187,9 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         return {"key": ev.key, "title": run_title(reg, ev), "when": reg.local12(ev.start), "state": ev.state, "instance": ev.instance,
                 "test": is_test_run(reg, ev), "rosters": len(ev.all_rosters),
                 "councils": [state_json(reg, rs, ev, s) for s in sessions], "end_consequence": bot.end_consequence(reg, rs, ev),
-                # before the start with no council: End's refusal, with Start now beside it (issue 14)
-                "end_note": None if sessions or ev.state != "locked" else end_refusal(ev),
+                # before the start with no council: one sentence that it hasn't started (this page has no End and no
+                # Cancel), with Start now beside it (issue 14)
+                "end_note": NOT_STARTED_YET if not sessions and ev.state == "locked" and end_refusal(ev) else None,
                 "may_start": ev.state == "locked" and start_now_refusal(reg, rs, ev) is None}
 
     def companion_json(reg) -> list[dict]:

@@ -6218,7 +6218,12 @@ empty roster slots* (unticked); Discord's screen offers **Lock as it stands** ·
 on the whole event. *Unlock* (Tasks 4–5): `rc.unlock` / `RaidMixin.unlock_run` put a locked event back to open signup with
 every locked raid's roster on the board as hand placements, Auto Lock off, fill asks withdrawn, confirmation asks kept
 (nothing expires while open), the lock's Not rostered notices and cards taken back; the next lock reconciles the asks (a yes
-is not asked again, an open ask is kept, someone left off has it closed and one notice). `consequences.unlock_box` on the
+is not asked again, an open ask is kept, someone left off has it closed and one notice). Its fix round: a name the lock
+rostered on an offspec keeps that spec on the board (`RaidEvent.played_as`, written by the unlock, read while open, cleared
+at the lock), so a relock reproduces offspec seats; `rc.confirm_plan` is the one reader of who a lock asks to confirm
+(`send_confirmations`, `relock_drops` and the lock box all read it, so the box counts only who will be asked); an unlock is
+refused while the lock is still posting its cards and DMs (`rc.UNLOCK_SENDING`); an unlock counts the sheet's reminder as
+sent, so no reminder DM follows it. `consequences.unlock_box` on the
 site (More, the sheet card), Discord (the lock card, `/raid unlock`), plain text `run_unlock` and MCP `unlock_run`. *Start
 now* (Task 6): `rc.start_now` makes a locked event's start this minute (later raids by the same amount) through
 `rc.reschedule(..., keep_confirm=True)` — the owner's ruling: every confirm-by stays, so no unanswered confirmation expires
@@ -6226,7 +6231,14 @@ and no seat is freed by it; `rc.start_now_refusal` (open, started, ended, cancel
 `_after_move` with `reschedule_event` (the sheet and cards edited in place, the `moved` notice, no DM) and writes one thread
 and one audit line. `consequences.start_now_box` on the site (Events › More under End, beside the sheet card's greyed End,
 Loot › Tonight), Discord (the lock card's fifth button, End's "hasn't started" refusal screen, `/raid start`), plain text
-`run_start` (always reviewed) and MCP `start_now`. *The loot End gap* (Task 6): `LootMixin.end_run`, `end_box`, POST
+`run_start` (always reviewed) and MCP `start_now`. Its fix round's rulings: **no ask outlives its event** — End and the
+bot's own close close every Confirm ask still open on the raid (`rc.close_asks_at_end`: `expired`, "no answer in time"; no
+seat freed, no notice) and edit each card to `rc.ENDED_ASK`, needed because a kept confirm-by can fall after an early
+End; a Reopen leaves them closed and asks nobody again. **An event has started when its first raid has** —
+`rc.end_refusal` reads the first raid's start (a later raid's start less its offset), so End works on every raid of a
+started event on every path. The box names when the event now ends by itself (`consequences.start_now_close`), the
+notice says it has started (`rc.STARTED_NOTICE`), and Loot › Tonight says only `rc.NOT_STARTED_YET` beside Start now.
+*The loot End gap* (Task 6): `LootMixin.end_run`, `end_box`, POST
 `/api/loot/{run}/end` (so MCP `end_loot`) and plain text's loot end now apply `rc.end_refusal` (`rc.END_NOT_STARTED`) like
 every other End, unless a loot council is open. *Rulings* (progress.md): the empty-board refusal applies only when people
 joined; with Auto Lock off a pre-lock ask's deadline is the start; an as-it-stands lock is refused before any raid locks

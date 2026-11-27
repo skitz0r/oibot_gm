@@ -9,6 +9,7 @@ start like every other End, unless a loot council is open."""
 from __future__ import annotations
 
 import inspect
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -126,13 +127,17 @@ def test_a_test_event_starts_now_too(reg, rs):
 
 def test_the_verb_tells_as_reschedule_does_and_dms_nobody(reg, rs):
     bot, ev, ms = locked_event(reg, rs)
-    dms = len(bot.cards)
+    dms, was = len(bot.cards), reg.local12(ev.start)
     line = run(bot.start_now(reg, rs, ev, by="Jon", via="web"))
     ev = rs.events[ev.key]
-    assert line.startswith(f"{reg.raid_def(ev.instance)['name']} started now, at {reg.local12(ev.start)}.") and "Nobody was DMed." in line
+    name, when = reg.raid_def(ev.instance)["name"], reg.local12(ev.start)
+    assert line.startswith(f"{name} started now, at {when}.") and "Nobody was DMed." in line
     assert sorted(moved_notices(reg, ev)) == sorted(rc.answered_ids(ev)), "the moved notice, to everyone who answered"
+    texts = {n["text"] for m in reg.members.values() for n in m.notices if n.get("kind") == "moved" and n.get("run") == ev.key}
+    assert texts == {f"{name} has started, at {when} instead of {was}."}, "it says the event HAS started"
     assert len(bot.cards) == dms, "no new DM"
-    assert len([u for u in bot.updates if "started now by Jon" in u]) == 1, "one thread line"
+    started = [u for u in bot.updates if "has started" in u]
+    assert len(started) == 1 and started[0].startswith(f"▶️ {name} has started: Jon started it at {when}, earlier than its planned {was}")
 
 
 # ---------------------------------------------------------------- the box
@@ -142,14 +147,18 @@ def test_the_box_says_what_changes_who_is_told_and_what_cant_be_undone(reg, rs):
     b = cq.start_now_box(reg, ev, rs)
     n = len(rc.answered_ids(ev))
     assert b["title"] == f"Start the {cq.event_title(reg, ev)} event now?" and b["verb"] == "Start now" and not b["danger"]
-    assert b["sentences"] == ["The start moves to this minute.", f"The {n} who answered each get a notice, and 8 confirmation asks keep their deadline.",
-                              "A started event can't be moved back or edited."]
+    close = reg.local12(rc.run_close_at(reg, ev) + (reg.now_local().replace(second=0, microsecond=0) - ev.start))
+    assert b["sentences"] == [f"The event starts this minute and ends by itself at {close}.",
+                              f"The {n} who answered each get a notice, and 8 confirmation asks keep their deadline.",
+                              "The event cannot be rescheduled or edited afterwards."]
+    rc.start_now(reg, rs, ev.model_copy(deep=True), "t", save=False)  # a preview writes nothing
+    assert rc.start_now_refusal(reg, rs, ev) is None
     for a in open_asks(reg, ev):
         a["answer"] = "yes"
     assert cq.start_now_box(reg, ev, rs)["sentences"][1] == f"The {n} who answered each get a notice, and nobody gets a DM."
     for s in b["sentences"]:
         assert s[0].isupper() and s.endswith(".") and s.count(".") == 1 and len(s.split()) <= 20, s
-        assert not any(ch in s for ch in "();:—"), s
+        assert not any(ch in s for ch in "();—") and not re.search(r":(?!\d\d)", s), s
     rc.start_now(reg, rs, ev, "t")
     b = cq.start_now_box(reg, ev, rs)
     assert b["verb"] is None and b["sentences"] == [rc.START_NOW_STARTED]
@@ -211,7 +220,7 @@ def test_loot_end_before_the_start_is_refused_on_the_route_the_verb_and_plain_te
         loot_ops.describe(w.reg, op)
     assert rc.END_NOT_STARTED in configops.describe(w.reg, op), "the plain-text diff says so before Apply"
     row = next(x for x in w.c.get("/api/loot", headers=LH).json()["runs"] if x["key"] == ev.key)
-    assert row["end_note"] == rc.END_NOT_STARTED and row["may_start"] is True, "Loot › Tonight: the refusal, Start now beside it"
+    assert row["end_note"] == rc.NOT_STARTED_YET and row["may_start"] is True, "Loot › Tonight: one sentence, Start now beside it"
     rc.start_now(w.reg, w.rs, ev, "t")
     row = next(x for x in w.c.get("/api/loot", headers=LH).json()["runs"] if x["key"] == ev.key)
     assert row["end_note"] is None and row["may_start"] is False
@@ -365,3 +374,97 @@ def test_start_now_never_swallows_opening_a_sheet_or_a_loot_council():
     for phrase in ('"start tonight\'s raid now"', '"we\'re starting"', '"start the raid"'):
         assert phrase in start and phrase not in opened and phrase not in loot, phrase
     assert "run_open" in start and '"start a sheet"' in start and "loot field=open" in start and '"start the loot council"' in start
+
+
+# ---------------------------------------------------------------- fix round 1: no ask outlives its event
+
+def end_bot(reg, rs):
+    """NightBot (RaidMixin + the scheduler, DM cards that can be edited) with LootMixin's End verb, no council."""
+    from oibot_gm.discord_loot import LootMixin
+
+    class EndBot(NightBot, LootMixin):
+        events: dict = {}
+
+    bot = EndBot(reg, rs)
+    bot.events = {}
+    return bot
+
+
+def ended_card_texts(bot, reg, ev) -> list[str]:
+    from test_raid_night import card_texts
+
+    want = rc.ENDED_ASK.format(label=rc_label(reg, ev))
+    return [m for m in bot.cards.values() if any(want in t for t in card_texts(m))]
+
+
+def rc_label(reg, ev):
+    from oibot_gm.raid_views import run_label
+
+    return run_label(reg, ev)
+
+
+def test_start_now_then_end_closes_every_open_confirm_ask_and_edits_its_card(reg, rs):
+    bot = end_bot(reg, rs)
+    _b, ev, ms = locked_event(reg, rs)
+    bot.__dict__.update({k: v for k, v in _b.__dict__.items() if k not in ("events",)})  # the same DM cards and channels
+    asks = [a for _m, a in rc.open_placement_rows(reg, ev)]
+    assert len(asks) == 8 and all(a.get("dm") for a in asks)
+    run(bot.start_now(reg, rs, ev, by="Jon"))
+    dms = len(bot.cards)
+    run(bot.end_run(reg, rs, rs.events[ev.key], by="Jon"))
+    ev = rs.events[ev.key]
+    assert ev.state == "done" and rc.open_placement_rows(reg, ev) == [], "no ask outlives its event"
+    assert all(a["answer"] == "expired" and a["answered_by"] == "end" for a in asks)
+    assert len(ended_card_texts(bot, reg, ev)) == 8, "each card edited to its final state"
+    assert len(bot.cards) == dms, "no new DM"
+    assert not [n for m in reg.members.values() for n in m.notices if n.get("kind") == "released" and n.get("run") == ev.key], "no seat freed"
+    assert sorted(p.signup_name for r in ev.all_rosters for p in r.selected), "the roster stays as it played"
+    # Reopen (an End by mistake): the asks stay closed and nobody is asked again, even after the scheduler's next minute
+    run(bot.reopen_run(reg, rs, ev, by="Jon"))
+    run(bot.scheduler_tick_guild(reg))
+    ev = rs.events[ev.key]
+    assert ev.state == "locked" and rc.open_placement_rows(reg, ev) == [] and len(bot.cards) == dms
+
+
+def test_start_now_then_the_automatic_close_closes_them_too(reg, rs, monkeypatch):
+    bot, ev, ms = locked_event(reg, rs)
+    run(bot.start_now(reg, rs, ev, by="Jon"))
+    ev = rs.events[ev.key]
+    dms = len(bot.cards)
+    later = rc.run_close_at(reg, ev) + timedelta(minutes=1)
+    monkeypatch.setattr(reg, "now_local", lambda: later)
+    run(bot.scheduler_tick_guild(reg))
+    ev = rs.events[ev.key]
+    assert ev.state == "done" and rc.open_placement_rows(reg, ev) == []
+    assert len(ended_card_texts(bot, reg, ev)) == 8 and len(bot.cards) == dms
+
+
+def test_an_ordinary_end_after_the_deadline_changes_no_answer(reg, rs):
+    bot, ev, ms = locked_event(reg, rs)
+    for i, (_m, a) in enumerate(rc.open_placement_rows(reg, ev)):
+        a["answer"] = "yes" if i % 2 else "no"
+    before = [dict(a) for m in reg.members.values() for a in m.placement_asks if a["roster"] == ev.team]
+    rc.end_run(reg, rs, ev, "t")
+    after = [dict(a) for m in reg.members.values() for a in m.placement_asks if a["roster"] == ev.team]
+    assert before == after and not ended_card_texts(bot, reg, ev)
+
+
+# ---------------------------------------------------------------- fix round 1: an event has started when its first raid has
+
+def test_a_later_raid_ends_once_the_first_raid_has_started(reg, rs):
+    from oibot_gm.raid_views import night_actions_row
+
+    bot = NightBot(reg, rs)
+    lead, fev, ms = _pair_with_lead_board(reg, rs)
+    fev.layout = [[m.display_name for m in ms[5:8]]]
+    rs.save(fev, "board (test)")
+    run(bot.lock_run(reg, rs, rs.events[lead.key], by="Jon", fill=False))
+    fev = rs.events[fev.key]
+    assert rc.end_refusal(fev) == rc.END_NOT_STARTED
+    rc.start_now(reg, rs, fev, "Jon")
+    lead, fev = rs.events[lead.key], rs.events[fev.key]
+    assert fev.start > reg.now_local(), "the later raid's own start is still ahead"
+    assert rc.end_refusal(fev) is None and rc.end_refusal(lead) is None, "the event has started: End works on every raid"
+    assert not night_actions_row(reg, fev).children[-1].item.disabled, "the later raid's lock card End is live"
+    assert rc.start_now_refusal(reg, rs, fev) == rc.START_NOW_STARTED
+    assert rc.start_now_refusal(reg, None, fev) == rc.START_NOW_STARTED, "the card renderer agrees"

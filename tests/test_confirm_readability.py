@@ -1050,8 +1050,9 @@ def start_now_cases(reg, rs, add):
     for m in pool:  # nothing left over from another case on this roster
         m.placement_asks = [a for a in m.placement_asks if a["roster"] != ev.team]
     b = cq.start_now_box(reg, ev, rs)
-    assert b["sentences"] == ["The start moves to this minute.", "The 10 who answered each get a notice, and nobody gets a DM.",
-                              cq.START_NOW_FIXED], b
+    close = reg.local12(cq.start_now_close(reg, ev, rs))
+    assert b["sentences"] == [f"The event starts this minute and ends by itself at {close}.",
+                              "The 10 who answered each get a notice, and nobody gets a DM.", cq.START_NOW_FIXED], b
     add("start_now_box", "every confirmation answered", b)
     for n, case in ((1, "one confirmation ask open"), (8, "eight confirmation asks open")):
         for m in pool[:n]:
@@ -1064,7 +1065,7 @@ def start_now_cases(reg, rs, add):
             m.placement_asks = [a for a in m.placement_asks if a["roster"] != ev.team]
     four = next(e for e in rs.events.values() if e.state == "locked" and not rc.is_follow(e) and len(rc.event_parts(rs, e)) == 4)
     b = cq.start_now_box(reg, rc.event_parts(rs, four)[1], rs)
-    assert b["sentences"][0].endswith("the later raids move by the same amount."), b
+    assert b["sentences"][0].startswith("The event starts this minute, later raids move up, and it ends by itself at "), b
     add("start_now_box", "four raids", b)
     add("start_now_box", "an open event", cq.start_now_box(reg, open_test_run(reg, rs, days=11), rs))
     rc.start_now(reg, rs, ev, "t")
@@ -1881,7 +1882,14 @@ def final_review_boxes(reg, rs, lk, add):
     add("remind_box", "an open sheet", cq.remind_box(reg, open_, rs))
     bot = SimpleNamespace(events={})
     bot.end_sentences = lambda r, s, e: LootMixin.end_sentences(bot, r, s, e)
-    add("end_box", "no council", LootMixin.end_box(bot, reg, rs, lk))
+    b = LootMixin.end_box(bot, reg, rs, lk)  # before its start: End refuses (issue 14)
+    assert b["sentences"] == [rc.END_NOT_STARTED], b
+    add("end_box", "no council, before the start", b)
+    started = lk.model_copy(deep=True)  # the same event once started: the ordinary End box, linted as before
+    started.starts_at = (reg.now_local() - timedelta(minutes=30)).replace(second=0, microsecond=0).isoformat()
+    b = LootMixin.end_box(bot, reg, rs, started)
+    assert b["verb"] is not None and b["sentences"][0].endswith("is finished."), b
+    add("end_box", "no council", b)
     sess = SimpleNamespace(guild=reg.key, run_key=lk.key)
     bot.events = {"s": sess}
     bot.loot_summary = lambda r, s: {"awards": 6, "overrides": 1, "never_confirmed": [1], "undistributed": [1, 2], "reasons_pending": [1]}

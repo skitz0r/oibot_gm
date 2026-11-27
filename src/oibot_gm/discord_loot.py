@@ -1170,7 +1170,10 @@ class LootMixin:
                 await self.loot_ended(reg, s, summary["text"])
             except Exception as e:  # noqa: BLE001 — the archive is written; the post is the surfaces'
                 log.warning("loot end post failed: %s", e)
-        changed = rc.end_run(reg, rs, ev, by)
+        cards = [(a["dm"][0], a["dm"][1]) for _m, a in rc.open_placement_rows(reg, ev) if a.get("dm")]
+        changed = rc.end_run(reg, rs, ev, by)  # closes every Confirm ask still open (a Start now keeps its deadline)
+        if changed and cards and hasattr(self, "end_ask_cards"):
+            await self.end_ask_cards(reg, ev, cards)
         await self._audit(reg, by, f"ended {rc.run_words(reg, ev)}" + (f" and its loot council ({len(texts)})" if texts else ""), via, by_id)
         if changed and refresh and hasattr(self, "refresh_sheet"):  # the sheet and lock card leave their live buttons
             try:
