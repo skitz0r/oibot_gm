@@ -731,7 +731,11 @@ class RaidMixin:
         if ev.state != "locked":
             return [], nd
         if held and len(held) >= rc.open_seat_count(reg, ev):
-            return sent, nd  # every open seat is held by the officers: never "nobody left to ask" (fill_state_text says held)
+            # every open seat is held by the officers: never "nobody left to ask", and no stale "asking" with no ask out
+            if not [a for a in ev.fill_asks if a.pending] and ev.fill_state != "idle":
+                ev.fill_state = "idle"
+                rs.save(ev, "fill: every open seat is held by the officers")
+            return sent, nd
         if not [a for a in ev.fill_asks if a.pending]:
             if not swaps and await asyncio.to_thread(rc.withheld_swaps, reg, rs, ev):
                 if ev.fill_state != "suggested":  # said once: the swap needs an officer's Ask on the lock card
@@ -1770,14 +1774,14 @@ class RaidMixin:
         every raid of the event they hold one on (rc.free_seat: the answer is No thanks now), their open Confirm ask
         closes and its DM card is edited to its final state — no notice, no DM, and no fill ask: each seat opened is
         held from the automatic asks (rc.hold_seat / rc.held_seats). One thread line per raid; sheet and cards redrawn."""
-        held = [(ev, ev.seat_of(m)[1].role)] + ([(p, p.seat_of(m)[1].role) for p in rc.later_parts(rs, ev)
-                                                 if sheet_state(p) == "locked" and p.seat_of(m) is not None]
-                                                if ev.followed_by and not rc.is_follow(ev) else [])
+        held = [(ev, ev.seat_of(m))] + ([(p, p.seat_of(m)) for p in rc.later_parts(rs, ev)
+                                         if sheet_state(p) == "locked" and p.seat_of(m) is not None]
+                                        if ev.followed_by and not rc.is_follow(ev) else [])
         rc.free_seat(reg, rs, ev, m, "officer", notice=False)
         await self.seat_released(reg, ev, m, "officer")
-        for p, role in held:
+        for p, (roster, seat) in held:  # the seat in ITS roster, with its role
             p = rs.events.get(p.key, p)
-            rc.hold_seat(p, role, m.discord_id)
+            rc.hold_seat(p, seat.role, roster, m.discord_id)
             rs.save(p, f"{m.display_name}'s seat held open ({by})")
             await self.post_run_update(reg, p, f"↩️ {by} set {m.display_name} to No thanks — seat open")
             await self.refresh_cards(reg, p)

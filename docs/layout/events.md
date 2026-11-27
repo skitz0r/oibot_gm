@@ -45,11 +45,14 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        groups' open seats, an Undo, a whole-board write): exactly the seats asked change, the roster COUNT never changes (a split
                        council's roster index stays valid), a newcomer keeps their answer and gets no Confirm ask, a removed person keeps their
                        answer (unseat: their OPEN Confirm ask closes `released`, a yes stays) — no notice, DM or fill ask; RaidEvent.held_seats
-                       [{role, uid}] (the seats an officer's edits opened, hold_seat) read ONLY through held_seats(reg, ev) = what still holds
-                       now (newest first, a seat of its role while that role is short, else a plain open seat, never more than are open; fix
-                       round 1: role-aware, so a held tank seat is no ask for the headcount nor the minimum), pruned by every seat-filling
-                       write (prune_held: seat_player, the quiet path) so a seat a member gives up later is asked for; role_plan(held=) /
-                       fill_batch(held=) take them out seat for seat and never ask the person taken off; held_words(n) = the lock card's
+                       [{role, roster, uid}] (a SEAT IN A ROSTER an officer's edit opened, hold_seat; the quiet path holds each roster's rise
+                       in open seats) read ONLY through held_seats(reg, ev) = what still holds now (per roster, the newest holds up to that
+                       roster's open seats, whatever its role — `as` = the role only while it is short, so a held tank seat raises no tank
+                       ask; held_in = per roster), pruned by every seat-filling write (prune_held: seat_player, the quiet path) so a seat a
+                       member gives up later is asked for; seat_player(…, held_ok=) seats a yes only in a roster with an un-held open seat
+                       (held_ok: a yes to an officer's Fill seats ask may take a held seat, ending it); role_plan(held=) / fill_batch(held=)
+                       take held seats out and ask a role only into an un-held free seat (the person taken off is an ordinary
+                       Join-not-rostered, eligible for a later member-caused seat); held_words(n) = the lock card's
                        sentence (fill_state_text: never "Nobody left to ask" for held seats); and board_undo {officer id →
                        {before, after}} (undo_record = their one-step Undo while the board is the one their edit left; both emptied by unlock
                        and the lock); board_line(added, removed) = the reply every surface shows; a member-caused opening (Can't make it, an
@@ -366,7 +369,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        surface sends (as_officer — inbox.do_member_action, POST /set, the switch route, plain text's run_answer for someone
                        else or an officer's own: the officer themselves and someone who never answered included; no on_behalf notice);
                        run_fill's automatic asks pass held = rc.held_seats to rc.fill_batch and, with every open seat held, return before
-                       the exhausted / suggested branch; board_move(…, undo_id=) / save_board(…, undo_id=) = the acting officer's one-step
+                       the exhausted / suggested branch (fill_state back to idle when no ask is out); quiet_drop holds the seat in its roster; board_move(…, undo_id=) / save_board(…, undo_id=) = the acting officer's one-step
                        Undo after the lock from plain text, MCP and the site's whole-board write;
                        set_answer(…, spec=, via=) (a role switch: the spec on the answer for the whole evening, a notice, one audited line);
                        send_plan(…, seats=) (one ask: the Events page's Switch after the lock); open_run_and_post(…, lock_hours=, first_rosters=);

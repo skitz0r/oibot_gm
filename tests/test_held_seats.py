@@ -252,3 +252,106 @@ def test_plain_text_moves_and_boards_after_the_lock_record_the_officers_undo(reg
     run(configops.apply_async(reg, ConfigOp(op="run_board", target=ev.key, value=board + ", " + who.display_name), "Officer", True,
                               bot=bot, by_id=OFFICER + 1))
     assert ev.seat_of(who) and rc.undo_record(reg, ev, OFFICER + 1) is not None and rc.undo_record(reg, ev, OFFICER) is None
+
+
+# ---------------------------------------------------------------- fix round 2: a hold is a seat IN A ROSTER
+
+def split_night(reg, rs, ev=None):
+    """Every puppet rostered on two rosters of a 10-man (10 + 6) — on `ev` (a later raid of a lineup), else a fresh test event."""
+    from conftest import join, lock_with_board, open_test_run
+
+    pool = reg.test_members()
+    if ev is None:
+        ev = open_test_run(reg, rs)
+        join(reg, rs, ev, pool)
+    lock_with_board(reg, rs, ev, [m.display_name for m in pool])
+    assert [len(r.selected) for r in ev.all_rosters] == [10, 6]
+    return ev
+
+
+def take_off_roster_one_then_a_member_leaves_roster_two(bot, reg, rs, ev):
+    a = ev.all_rosters[0].selected[-1].signup_name
+    rc.apply_layout_locked(reg, rs, ev, [[n for n in g if n != a] for g in rc.board_layout(reg, ev)], by="Officer", by_id=OFFICER)
+    assert [h["roster"] for h in rc.held_seats(reg, ev)] == [0]
+    b = ev.all_rosters[1].selected[0]
+    rc.free_seat(reg, rs, ev, b.discord_id, "callout")
+    return b
+
+
+def test_a_fill_yes_for_a_members_seat_lands_in_the_roster_they_left_never_the_held_seat(reg, rs):
+    bot = NightBot(reg, rs)
+    ev = split_night(reg, rs)
+    b = take_off_roster_one_then_a_member_leaves_roster_two(bot, reg, rs, ev)
+    sg = ev.signups[str(b.discord_id)]
+    sg.status = "in"
+    assert rc.seat_player(reg, ev, sg) == 1, "the yes takes the member's roster-2 seat"
+    assert [len(r.selected) for r in ev.all_rosters] == [9, 6] and [h["roster"] for h in rc.held_seats(reg, ev)] == [0]
+
+
+def test_an_officers_fill_seats_yes_may_take_a_held_seat_and_ends_that_hold(reg, rs):
+    bot, ev, seated, team = night(reg, rs)  # one roster, full: the officer's take-off is the only open seat
+    a = seated[-1].display_name
+    take_off(bot, reg, rs, ev, seated[-1])
+    sg = rc.signup_by_name(ev, a)
+    assert rc.seat_player(reg, ev, sg) is None, "an automatic yes never takes a held seat"
+    assert rc.seat_player(reg, ev, sg, held_ok=True) == 0 and rc.held_seats(reg, ev) == []
+
+
+def test_the_same_on_a_later_raid_of_a_lineup(reg, rs):
+    from test_per_raid_switch import evening
+
+    for rid in reg.profile.raids:
+        reg.set_raid_overrides(rid, {"first_open": "2026-01-01T00:00"}, "t")
+    lead, fev, _ms = evening(reg, rs)
+    for m in reg.test_members():
+        rc.set_signup(reg, rs, rs.events[lead.key], m, None, "in", source="test")
+    fev = rs.events[fev.key]
+    lock_names = [m.display_name for m in reg.test_members()]
+    from conftest import lock_with_board
+
+    lock_with_board(reg, rs, fev, lock_names)
+    bot = NightBot(reg, rs)
+    b = take_off_roster_one_then_a_member_leaves_roster_two(bot, reg, rs, fev)
+    sg = fev.signups[str(b.discord_id)]
+    sg.status = "in"
+    assert rc.seat_player(reg, fev, sg) == 1 and [h["roster"] for h in rc.held_seats(reg, fev)] == [0]
+
+
+def test_a_dps_hold_never_evaporates_when_tanks_and_healers_are_short(reg, rs):
+    bot, ev, seated, team = night(reg, rs)
+    tank = of_role(reg, seated, "tank")
+    dps = next(m for m in seated if by_role(reg, [m])["melee"] or by_role(reg, [m])["ranged"])
+    take_off(bot, reg, rs, ev, dps)  # the officer's dps seat: held
+    rc.free_seat(reg, rs, ev, tank.discord_id, "callout")  # a tank short elsewhere, and its seat free
+    rc.seat_player(reg, ev, rc.signup_by_name(ev, bench_dps(reg, ev)))  # the tank's seat taken by a dps: tank short, one seat open
+    assert rc.open_seat_count(reg, ev) == 1 and rc.needs(reg, ev, team)["roles"].get("tank")
+    assert len(rc.held_seats(reg, ev)) == 1, "the held seat stays held though the tank minimum is short"
+    sent, _ = run(bot.run_fill(reg, rs, ev, team))
+    assert sent == [] and rc.held_words(1) in rc.fill_state_text(reg, ev)
+
+
+def bench_dps(reg, ev):
+    return next(s.display_name for s in ev.signups.values() if s.status == "in" and not ev.seat_of(s.discord_id)
+                and s.role in ("melee", "ranged"))
+
+
+def test_the_person_taken_off_is_eligible_for_a_seat_a_member_gives_up(reg, rs):
+    bot, ev, seated, team = night(reg, rs)
+    dps = next(m for m in seated if by_role(reg, [m])["melee"] or by_role(reg, [m])["ranged"])
+    take_off(bot, reg, rs, ev, dps)
+    for s in ev.signups.values():  # nobody else off the roster: only the person taken off could come
+        if s.status in ("in", "sub") and not ev.seat_of(s.discord_id) and s.discord_id != dps.discord_id:
+            s.status = "out"
+    rs.save(ev, "t")
+    other = next(m for m in seated if ev.seat_of(m) and m is not dps and (by_role(reg, [m])["melee"] or by_role(reg, [m])["ranged"]))
+    run(bot.set_answer(reg, rs, ev, other, "out", None, by=other.display_name, by_id=other.discord_id))
+    assert dps.discord_id in {a.discord_id for a in pending(ev)} and ev.fill_state != "exhausted"
+
+
+def test_all_held_leaves_no_stale_asking_state(reg, rs):
+    bot, ev, seated, team = night(reg, rs)
+    take_off(bot, reg, rs, ev, of_role(reg, seated, "tank"))
+    ev.fill_state = "asking"  # an earlier ask, closed since
+    run(bot.run_fill(reg, rs, ev, team))
+    assert ev.fill_state == "idle" and "waiting for answers" not in rc.fill_state_text(reg, ev)
+    assert rc.held_words(1) in rc.fill_state_text(reg, ev)

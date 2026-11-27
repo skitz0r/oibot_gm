@@ -1489,10 +1489,12 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    Ivy's seat in Group 2, and Ivy waits in Not rostered. …"*); dragging someone out takes them off the roster with their
    answer kept (*"Nettle comes off the roster and waits in Not rostered. …"*). A removed person's open Confirm card is
    edited to say the seat was released (an edit, never a DM); someone who had confirmed and is only moved keeps their
-   confirmation. A seat an officer opens is not asked for on its own — not as a seat, and not for the tank or healer it
-   leaves short — and the person taken off is never asked for it automatically; the lock card then says *Officers are
-   keeping 1 seat open, so it is asked for only with Fill seats.* (never *Nobody left to ask*). **Fill seats…** asks for
-   it when you want; once a held seat is filled any way, it is held no more. The
+   confirmation. A seat an officer opens is held in its roster: it is not asked for on its own — not as a seat, and not
+   for the tank or healer it leaves short — and a yes to an automatic ask for another seat never lands in it (on an
+   event with several rosters it lands in the roster the member left). The person taken off is a joiner who isn't
+   rostered like anyone else: a seat a member gives up later may be offered to them. While only held seats are open the
+   lock card says *Officers are keeping 1 seat open, so it is asked for only with Fill seats.* (never *Nobody left to
+   ask*). **Fill seats…** asks for a held seat when you want; once a held seat is filled any way, it is held no more. The
    lock itself, a member's *Can't make it* and an expired confirmation work as before (their seat is asked for when
    Automated Fill Requests are on). A
    drag started on the open board and dropped after the event locked is refused ("The event locked while you were
@@ -1801,7 +1803,8 @@ rostered person's seat follows a new character or spec at once), **Bench** is th
 their seat with no callout recorded and no fill ask. **Record a callout** stays what it was: their seat is asked for
 like any *Can't make it*. Pins are officers' planning: nobody is told, and after the lock a pin is refused (*The roster
 is already locked, and a pin only shapes the lock.*). When an officer drags someone onto a locked board, the event's
-thread says *in* — nobody is asked to confirm. A member's own places (the sheet's buttons, the Me page) refuse Join,
+thread says *in* — nobody is asked to confirm. In plain text an officer's own *"I can't make it"* (or No thanks about
+themselves) is still recorded as a callout, as any member's is. A member's own places (the sheet's buttons, the Me page) refuse Join,
 Bench and No thanks after the lock for everyone, officers included; *Can't make it* is always there.
 
 **Role switches (an officer picks the spec someone plays).** An event's page on the site has a **Role switches**

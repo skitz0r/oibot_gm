@@ -3549,7 +3549,8 @@ def role_plan(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, team: dict |
     from blocking a seat only they can cover. Each short seat gets up to PLAN_ALTERNATES alternates. `swaps=False`
     leaves switches out (D3: after lock on a recurring run they wait for an officer's Ask; `withheld` says so).
     `held` (after lock, the automatic asks only: held_seats): each seat an officer's edit holds open is one free seat
-    fewer — and, held as a tank or healer seat, one fewer of that role short — and whoever was taken off is not asked."""
+    fewer — and, held as a tank or healer seat, one fewer of that role short; a role short is asked for only into a free
+    seat nobody holds (none left: nothing is asked)."""
     locked = ev.state != "open" and bool(ev.all_rosters)
     g = gaps(reg, ev)
     n, size = g["rosters"], g["size"]
@@ -3562,7 +3563,6 @@ def role_plan(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, team: dict |
     # a seat freed later; asks still in play always do
     asked = {a.discord_id for a in ev.fill_asks if a.pending or ev.state == "open" or a.phase == "fill"}
     held = list(held or []) if locked else []
-    asked |= {int(h["uid"]) for h in held if h.get("uid") is not None}  # taken off by an officer: never asked for it
     saved = saved_this_lockout(reg, rs, ev)
     exp_from = expected_from(reg, ev)
 
@@ -3614,6 +3614,12 @@ def role_plan(reg: Registry, rs: "RaidStore | None", ev: RaidEvent, team: dict |
     short_roles = {r: k for r, k in short_roles.items() if k > 0}
     # after lock a new body needs a free seat (seat_player) — a body ask still out holds one; before lock the lock decides
     seats_free = max(0, g["headcount"] - len(held) - sum(1 for a in counted if not a.swap)) if locked else None
+    if held and seats_free is not None:  # a role is asked for only into a seat nobody holds: no free seat, no role ask
+        room = seats_free
+        for r in list(short_roles):
+            short_roles[r] = min(short_roles[r], room)
+            room -= short_roles[r]
+        short_roles = {r: k for r, k in short_roles.items() if k > 0}
     free = [seats_free]
     full = (seats_free == 0) if locked else len(cur) >= g["seats"]
     headcount = seats_free if locked else 0  # before lock suggestions are for the minimums only; the reminder chases the rest
@@ -4328,7 +4334,7 @@ def _apply_yes(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk, m: Mem
         s.spec, s.offspec, s.role = ask.spec, c.spec, ask.role
     ev.signups[str(m.discord_id)] = s
     ev.log.append(f"fill: {ask.display_name} in as {c.label} ({ask.kind})")
-    if ev.state != "open" and ev.all_rosters and not _reseat(ev, s, reg.key) and seat_player(reg, ev, s) is None:
+    if ev.state != "open" and ev.all_rosters and not _reseat(ev, s, reg.key) and seat_player(reg, ev, s, held_ok=ask.approved_by is not None) is None:
         # every seat was taken meanwhile: a Join, not rostered (the board can move them in); never reported as seated
         ev.log.append(f"fill: no free seat for {ask.display_name}")
         rs.save(ev, f"fill {ask.display_name} in, no seat")
@@ -5856,6 +5862,8 @@ def _apply_layout_locked(reg: Registry, rs: RaidStore, ev: RaidEvent, layout: li
     before = {player_uid(ev, p): p for p in ev.seated()}
     players = {player_uid(ev, p): p for p in players_for(reg, ev)}
     prune_held(reg, ev)  # what the seats held before this edit still hold
+    open_before = roster_open(reg, ev)
+    roster_before = {player_uid(ev, p): i for i, r in enumerate(ev.rosters) for p in r.selected}
     seen: set = set()
     layout_uids = []
     for g in list(layout)[:k * n]:
@@ -5895,9 +5903,15 @@ def _apply_layout_locked(reg: Registry, rs: RaidStore, ev: RaidEvent, layout: li
     seated = {player_uid(ev, p) for p in ev.seated()}
     players = {player_uid(ev, p): p for p in players_for(reg, ev)}
     ev.rosters[0].benched = [p for u, p in players.items() if u not in seated and p.status == "signed"]
-    for u in removed_uids:  # each seat this edit opened is held from the automatic asks (its role, who was taken off)
-        hold_seat(ev, before[u].role, u)
-    prune_held(reg, ev)  # a substitute or a placement in the same edit filled it: held no more
+    # each seat this edit opened is held, in its roster, from the automatic asks: a roster with more open seats than
+    # before holds the difference (the role of whoever left it, for the tank / healer count)
+    roster_after = {player_uid(ev, p): i for i, r in enumerate(ev.rosters) for p in r.selected}
+    for i, (was, now_) in enumerate(zip(open_before, roster_open(reg, ev))):
+        left = [before[u] for u, ri in roster_before.items() if ri == i and roster_after.get(u) != i]
+        for k in range(max(0, now_ - was)):
+            p = left[k] if k < len(left) else None
+            hold_seat(ev, p.role if p else None, i, player_uid(ev, p) if p else None)
+    prune_held(reg, ev)  # a placement in the same edit filled one: held no more
     ev.log.append(f"board ({by}): " + ((f"+{', '.join(s.display_name for s in added)} " if added else "") + (f"-{', '.join(removed)}" if removed else "")).strip()
                   if added or removed else f"board ({by}): groups moved")
     if by_id is not None:
@@ -6021,12 +6035,21 @@ def free_seat(reg: Registry, rs: RaidStore, ev: RaidEvent, who, why: str, *, not
     return p
 
 
-def seat_player(reg: Registry, ev: RaidEvent, sg: Signup) -> int | None:
-    """Put a signup into the first roster with a free seat (after a fill yes or an officer add). Returns the roster index."""
+def seat_player(reg: Registry, ev: RaidEvent, sg: Signup, *, held_ok: bool = False) -> int | None:
+    """Put a signup into the first roster with a free seat that no officer holds (after a fill yes or an officer add;
+    held_seats). `held_ok` (a yes to an ask an officer sent with Fill seats): a held seat may be taken when no other is
+    free — that hold ends. Returns the roster index, None when no seat may be taken."""
     size = run_size(reg, ev)
+    held = held_in(reg, ev) if ev.held_seats else [0] * len(ev.all_rosters)
+    order = [i for i, r in enumerate(ev.all_rosters) if size - len(r.selected) - held[i] > 0]
+    if held_ok:
+        order += [i for i, r in enumerate(ev.all_rosters) if i not in order and len(r.selected) < size]
+    if not order:
+        return None
     found = reg.find(sg.character)
     p = Player(signup_name=sg.display_name, discord_id=sg.discord_id, pos=len(ev.signups), status="signed", cls=sg.cls, spec=sg.spec, role=sg.role, offspec=sg.offspec, character=sg.character, rank=found[1].rank if found else "unknown")
-    for i, r in enumerate(ev.all_rosters):
+    for i in order:
+        r = ev.all_rosters[i]
         if len(r.selected) < size:
             r.selected.append(p)
             r.benched = [x for x in r.benched if x.signup_name != p.signup_name]
@@ -6883,42 +6906,55 @@ def open_seat_count(reg: Registry, ev: RaidEvent) -> int:
     return sum(max(0, size - len(r.selected)) for r in ev.all_rosters)
 
 
+def roster_open(reg: Registry, ev: RaidEvent) -> list[int]:
+    """Each locked roster's open seats, by roster index."""
+    size = run_size(reg, ev)
+    return [max(0, size - len(r.selected)) for r in ev.all_rosters]
+
+
 def held_seats(reg: Registry, ev: RaidEvent) -> list[dict]:
     """The seats an officer's own edits hold open from the automatic asks NOW (RaidEvent.held_seats read against the
-    roster as it stands — never trusted as stored): the newest first, each taking a seat of its role while that role is
-    short of its minimum (`as` = the role), else a plain open seat (`as` = ""), and never more than the seats open; a hold
-    left with no seat to take holds nothing. → [{role, uid, as}]."""
-    if ev.state != "locked" or not ev.held_seats:
+    roster as it stands — never trusted as stored). A hold is a SEAT IN A ROSTER (fix round 2): per roster, the newest
+    holds up to that roster's open seats hold; a held seat is withheld whatever its role (a tank / healer shortage never
+    makes it evaporate). `as` = its role while that role is short of its minimum (so a held tank seat raises no tank ask
+    either), else "". → [{role, roster, uid, as}]."""
+    if ev.state != "locked" or not ev.held_seats or not ev.all_rosters:
         return []
-    free = open_seat_count(reg, ev)
-    if not free:
-        return []
+    free = roster_open(reg, ev)
     short = dict(gaps(reg, ev)["roles"])
-    plain = max(0, free - sum(min(k, free) for k in short.values()))
     out: list[dict] = []
     for h in reversed(ev.held_seats):
-        if len(out) >= free:
-            break
+        i = int(h.get("roster") or 0)
+        if not 0 <= i < len(free) or free[i] <= 0:
+            continue
+        free[i] -= 1
         r = h.get("role")
         if short.get(r, 0) > 0:
             short[r] -= 1
             out.append({**h, "as": r})
-        elif plain > 0:
-            plain -= 1
+        else:
             out.append({**h, "as": ""})
     return out
 
 
+def held_in(reg: Registry, ev: RaidEvent) -> list[int]:
+    """How many seats each roster holds now (held_seats), by roster index."""
+    n = [0] * len(ev.all_rosters)
+    for h in held_seats(reg, ev):
+        n[int(h.get("roster") or 0)] += 1
+    return n
+
+
 def prune_held(reg: Registry, ev: RaidEvent) -> None:
-    """Keep only the holds that still hold a seat (held_seats): a held seat filled by any path — a fill yes, Fill seats,
-    an officer's placement, a relock — stops being held for good, so a seat a member gives up later is asked for."""
+    """Keep only the holds that still hold a seat in their roster (held_seats): a held seat filled by any path — a fill
+    yes from Fill seats, an officer's placement, a relock — stops being held for good."""
     if ev.held_seats:
-        ev.held_seats = [{"role": h.get("role"), "uid": h.get("uid")} for h in reversed(held_seats(reg, ev))]
+        ev.held_seats = [{k: h.get(k) for k in ("role", "roster", "uid")} for h in reversed(held_seats(reg, ev))]
 
 
-def hold_seat(ev: RaidEvent, role: str | None, uid: int | None) -> None:
-    """An officer's edit opened a seat on a locked roster: held from the automatic asks (held_seats)."""
-    ev.held_seats = [h for h in ev.held_seats if uid is None or h.get("uid") != uid] + [{"role": role, "uid": uid}]
+def hold_seat(ev: RaidEvent, role: str | None, roster: int, uid: int | None = None) -> None:
+    """An officer's edit opened a seat in roster `roster` of a locked raid: held from the automatic asks (held_seats)."""
+    ev.held_seats = list(ev.held_seats) + [{"role": role, "roster": int(roster), "uid": uid}]
 
 
 def held_words(n: int) -> str:
