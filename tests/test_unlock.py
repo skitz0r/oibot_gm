@@ -252,7 +252,7 @@ def test_unlock_refusals_one_sentence_each(reg, rs):
     assert rc.unlock_refusal(reg, rs, ev) == rc.UNLOCK_DONE
     opened.state = "cancelled"
     assert rc.unlock_refusal(reg, rs, opened) == rc.UNLOCK_CANCELLED
-    for s in (rc.UNLOCK_OPEN, rc.UNLOCK_DONE, rc.UNLOCK_CANCELLED, rc.UNLOCK_STARTED, rc.UNLOCK_LOOT, rc.UNLOCK_SENDING):
+    for s in (rc.UNLOCK_OPEN, rc.UNLOCK_DONE, rc.UNLOCK_PART_ENDED, rc.UNLOCK_CANCELLED, rc.UNLOCK_STARTED, rc.UNLOCK_LOOT, rc.UNLOCK_SENDING):
         assert s.endswith(".") and s.count(".") == 1 and len(s.split()) <= 20
 
 

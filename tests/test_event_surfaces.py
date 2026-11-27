@@ -394,7 +394,8 @@ def test_a_cancel_on_a_later_raid_after_the_first_finished_posts_nothing(reg, rs
     later = rc.later_parts(rs, first)
     first.state = "done"
     rs.save(first, "done")
-    assert not rc.cancel_tells_channel(rs, later[1]) and rc.cancel_tells_channel(rs, first)
+    # pressed on the finished first raid too, the cancel acts on the raids still to play (rc.cancel_target): no channel line
+    assert not rc.cancel_tells_channel(rs, later[1]) and not rc.cancel_tells_channel(rs, first)
     line = configops.describe(reg, ConfigOp(op="run_cancel", target=later[1].key))
     assert "signup channel" not in line and "sheet" not in line.split(". ", 1)[1], line
     out = run(bot.cancel_run(reg, rs, later[1], "Officer", None, by_id=OWNER))

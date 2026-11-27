@@ -82,6 +82,8 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\
         if self.action == "reopen":  # the one press a closed run's card keeps
             await reopen_press(interaction, bot, reg, rs, ev)
             return
+        if self.action == "cancel" and ev is not None:  # a raid that ended while its event plays on: the raids still to play
+            ev = rc.cancel_target(rs, ev)
         if not ev or ev.state in ("done", "cancelled"):
             await interaction.response.send_message("That event is closed.", ephemeral=True)
             return
@@ -286,6 +288,7 @@ async def cancel_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=
 
     async def do(i: discord.Interaction, v: dict) -> None:
         cur = rs.events.get(key)  # re-read: it may have closed while the box was open
+        cur = rc.cancel_target(rs, cur) if cur is not None else None  # its event's raids still to play, if any
         if not cur or cur.state in ("done", "cancelled"):
             await wiz.finish(i, f"{rc.run_words(reg, cur or ev)} closed before your press, so nothing was changed.")
             return

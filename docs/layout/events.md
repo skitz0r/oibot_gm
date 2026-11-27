@@ -64,7 +64,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        Raid night (design §5.39): expire_confirmations expires only a held ask (locked runs only); unasked_seats (the lock's recovery: only
                        RaidEvent.lock_seats, the seats at the flip — never a fill-seated or later seat; legacy_lock_sent = a pre-field run is stamped); cancel_effects;
                        reopen_refusal/reopen_run (an END by mistake, REOPEN_GRACE_HOURS, never a cancelled run); remind_refusal; end_refusal;
-                       Unlock (issue 14): unlock_refusal(reg, rs, ev, at=None) (UNLOCK_OPEN/DONE/CANCELLED/STARTED/LOOT, the first raid decides;
+                       Unlock (issue 14): unlock_refusal(reg, rs, ev, at=None) (UNLOCK_OPEN/DONE/PART_ENDED/CANCELLED/STARTED/LOOT, the first raid decides — PART_ENDED when it is done and a later raid is live;
                        loot_open_on = a live council's file) and unlock(reg, rs, ev, by) → Unlocked (raids, asks_kept, fills + fills_withdrawn,
                        returned, notices): every locked raid back to open, layout = the locked rosters' groups, placed_by {name: 0} (nobody's
                        Undo), rosters cleared, Auto Lock off on every raid's dict, fill asks withdrawn (withdraw_fill_asks), seats freed after the
@@ -128,6 +128,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        auto_placed (discord_raid.save_board and configops' run_board without the bot share it); leave_follow / stay_for_follow; `_solve_run` adds LEAD_SEAT_BONUS once per earlier raid a player was rostered on;
                        `conflicts` exempts same_event; free_seat on part 0 frees the seat on every locked later part; held_later(rs, ev, who) = the
                        later places a Can't frees; a cancel on any part takes every live raid (cancel_effects(…, rs) / cancel_tells_channel);
+                       cancel_target(rs, ev) = THE raid a cancel pressed on `ev` acts as (live first raid › `ev` live › the event's first live raid › `ev` = refusal),
+                       so a part-ended event (first raid done, a later one live) cancels from either key on every surface;
                        LATER_PART_LOCK. run_strategy(reg, ev) = THE split-strategy chain (run → roster → raid → balanced) the lock and Preview lock share.
                        Reschedule (§5.67 phase 3, C11): reschedule_refusal (MOVE_CLOSED, MOVE_STARTED, MOVE_PAST, MOVE_SAME / TIMING_SAME,
                        MOVE_CLASH via live_at, TIMING_LOCKED, TIMING_ORDER, TIMING_UNKNOWN), reschedule(reg, rs, ev, start=, timing=, by, save=) →
@@ -265,8 +267,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        Lineups (§5.62, §5.67 phase 3): lock_run on a later raid while an earlier one is open → LATER_PART_LOCK; lock_parts = part 0's
                        lock builds every later raid in order (a short role never stops one; it stops at the first part that stays open with its
                        lock_error, the scheduler retries in order; one ops warn per part that raises); after_lead_out, drop_seated cascade from part 0
-                       only; stay_for_follow; cancel_run on ANY part cancels every live raid of the run (a later part redirects to part 0 while part 0
-                       is live; one audit line naming every key); open_run_and_post(…, lineup=).
+                       only; stay_for_follow; cancel_run on ANY part cancels every live raid of the run (redirects to rc.cancel_target: part 0 while part 0
+                       is live, the first live raid when the pressed raid is done / cancelled; one audit line naming every key); open_run_and_post(…, lineup=).
                        Reschedule / Edit lineup (§5.67 phase 3; officers, decided LIVE — resolve_role at PRIV_LIVE; by_id None = code for the guild;
                        preview → the consequence sentences; `rev` = rc.event_rev, else RUN_CHANGED): reschedule_event(reg, rs, ev, start=, timing=, …)
                        (MOVE_OFFICER_ONLY; under every part's board_lock, the refusal re-checked; the sheet edited in place under its message id,

@@ -67,7 +67,8 @@ export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; 
     const locked = s.state === "locked";
     const out: React.ReactNode[] = [];
     const why = (note?: string | null) => (note ? <Text size="xs" c="dimmed">{note}</Text> : null);
-    if (live) {
+    // a raid that ended while a later raid still plays offers none of the live items (only Reopen, within the hour)
+    if (live && s.state !== "done" && s.state !== "cancelled") {
       out.push(<Menu.Item key={`${p.key}:fill`} leftSection={<IconUsersPlus size={14} />} onClick={() => setFill(s)}>{locked ? L.fill : L.suggest}</Menu.Item>);
       if (locked) {
         out.push(<Menu.Item key={`${p.key}:remind`} leftSection={<IconBell size={14} />} disabled={!s.may_remind} onClick={() => remind(s)}>{L.remind}{why(s.may_remind ? null : s.remind_note)}</Menu.Item>);

@@ -1816,7 +1816,7 @@ def refused_line(reg: Registry, op: ConfigOp, e: Exception) -> str:
             elif op.op in ("run_unlock", "run_start"):
                 subject = run_words(reg, _unlock_event(reg, op.target)[1])
             else:
-                subject = run_words(reg, _live_event(reg, op.target)[1])
+                subject = run_words(reg, _live_event(reg, op.target, cancel=op.op == "run_cancel")[1])
         except RegistryError:
             subject = ""
     elif op.op in ("character", "absence_clear", "dm", "regular") and op.member:
@@ -1840,14 +1840,17 @@ def run_words(reg: Registry, ev) -> str:
     return f"{reg.raid_def(ev.instance).get('name', ev.instance) if ev.instance else 'The event'} {reg.local12(ev.start)}"
 
 
-def _live_event(reg: Registry, target: str | None, raids=None):
+def _live_event(reg: Registry, target: str | None, raids=None, *, cancel: bool = False):
     """The live sheet a run key (or event key) names. `raids` is the bot's RaidStore when there is one (so the
-    change lands on the event the scheduler holds); otherwise the store is read fresh from disk."""
+    change lands on the event the scheduler holds); otherwise the store is read fresh from disk. `cancel` (run_cancel):
+    a closed raid's key names the raid its cancel acts as (rc.cancel_target: a part-ended event's raids still to play)."""
     from . import raidcycle as rc
 
     rs = raids if raids is not None else rc.RaidStore(reg.store, reg.key)
     key = (target or "").strip()
     ev = (rs.events.get(key) or rs.for_team(key)) if key else None
+    if cancel and ev is not None:
+        ev = rc.cancel_target(rs, ev)
     if ev is None and key:  # a raid id or name: fine when exactly one of its runs is live
         k = key.lower()
         hits = [e for e in rs.live() if e.instance and (e.instance.lower() == k or reg.raid_def(e.instance).get("name", "").lower() == k)]
@@ -2006,6 +2009,8 @@ def op_run_key(reg: Registry, op: ConfigOp, raids=None) -> str | None:
     if op.op not in RUN_OPS or op.op == "run_open":
         return None
     try:
+        if op.op == "run_cancel":
+            return _live_event(reg, op.target, raids, cancel=True)[1].key
         return (_unlock_event if op.op in BOX_OPS else _live_event)(reg, op.target, raids)[1].key
     except RegistryError:
         return None
@@ -2151,7 +2156,8 @@ def _box_refusal(reg: Registry, op: ConfigOp, rs, ev, b: dict) -> str:
     """A refused box's sentence, said for plain text: an unlock of an event that ENDED names Reopen (UNLOCK_ENDED)."""
     from . import raidcycle as rc
 
-    return UNLOCK_ENDED if op.op == "run_unlock" and rc.first_part(rs, ev).state == "done" else b["sentences"][0]
+    ended = op.op == "run_unlock" and b["sentences"][0] == rc.UNLOCK_DONE  # a part-ended event keeps its own sentence (Cancel)
+    return UNLOCK_ENDED if ended else b["sentences"][0]
 
 
 def _unlock_event(reg: Registry, target: str | None, raids=None):
@@ -3048,7 +3054,7 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         name = run_words(reg, rc.first_part(rs, ev))
         return (f"unlock {name}. " if op.op == "run_unlock" else f"start {name} now. ") + " ".join(b["sentences"])
     # the run ops: resolve the live run first so the line names it
-    rs, ev = _live_event(reg, op.target)
+    rs, ev = _live_event(reg, op.target, cancel=op.op == "run_cancel")
     label = run_words(reg, ev)
     if op.op == "run_reschedule":  # the confirm's own sentences (consequences.reschedule_consequence), refusals first
         from .consequences import reschedule_consequence
@@ -3870,7 +3876,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
             raise RegistryError(_box_refusal(reg, op, rs, ev, b))
         verb = bot.unlock_run if op.op == "run_unlock" else bot.start_now
         return await verb(reg, rs, ev, by=by, by_id=by_id, via=via, seen=rev)
-    rs, ev = _live_event(reg, op.target, rs)
+    rs, ev = _live_event(reg, op.target, rs, cancel=op.op == "run_cancel")
     if op.op == "run_reschedule":  # RaidMixin.reschedule_event: the site's Reschedule and MCP's reschedule_run share it
         start, timing = _reschedule_args(reg, op)
         return " ".join(await bot.reschedule_event(reg, rs, ev, start=start, timing=timing or None, by=by, by_id=by_id, via=via, rev=rev))

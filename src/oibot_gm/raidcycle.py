@@ -1637,10 +1637,27 @@ def event_rev(reg: Registry, rs: "RaidStore", ev: "RaidEvent") -> str:
 _OWN_READ = {"confirm", "first_come", "weights", "split_strategy"}  # read through their readers (run_weights …), not the dict
 
 
+def cancel_target(rs: "RaidStore", ev: "RaidEvent") -> "RaidEvent":
+    """THE raid a cancel pressed on `ev` acts as (RaidMixin.cancel_run, consequences.cancel_box / consequence("cancel"),
+    cancel_effects with `rs`, the Events page, the Discord buttons, plain text): the event's first raid while it is live
+    (the whole event goes); else `ev` while it is live (a later raid once the first has closed: the raids still to
+    play); else — `ev` has closed — the event's first raid still live, so a part-ended event is cancelled from ANY of
+    its raids' keys. `ev` itself when no raid of the event is live (or it was taken out of its lineup): the refusal."""
+    if ev.dropped:
+        return ev
+    first = first_part(rs, ev)
+    if first.state not in ("done", "cancelled"):
+        return first
+    if ev.state not in ("done", "cancelled"):
+        return ev
+    return next((p for p in event_parts(rs, ev) if p.state not in ("done", "cancelled")), ev)
+
+
 def cancel_tells_channel(rs: "RaidStore", ev: "RaidEvent") -> bool:
     """Whether a cancel pressed on `ev` can post its fixed line in the signup channel: the run's first raid owns the
     sheet and its channel, so a later raid whose first raid has already finished has neither (its cancel takes the raids
-    still to play, and nothing posts)."""
+    still to play, and nothing posts). Read for the raid the cancel acts as (cancel_target)."""
+    ev = cancel_target(rs, ev)
     if not is_follow(ev):
         return True
     first = first_part(rs, ev)
@@ -5580,6 +5597,7 @@ def reopen_run(reg: Registry, rs: RaidStore, ev: RaidEvent, by: str) -> str:
 
 UNLOCK_OPEN = "This event is still open for signup, so there is nothing to unlock."
 UNLOCK_DONE = "This event has ended, so it can't be unlocked."
+UNLOCK_PART_ENDED = "This event's first raid has ended, so its roster can't be unlocked, only cancelled."
 UNLOCK_CANCELLED = "A cancelled event can't be unlocked."
 UNLOCK_STARTED = "This event has already started, so it can't be unlocked."
 UNLOCK_LOOT = "A loot council is open on this event, so it can't be unlocked."
@@ -5603,8 +5621,8 @@ def unlock_refusal(reg: Registry, rs: RaidStore, ev: RaidEvent, at: datetime | N
     first = first_part(rs, ev)
     if first.state == "open":
         return UNLOCK_OPEN
-    if first.state == "done":
-        return UNLOCK_DONE
+    if first.state == "done":  # a later raid still to play: Cancel takes it (cancel_target), Unlock never does
+        return UNLOCK_PART_ENDED if any(p.state not in ("done", "cancelled") for p in event_parts(rs, first)) else UNLOCK_DONE
     if first.state == "cancelled":
         return UNLOCK_CANCELLED
     t = at or datetime.now(first.start.tzinfo)
@@ -5948,7 +5966,11 @@ def cancel_effects(reg: Registry, ev: RaidEvent, rs: "RaidStore | None" = None) 
     with a fill or pre-lock ask in play, `answered` how many answered the sheet. Nobody is DMed by a cancel (the DM
     rule): the sheet, the open ask cards, the signup channel line and the run's thread carry it. A cancel on any raid of
     a run cancels every LIVE raid of it (RaidMixin.cancel_run): see _cancel_lineup for `later` / `follow` / `lead` /
-    `first_closed` — `rs` (the run store) tells which raids are still live; without it every raid of the chain counts."""
+    `first_closed` — `rs` (the run store) tells which raids are still live; a closed `ev` reads the raid the cancel
+    acts as (cancel_target: a finished first raid's key reads the raids still to play); without it every raid of the
+    chain counts."""
+    if rs is not None and ev.state in ("done", "cancelled"):
+        ev = cancel_target(rs, ev)
     locked = ev.state != "open" and bool(ev.all_rosters)
     return {"state": ev.state, "locked": locked,
             "rostered": [p.signup_name for p in ev.seated()] if locked else [],

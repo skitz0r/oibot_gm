@@ -65,7 +65,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        groups go (Not placed, or Bench for a Bench answer); lock_refusal = everyone kept off), reschedule_box (3; `edit=True` = Edit event's box, the owner's tweaks B:
                        "Change <event>?" + Save + event_edit_lines = 'label: old → new' in PAGE_WORDS schedule_fields / priority / split words,
                        event_value_words; TIMING_NAMES carries confirmation, seating, priority, split) + reschedule_pick_box, lineup_box (4) + lineup_diff_lines,
-                       cancel_box (5, red), switch_box (6–7: locked=, swap=, own=), answer_box (8, inbox.action_lines) = a thin call of
+                       cancel_box (5, red; built for rc.cancel_target, so a part-ended event's box names the raids still to play), switch_box (6–7: locked=, swap=, own=), answer_box (8, inbox.action_lines) = a thin call of
                        member_action_box(reg, ev, m, key, character, spec, *, by_id, rev) = THE box of whatever an officer records for
                        someone (/raid set's SetWizard, POST /api/admin/action's preview / seen, the row ⋮ menu): action_lines under
                        MEMBER_ACTION_WORDS' title naming them + verb (answers keep "Answer for someone" / "Record answer"), never red;

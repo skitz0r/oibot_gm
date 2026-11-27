@@ -1647,13 +1647,12 @@ class RaidMixin:
         flip: a fan-out in flight sees the cancel before its next DM (RaidMixin._send_asks), stops, edits a card that
         went out meanwhile, and releases the lock — so the cancel waits for one DM at most, never a whole batch.
         Clearing the test bench passes notify=False: its cancels post nothing where real members read.
-        A run of several raids (design §5.62) is cancelled whole from ANY of its raids: a later raid's cancel is its first
-        raid's while that one is live, and the pressed raid's cancel takes every other live raid of the run with it (the
-        first raid may have finished while raids 3–4 still play) — one audit line naming them all."""
-        if audit and rc.is_follow(ev):
-            first = rc.first_part(rs, ev)
-            if first is not ev and first.state not in ("done", "cancelled"):
-                return await self.cancel_run(reg, rs, first, by, reason, notify=notify, by_id=by_id, via=via, audit=audit)
+        A run of several raids (design §5.62) is cancelled whole from ANY of its raids (rc.cancel_target): a later raid's
+        cancel is its first raid's while that one is live; a raid already done / cancelled whose event still has a live
+        raid (the first raid ended, a later one still locked) cancels the raids still to play; and the cancel takes every
+        other live raid of the run with it — one audit line naming them all. Refused only when no raid of it is live."""
+        if audit and (target := rc.cancel_target(rs, ev)) is not ev:
+            return await self.cancel_run(reg, rs, target, by, reason, notify=notify, by_id=by_id, via=via, audit=audit)
         async with self.board_lock(reg, ev.key):
             if ev.state in ("done", "cancelled"):
                 raise RegistryError(f"{run_title(reg, ev)} is already {ev.state} — nothing was changed.")

@@ -627,7 +627,10 @@ def lock_box(reg: Registry, ev: rc.RaidEvent, rs=None, fill: bool = False) -> di
 def _cancel(reg: Registry, ev: rc.RaidEvent, rs=None) -> list[str]:
     """Cancel an event (a cancel on any raid of it cancels every live raid of it — RaidMixin.cancel_run): how many raids
     go, who sees it, and that it can't be reopened. Nobody is DMed (the DM rule): the sheet is edited to its final state
-    and every open ask card says Cancelled. The answers live on the first raid, so who sees it is read there."""
+    and every open ask card says Cancelled. The answers live on the first raid, so who sees it is read there. With `rs`,
+    a closed `ev` speaks for the raids of its event still live (rc.cancel_target: a part-ended event's first raid)."""
+    if rs is not None and ev.state in ("done", "cancelled"):
+        ev = rc.cancel_target(rs, ev)
     if (closed := _closed(ev)):
         return closed
     fx = rc.cancel_effects(reg, ev, rs)
@@ -657,7 +660,11 @@ def _cancel(reg: Registry, ev: rc.RaidEvent, rs=None) -> list[str]:
 
 
 def cancel_box(reg: Registry, ev: rc.RaidEvent, rs=None) -> dict:
-    """Box 5: Cancel an event — red, it cannot be undone. A finished or cancelled event answers with a refusal box."""
+    """Box 5: Cancel an event — red, it cannot be undone. Built for the raid the cancel acts as (rc.cancel_target), so a
+    part-ended event's box names the raids still to play whichever key asks; an event with no raid live answers with a
+    refusal box."""
+    if rs is not None:
+        ev = rc.cancel_target(rs, ev)
     if (closed := _closed(ev)):
         return refusal_box_for(closed[0])
     return box(f"Cancel {event_title(reg, ev)}?", _cancel(reg, ev, rs), "Cancel event", danger=True,

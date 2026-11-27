@@ -977,9 +977,12 @@ already be filled, and nobody puts you back by hand. A *Can't make it* on the fi
 (*"Your Barrow Deeps place goes too."*). Once a later raid has started and its loot council is open, the companion's
 drops go there, even while the council before it is still open; until then the earlier council takes them. Cancelling
 any raid of the event cancels the whole event in the same press, its sheet and every later raid (*"Both raids of this
-event are cancelled."*). Once the first raid has finished, a cancel takes only the raids still to play:
+event are cancelled."*). Once the first raid has finished, a cancel takes only the raids still to play — pressed on
+any raid of the event, the finished one too (the Events page's **Cancel event**, its card in Discord, plain text, MCP):
 the finished raid stays done, and nothing goes to the signup channel — the sheet and its channel line belong to the
-first raid — so the cancel screen has no *Tell the channel?* choice then. A cancelled event is never reopened. If the bot restarts while an event is opening,
+first raid — so the cancel screen has no *Tell the channel?* choice then (*"The Barrow Deeps raid of this event is
+cancelled."*). The event then moves from *Open* to *History* as finished. Such an event can't be unlocked (*"This
+event's first raid has ended, so its roster can't be unlocked, only cancelled."*), and Reschedule and Edit event are gone. A cancelled event is never reopened. If the bot restarts while an event is opening,
 the next minute adds the later raids that didn't open yet, once, with no second sheet. Discord's `/raid open` sets a
 one-off's later raids; its schedule wizards show a schedule's later raids but don't set them — the site, plain text and MCP do. On the site's schedule editor the
 *Lineup* is the lineup builder: up to three later raids, each with its rosters (1–4) and its start, in 15-minute steps

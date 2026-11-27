@@ -1215,6 +1215,12 @@ def box_cases(reg, rs, runs, ms, dump):
     b = cq.cancel_box(reg, four, rs)
     assert b["sentences"][0] == "All 4 raids of this event are cancelled.", b
     add("cancel_box", "four raids", b)
+    four.state = "done"  # a part-ended event: the box from the finished first raid names the raids still to play
+    b = cq.cancel_box(reg, four, rs)
+    assert b["verb"] == "Cancel event" and b["sentences"][0].endswith("raids of this event are cancelled."), b
+    add("cancel_box", "four raids, the first finished, pressed on it", b)
+    dump.add("unlock_refusal", "four raids, the first finished", [rc.unlock_refusal(reg, rs, four) or ""])
+    four.state = "open"
     ev = runs["open recurring"]
     add("reschedule_box", "open, answers", cq.reschedule_box(reg, rs, ev, ev.start + timedelta(hours=1)))
     add("reschedule_pick_box", "nothing picked yet", cq.reschedule_pick_box(reg, rs, ev))

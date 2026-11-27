@@ -345,7 +345,9 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
         if first.closed_at:
             details.append(_fact("Ended", reg.local12(first.closed_at)))
     rows = {st: [_who(s) for s in sorted(first.by_status(st), key=lambda s: s.updated_at)] for st in ("in", "sub", "out")}
-    waiting = rc.pool_unanswered(reg, first) if live else []
+    # the answers live on the first raid: once it has ended (a later raid still to play) nobody answers any more
+    answering = live and first.state not in CLOSED
+    waiting = rc.pool_unanswered(reg, first) if answering else []
     rows["none"] = [{"uid": str(m.discord_id), "display_name": m.display_name, "character": c.label, "cls": c.cls, "spec": c.spec} for m, c in waiting]
     activity = []
     for p in parts:
@@ -353,8 +355,8 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
     activity.sort(key=lambda r: r["at"] or "", reverse=True)
     people = [{"uid": str(m.discord_id), "display_name": m.display_name, "characters": character_rows(reg, m)}
               for m in sorted(reg.members.values(), key=lambda m: m.display_name.lower())
-              if not m.test and m.active() and str(m.discord_id) not in first.signups] if live else []
-    started = first.start <= reg.now_local()
+              if not m.test and m.active() and str(m.discord_id) not in first.signups] if answering else []
+    started = first.start <= reg.now_local() or first.state in CLOSED  # an ended first raid: the event has started
     timing = rc.run_timing(reg, first)
     can_move = live and not started
     return {"key": first.key, "title": reg.local12(first.start), "state": state, "chip": rc.RUN_STATE_WORDS[state],
@@ -380,7 +382,7 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
             "start_day": first.start.astimezone(reg.tz).strftime("%Y-%m-%d"), "start_time": first.start.astimezone(reg.tz).strftime("%H:%M"),
             # each answered member's characters (the row ⋮'s answer box, the member fixed)
             "characters": {uid: character_rows(reg, m) for uid in {r["uid"] for rows_ in rows.values() for r in rows_}
-                           if (m := reg.members.get(int(uid))) is not None} if live else {},
+                           if (m := reg.members.get(int(uid))) is not None} if answering else {},
             "locks": lock_choices(float(timing["lock_hours_before"])) if can_move and timing.get("lock_hours_before") is not None else [],
             "edit": edit_options(reg, rs, first, timing) if can_move else None}
 
