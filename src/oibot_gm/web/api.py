@@ -1896,6 +1896,14 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             return JSONResponse({"error": str(e)}, status_code=409)
         return {"message": rc.site_words(v.reg, line)}
 
+    async def live_body(request: Request):
+        """body(officer=True) with the officer's rights decided NOW (live_officer, PRIV_LIVE), as End's route
+        (api_loot.writer) decides them: an officer demoted since the login's lookup can't unlock or start an event."""
+        v, d = await body(request, officer=True)
+        if live_officer is not None and not await live_officer(v):
+            raise HTTPException(403, "Officers only.")
+        return v, d
+
     @app.post("/api/run/{key}/unlock")
     async def run_unlock(request: Request, key: str):
         """Unlock a locked event (issue 14; RaidMixin.unlock_run): back to open signup with its rosters on the board,
@@ -1903,7 +1911,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         nothing written); `seen` = its fp → 409 with the fresh box when it changed while open, 400 with the refusal box
         (rc.unlock_refusal) when it can't go. No `seen` (MCP): the unlock itself, its refusal a 400. Any raid's key
         answers for its event; unlock_run writes the audit line."""
-        v, d = await body(request, officer=True)
+        v, d = await live_body(request)
         rs = bot.raids.store(v.reg)
         ev = rs.events.get(key) or find_live(v.reg, rs, key)  # an ended event, named by its key, answers with its refusal box
         fresh = cq.unlock_box(v.reg, ev, rs)
@@ -1926,7 +1934,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         nothing written); `seen` = its fp → 409 with the fresh box when it changed while open, 400 with the refusal box
         (rc.start_now_refusal) when it can't go. No `seen` (MCP): the start itself, its refusal a 400. Any raid's key
         answers for its event; start_now writes the audit line."""
-        v, d = await body(request, officer=True)
+        v, d = await live_body(request)
         rs = bot.raids.store(v.reg)
         ev = rs.events.get(key) or find_live(v.reg, rs, key)  # an ended event, named by its key, answers with its refusal box
         fresh = cq.start_now_box(v.reg, ev, rs)

@@ -82,7 +82,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        after the lock on EVERY surface (the route, MCP, plain text's run_strategy in the diff and at apply); the final fix wave's
                        remind_box (POST /api/run/{key}/remind), unlock_box(reg, ev, rs) (issue 14: S1 open signup with the rosters on the board —
                        "The whole event…" with several raids; S2 _unlock_told: "Nobody gets a DM", then the fill asks it withdraws, else the
-                       confirmation asks that stay open — unlock_facts reads both BEFORE the unlock; S3 UNLOCK_AGAIN; verb UNLOCK_VERB; rc.unlock_refusal
+                       confirmation asks that stay open — unlock_facts reads both BEFORE the unlock, the fill side as distinct people; S3 UNLOCK_AGAIN; verb UNLOCK_VERB; rc.unlock_refusal
                        → the refusal box; POST /api/run/{key}/unlock, unlock_decide, run_unlock's review), start_now_box(reg, ev, rs) (issue 14
                        Task 6: S1 the start moves to this minute — the later raids by the same amount with several; S2 _start_now_told: who
                        answered gets a notice, then the confirmation asks that keep their deadline, else "nobody gets a DM" — start_now_facts

@@ -1889,6 +1889,12 @@ def board_revs(reg: Registry, ops: list[ConfigOp], raids=None) -> dict[str, str]
             except RegistryError:
                 continue
             out.setdefault(EVENT_REV + ev.key, rc.event_rev(reg, rs, ev))
+        elif op.op in BOX_OPS:  # an unlock / start now carries the box the diff showed (its fp, the site's `seen`)
+            try:
+                rs, ev = _unlock_event(reg, op.target, raids)
+            except RegistryError:
+                continue
+            out.setdefault(BOX_REV + ev.key, _box_of(reg, op, rs, ev)["fp"])
         elif op.op == "run_fill":  # a send carries the plan the diff showed (rc.plan_rev) — before and after lock
             try:
                 rs, ev = _live_event(reg, op.target, raids)
@@ -1943,6 +1949,8 @@ def op_rev(op: ConfigOp, key: str | None, revs: dict[str, str]) -> str | None:
         return revs.get(PLAN_REV + key)
     if op.op in EVENT_OPS:
         return revs.get(EVENT_REV + key)
+    if op.op in BOX_OPS:
+        return revs.get(BOX_REV + key)
     return None
 
 
@@ -1998,7 +2006,7 @@ def op_run_key(reg: Registry, op: ConfigOp, raids=None) -> str | None:
     if op.op not in RUN_OPS or op.op == "run_open":
         return None
     try:
-        return _live_event(reg, op.target, raids)[1].key
+        return (_unlock_event if op.op in BOX_OPS else _live_event)(reg, op.target, raids)[1].key
     except RegistryError:
         return None
 
@@ -2118,9 +2126,32 @@ def _ended_event(reg: Registry, target: str | None, raids=None):
         raise RegistryError("There is no ended event by that name. Name the raid whose event ended." if key else "Name the event.")
     if ev.state == "cancelled":
         raise RegistryError(f"{run_words(reg, ev)} was cancelled — a cancelled event is never reopened; open a new one.")
+    if ev.state == "locked":  # a locked roster to change is Unlock's, never Reopen's
+        raise RegistryError(REOPEN_LOCKED.format(event=run_words(reg, ev)))
     if ev.state != "done":
         raise RegistryError(f"{run_words(reg, ev)} is {ev.state} — only an event that ended can be reopened.")
     return rs, ev
+
+
+REOPEN_LOCKED = "{event} is locked, not ended, so unlock it to change its roster."
+UNLOCK_ENDED = "This event has ended, so reopen it within the hour after its end instead."
+BOX_REV = "box:"  # board_revs key prefix: the box (its fp) a reviewed run_unlock / run_start showed — Apply refuses a changed one
+BOX_OPS = {"run_unlock", "run_start"}
+
+
+def _box_of(reg: Registry, op: ConfigOp, rs, ev) -> dict:
+    """The site's box for a reviewed op of BOX_OPS (consequences.unlock_box / start_now_box): the review prints it, Apply
+    re-checks its fp (the site's `seen`)."""
+    from . import consequences as cq
+
+    return (cq.unlock_box if op.op == "run_unlock" else cq.start_now_box)(reg, ev, rs)
+
+
+def _box_refusal(reg: Registry, op: ConfigOp, rs, ev, b: dict) -> str:
+    """A refused box's sentence, said for plain text: an unlock of an event that ENDED names Reopen (UNLOCK_ENDED)."""
+    from . import raidcycle as rc
+
+    return UNLOCK_ENDED if op.op == "run_unlock" and rc.first_part(rs, ev).state == "done" else b["sentences"][0]
 
 
 def _unlock_event(reg: Registry, target: str | None, raids=None):
@@ -3009,22 +3040,13 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
             raise RegistryError(why)
         back = ev.prev_state or "locked"
         return f"reopen {label} — " + ("locked again, the roster as it was" if back == "locked" else "the sheet is open again") + "; the loot council stays archived"
-    if op.op == "run_unlock":  # the Unlock box's own sentences (consequences.unlock_box), its refusal first
-        from .consequences import unlock_box
-
+    if op.op in BOX_OPS:  # the Unlock / Start now box's own sentences (consequences.unlock_box / start_now_box), its refusal first
         rs, ev = _unlock_event(reg, op.target)
-        b = unlock_box(reg, ev, rs)
+        b = _box_of(reg, op, rs, ev)
         if b["verb"] is None:
-            raise RegistryError(b["sentences"][0])
-        return f"unlock {run_words(reg, rc.first_part(rs, ev))}. " + " ".join(b["sentences"])
-    if op.op == "run_start":  # the Start now box's own sentences (consequences.start_now_box), its refusal first
-        from .consequences import start_now_box
-
-        rs, ev = _unlock_event(reg, op.target)
-        b = start_now_box(reg, ev, rs)
-        if b["verb"] is None:
-            raise RegistryError(b["sentences"][0])
-        return f"start {run_words(reg, rc.first_part(rs, ev))} now. " + " ".join(b["sentences"])
+            raise RegistryError(_box_refusal(reg, op, rs, ev, b))
+        name = run_words(reg, rc.first_part(rs, ev))
+        return (f"unlock {name}. " if op.op == "run_unlock" else f"start {name} now. ") + " ".join(b["sentences"])
     # the run ops: resolve the live run first so the line names it
     rs, ev = _live_event(reg, op.target)
     label = run_words(reg, ev)
@@ -3841,12 +3863,13 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
     if op.op == "run_reopen":  # RaidMixin.reopen_run: the closed card's Reopen, the site and MCP share it
         rs, ev = _ended_event(reg, op.target, rs)
         return await bot.reopen_run(reg, rs, ev, by=by, by_id=by_id, via=via)
-    if op.op == "run_unlock":  # RaidMixin.unlock_run: the lock card's Unlock, /raid unlock, POST /api/run/{key}/unlock, MCP
-        rs, ev = _unlock_event(reg, op.target, rs)
-        return await bot.unlock_run(reg, rs, ev, by=by, by_id=by_id, via=via)
-    if op.op == "run_start":  # RaidMixin.start_now: the lock card's Start now, /raid start, POST /api/run/{key}/start, MCP
-        rs, ev = _unlock_event(reg, op.target, rs)
-        return await bot.start_now(reg, rs, ev, by=by, by_id=by_id, via=via)
+    if op.op in BOX_OPS:  # RaidMixin.unlock_run / start_now (the lock card, /raid unlock | start, the site's route, MCP),
+        rs, ev = _unlock_event(reg, op.target, rs)  # with the box the review showed: a changed one is refused (RUN_CHANGED)
+        b = _box_of(reg, op, rs, ev)
+        if b["verb"] is None:
+            raise RegistryError(_box_refusal(reg, op, rs, ev, b))
+        verb = bot.unlock_run if op.op == "run_unlock" else bot.start_now
+        return await verb(reg, rs, ev, by=by, by_id=by_id, via=via, seen=rev)
     rs, ev = _live_event(reg, op.target, rs)
     if op.op == "run_reschedule":  # RaidMixin.reschedule_event: the site's Reschedule and MCP's reschedule_run share it
         start, timing = _reschedule_args(reg, op)

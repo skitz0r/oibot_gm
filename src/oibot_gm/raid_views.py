@@ -480,18 +480,20 @@ def night_actions_row(reg: Registry, ev: rc.RaidEvent):
     """The lock card's second row — the raid-night levers (design B2/B4/B7): Remind the unanswered (greyed when
     rc.remind_refusal says it can't go now, e.g. within the hour), Pause / Resume automatic asks (D18), Start now (while
     rc.start_now_refusal is None — `ev` answers for itself, the card holds no store; the decide screen prints
-    consequences.start_now_box), Unlock (before the start; the decide screen prints consequences.unlock_box or its
+    consequences.start_now_box), Unlock (before the event's first raid starts and while no loot council is open on this raid —
+    boss_progress, the same session files rc.loot_open_on reads; the decide screen prints consequences.unlock_box or its
     refusal), End the run (after the scheduled start; LootMixin.end_run). One order always; what does not apply is
     disabled in place. Discord's five buttons a row: this row is full."""
     ui = discord.ui
     started = datetime.now(ev.start.tzinfo) >= ev.start
     remind_no = rc.remind_refusal(reg, ev) if rc.run_confirms(reg, ev) else rc.NO_CONFIRMATIONS
-    down = bool((boss_progress(reg, ev) or {}).get("all_down"))  # the last boss is down: End is the next thing to press (L12)
+    prog = boss_progress(reg, ev)  # this raid's loot council(s), None without one
+    down = bool((prog or {}).get("all_down"))  # the last boss is down: End is the next thing to press (L12)
     first_start = ev.start - timedelta(minutes=int(ev.starts or 0)) if rc.is_follow(ev) else ev.start  # the event starts with its first raid
     return ui.ActionRow(RunButton(reg.key, ev.key, "remind", disabled=bool(remind_no)),
                         RunButton(reg.key, ev.key, "pause", label=RUN_WORDS["resume"] if ev.autofill_paused else None),
                         RunButton(reg.key, ev.key, "start", disabled=rc.start_now_refusal(reg, None, ev) is not None),  # issue 14
-                        RunButton(reg.key, ev.key, "unlock", disabled=datetime.now(ev.start.tzinfo) >= first_start),  # issue 14: before the start (decide: rc.unlock_refusal)
+                        RunButton(reg.key, ev.key, "unlock", disabled=datetime.now(ev.start.tzinfo) >= first_start or prog is not None),  # issue 14: before the FIRST raid's start, no council open (decide: rc.unlock_refusal)
                         RunButton(reg.key, ev.key, "end", disabled=not (started or down)))
 
 

@@ -335,7 +335,7 @@ class StartBot:
     def __init__(self, rs):
         self.raids, self.calls = type("S", (), {"store": lambda _s, _r: rs})(), []
 
-    async def start_now(self, reg, rs, ev, by, by_id=None, *, via="discord"):
+    async def start_now(self, reg, rs, ev, by, by_id=None, *, via="discord", seen=None):
         self.calls.append(("start_now", ev.key, by, via))
         return "Started."
 

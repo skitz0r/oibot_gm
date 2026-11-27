@@ -46,6 +46,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        Issue 14: run_unlock (target; RUN_OPS, group `runs`, RUN_VERBS_AUDITED, WARN_OPS always) — _unlock_event finds any event by
                        its key (an ended one answers with rc.unlock_refusal's sentence) else the live one; its review line is "unlock <event>. " +
                        consequences.unlock_box's sentences; apply = RaidMixin.unlock_run. SCHEMA_TEXT tells it from run_reopen (an END undone).
+                       BOX_OPS (run_unlock, run_start): board_revs carries the box's fp under BOX_REV + key, op_rev hands it to Apply as
+                       `seen` (unlock_run / start_now re-check it under the locks → rc.RUN_CHANGED), as the site's `seen`; REOPEN_LOCKED /
+                       UNLOCK_ENDED = each refusal names the other verb (_box_refusal).
                        run_start (Task 6; the same registrations, found by _unlock_event): review "start <event> now. " + consequences.start_now_box's
                        sentences; apply = RaidMixin.start_now. SCHEMA_TEXT keeps it apart from run_open ("start a sheet") and loot field=open.
                        Phase 4 (§5.67): op_box(reg, ops, diff, rs=) → Described.box (and each line's) for one schedule's or one raid's write (boxes

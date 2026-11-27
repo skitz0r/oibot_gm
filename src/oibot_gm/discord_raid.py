@@ -65,6 +65,13 @@ class RaidContext:
 
 # ---------------------------------------------------------------- bot mixin
 
+def _cq():
+    """consequences, imported late (it imports raid_views, which this module imports)."""
+    from . import consequences
+
+    return consequences
+
+
 class RaidMixin:
     """Methods the bot needs; mixed into OibotGM."""
 
@@ -1692,7 +1699,7 @@ class RaidMixin:
         await ops_mod.audited(self.ops, reg, by, f"reopened {run_title(reg, ev)} ({back})", via=via, by_id=by_id)
         return f"Reopened {run_title(reg, ev)} — {'locked, roster as it was' if back == 'locked' else 'the sheet is open again'}."
 
-    async def unlock_run(self, reg, rs, ev, by: str, by_id: int | None = None, *, via: str = "discord") -> str:
+    async def unlock_run(self, reg, rs, ev, by: str, by_id: int | None = None, *, via: str = "discord", seen: str | None = None) -> str:
         """THE unlock (issue 14) behind every surface: the event `ev` belongs to goes back to open signup with its rosters
         on the board (rc.unlock — every locked raid, any raid of it standing for its first). Under the first raid's solver
         single flight and every raid's board lock (one order, as reschedule takes them), so a lock, a cancel or a board
@@ -1715,6 +1722,8 @@ class RaidMixin:
                 await stack.enter_async_context(self.board_lock(reg, key))
             if (why := rc.unlock_refusal(reg, rs, first, sending=sending())) is not None:
                 raise RegistryError(why)
+            if seen and _cq().unlock_box(reg, first, rs)["fp"] != seen:  # plain text's reviewed box changed since (the site's `seen`)
+                raise RegistryError(rc.RUN_CHANGED)
             had = {p.key: ({k: v for k, v in p.cards.items() if k.startswith("lock:")}, p.cards_channel_id, p.lock_line) for p in parts}
             done = rc.unlock(reg, rs, first, by, fills=False)  # the fill asks close below, under plan_lock
         fills: list = []
@@ -1845,7 +1854,7 @@ class RaidMixin:
             reg.notify(uid, "moved", f"{name} now starts {when}." if moved else f"{name} now locks {locks}.", run=first.key)
         return edited
 
-    async def start_now(self, reg, rs, ev, by: str, by_id: int | None = None, *, via: str = "discord") -> str:
+    async def start_now(self, reg, rs, ev, by: str, by_id: int | None = None, *, via: str = "discord", seen: str | None = None) -> str:
         """THE Start now (issue 14) behind every surface: a locked event before its start starts this minute
         (rc.start_now — the first raid's start becomes now, later raids move by the same amount, every confirm-by stays,
         so no unanswered confirmation expires and no seat is freed by it). Under every raid's board lock (one order, as
@@ -1861,6 +1870,8 @@ class RaidMixin:
                 await stack.enter_async_context(self.board_lock(reg, key))
             if (why := rc.start_now_refusal(reg, rs, first)) is not None:  # again, now that nothing else writes the event
                 raise RegistryError(why)
+            if seen and _cq().start_now_box(reg, first, rs)["fp"] != seen:  # plain text's reviewed box changed since
+                raise RegistryError(rc.RUN_CHANGED)
             old = first.start
             rc.stamp_before_change(reg, rs, parts)  # a run the start's stamping missed: stamped from its night, written below
             mv = rc.start_now(reg, rs, first, by)

@@ -236,12 +236,12 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        re-checks under board_lock and RAISES the refusal (lock_empty_refusal, lock_all_off) instead of recording a failed lock.
                        A relock (after an unlock) reconciles in reconcile_asks: left off → ask closed `unrostered` / yes lapsed, card edited,
                        Not rostered notice; kept open ask → card redrawn (edit_live_card); send_confirmations skips a standing yes.
-                       unlock_run(reg, rs, ev, by, by_id=None, *, via) = THE unlock verb: solving + every raid's board_lock, rc.unlock, late fill
+                       unlock_run(reg, rs, ev, by, by_id=None, *, via, seen=None) = THE unlock verb (seen = a reviewed box's fp, re-checked under the locks → RUN_CHANGED): solving + every raid's board_lock, rc.unlock, late fill
                        asks closed under plan_lock, fill cards edited, lock cards and lock_line deleted (_delete_message, failure-quiet), a fresh
                        health card when the event had one, refresh_sheet / refresh_cards, one thread line, one audit line, no DM.
                        Every surface calls it after the box (Task 5): POST /api/run/{key}/unlock, raid_buttons.unlock_decide (the lock
                        card's Unlock, /raid unlock), configops run_unlock, MCP unlock_run.
-                       start_now(reg, rs, ev, by, by_id=None, *, via) = THE Start now verb: every raid's board_lock, rc.start_now, then
+                       start_now(reg, rs, ev, by, by_id=None, *, via, seen=None) = THE Start now verb (seen as unlock_run's): every raid's board_lock, rc.start_now, then
                        _after_move (shared with reschedule_event: refresh_sheet, every live raid's cards, open Confirm / fill-ask cards via
                        edit_live_card, the `moved` notice to Moved.told), one thread line, one audit line, no DM. Callers: POST
                        /api/run/{key}/start, raid_buttons.start_decide, configops run_start, MCP start_now.
@@ -350,7 +350,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
   raid_buttons.py      RUN_WORDS = THE label of every run verb (RunButton.LABELS is built from it; /api/meta.run_labels — design §5.56 phase 2);
                        persistent DynamicItem buttons: SignupButton (Join/Bench/No thanks/Can't make it + character picker), FillButton, PlaceButton,
                        RunButton (officer Lock/Fill/Loot/Cancel on the cards; the lock card's second row Remind/Pause/Start now/Unlock/End — Start
-                       now greyed unless rc.start_now_refusal(reg, None, ev) is None, Unlock greyed once the event's first raid has started; the closed card's Reopen; lock_decide / cancel_decide / remind_decide /
+                       now greyed unless rc.start_now_refusal(reg, None, ev) is None, Unlock greyed once the event's first raid has started or while boss_progress finds a loot council on that raid; the closed card's Reopen; lock_decide / cancel_decide / remind_decide /
                        unlock_decide (cq.unlock_box: Unlock · Back, or the refusal; then unlock_run) / start_decide (cq.start_now_box: Start now · Back,
                        or the refusal; then start_now — end_decide's "hasn't started" refusal keeps a Start now button that opens it) / end_decide = THE lock, cancel, remind, unlock, start and end screens: the server's
                        box through Wizard.decide_box — cq.lock_box (a complete board: Lock · Preview lock; with the fill choice two verbs, RUN_WORDS

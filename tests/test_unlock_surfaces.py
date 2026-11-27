@@ -68,6 +68,24 @@ def test_the_box_says_what_changes_who_is_told_and_what_follows(reg, rs):
     assert cq.unlock_box(reg, ev, rs)["sentences"][1] == "Nobody gets a DM, and the 2 people asked to fill a seat see their ask withdrawn."
 
 
+def test_the_people_asked_to_fill_are_counted_once_each(reg, rs):
+    """One member holding fill asks on both raids of a lineup is one person in the box."""
+    bot = NightBot(reg, rs)
+    lead, fev, ms = _pair_with_lead_board(reg, rs)
+    fev.layout = [[m.display_name for m in ms[5:8]]]
+    rs.save(fev, "board (test)")
+    run(bot.lock_run(reg, rs, rs.events[lead.key], by="Jon", fill=False))
+    lead, fev = rs.events[lead.key], rs.events[fev.key]
+    answer_all(reg, lead)
+    fill_ask(lead, ms[20])
+    fill_ask(fev, ms[20])
+    told = cq.unlock_box(reg, lead, rs)["sentences"][1]
+    assert told == "Nobody gets a DM, and the one person asked to fill a seat sees their ask withdrawn.", told
+    b = cq.unlock_box(reg, lead, rs)
+    fill_ask(fev, ms[21])
+    assert cq.unlock_box(reg, lead, rs)["fp"] != b["fp"]
+
+
 def test_withdrawn_fill_asks_win_over_confirmation_asks_kept(reg, rs):
     bot, ev, ms = locked_event(reg, rs)
     fill_ask(ev, ms[9])
@@ -104,8 +122,28 @@ def test_the_box_refuses_in_one_sentence(reg, rs):
 
 
 def test_every_sentence_reads_aloud(reg, rs):
+    """Every case of the box: nothing out, confirmation asks open, fill asks out (one person, two), a lineup, refusals."""
     bot, ev, ms = locked_event(reg, rs)
-    for b in (cq.unlock_box(reg, ev, rs),):
+    boxes = [cq.unlock_box(reg, ev, rs)]
+    answer_all(reg, ev)
+    boxes.append(cq.unlock_box(reg, ev, rs))
+    fill_ask(ev, ms[9])
+    boxes.append(cq.unlock_box(reg, ev, rs))
+    fill_ask(ev, ms[8])
+    boxes.append(cq.unlock_box(reg, ev, rs))
+    loot = loot_file(rs, ev)
+    boxes.append(cq.unlock_box(reg, ev, rs))
+    loot.unlink()
+    boxes.append(cq.unlock_box(reg, open_test_run(reg, rs, days=6), rs))
+    lead, fev, pool = _pair_with_lead_board(reg, rs)
+    fev.layout = [[m.display_name for m in pool[5:8]]]
+    rs.save(fev, "board (test)")
+    run(NightBot(reg, rs).lock_run(reg, rs, rs.events[lead.key], by="Jon", fill=False))
+    boxes.append(cq.unlock_box(reg, rs.events[fev.key], rs))
+    rc.end_run(reg, rs, ev, "t")
+    boxes.append(cq.unlock_box(reg, ev, rs))
+    assert len({b["fp"] for b in boxes}) == len(boxes), "eight cases, eight boxes"
+    for b in boxes:
         for s in b["sentences"]:
             assert s[0].isupper() and s.endswith(".") and s.count(".") == 1 and len(s.split()) <= 20, s
             assert not any(ch in s for ch in "();:—"), s
@@ -218,13 +256,39 @@ def test_the_lock_card_carries_unlock_beside_end_with_the_guild_key(reg, rs):
     assert not night_actions_row(reg, ev).children[-2].item.disabled, "before the start it can be pressed"
 
 
+def test_the_lock_card_greys_unlock_while_a_loot_council_is_open(reg, rs, monkeypatch):
+    from oibot_gm import raid_views
+
+    _bot, ev, ms = locked_event(reg, rs)
+    monkeypatch.setattr(raid_views, "boss_progress", lambda reg_, ev_: {"done": 0, "total": 0, "rosters": {}, "all_down": False})
+    assert raid_views.night_actions_row(reg, ev).children[-2].item.disabled
+
+
+def test_a_later_raids_lock_card_greys_unlock_by_the_first_raids_start(reg, rs):
+    from datetime import datetime
+
+    from oibot_gm.raid_views import night_actions_row
+
+    bot = NightBot(reg, rs)
+    lead, fev, ms = _pair_with_lead_board(reg, rs)
+    fev.layout = [[m.display_name for m in ms[5:8]]]
+    rs.save(fev, "board (test)")
+    run(bot.lock_run(reg, rs, rs.events[lead.key], by="Jon", fill=False))
+    fev = rs.events[fev.key]
+    assert rc.is_follow(fev) and not night_actions_row(reg, fev).children[-2].item.disabled
+    now = datetime.now(fev.start.tzinfo)
+    fev.starts = int((fev.start - now).total_seconds() // 60) + 30  # its first raid began half an hour ago; it hasn't
+    assert fev.start > now
+    assert night_actions_row(reg, fev).children[-2].item.disabled, "greyed by the FIRST raid's start"
+
+
 # ---------------------------------------------------------------- plain text and MCP
 
 class UnlockBot:
     def __init__(self, rs):
         self.raids, self.calls = type("S", (), {"store": lambda _s, _r: rs})(), []
 
-    async def unlock_run(self, reg, rs, ev, by, by_id=None, *, via="discord"):
+    async def unlock_run(self, reg, rs, ev, by, by_id=None, *, via="discord", seen=None):
         self.calls.append(("unlock_run", ev.key, by, via))
         return "Unlocked."
 
@@ -245,11 +309,15 @@ def test_unlock_and_reopen_are_never_confused(reg, rs):
     """Both ways: an unlock of an ended event is refused (Reopen is for that), a reopen of a locked one is refused, and
     the parser's prompt tells them apart by the words people use."""
     _bot, ev, ms = locked_event(reg, rs)
-    with pytest.raises(RegistryError, match="only an event that ended"):
+    with pytest.raises(RegistryError) as e:
         configops.describe(reg, ConfigOp(op="run_reopen", target=ev.key), strict=True)
+    assert str(e.value).endswith("is locked, not ended, so unlock it to change its roster."), e.value
     rc.end_run(reg, rs, ev, "t")
-    with pytest.raises(RegistryError, match="ended"):
+    with pytest.raises(RegistryError) as e:
         configops.describe(reg, ConfigOp(op="run_unlock", target=ev.key), strict=True)
+    assert str(e.value) == configops.UNLOCK_ENDED
+    for x in (configops.UNLOCK_ENDED, configops.REOPEN_LOCKED.format(event="Barrow Deeps Wed 9 Dec 10 PM")):
+        assert x.endswith(".") and x.count(".") == 1 and len(x.split()) <= 20 and not any(c in x for c in "();:—"), x
     assert "Unlock" in configops.describe(reg, ConfigOp(op="run_unlock", target=ev.key)), "listed as refused, by its name"
     text = configops.SCHEMA_TEXT
     unlock = text[text.index("  run_unlock:"):].split("\n  run_")[0]
@@ -257,6 +325,23 @@ def test_unlock_and_reopen_are_never_confused(reg, rs):
     for phrase in ('"unlock tonight\'s raid"', '"reopen the roster for Tuesday"', '"undo the lock"'):
         assert phrase in unlock and phrase not in reopen, phrase
     assert '"undo the end"' in reopen and "run_unlock" in reopen and "run_reopen" in unlock
+
+
+def test_a_reviewed_unlock_is_refused_when_the_event_changed_before_apply(reg, rs):
+    """Plain text carries the box the review showed (configops.board_revs → op_rev, the site's `seen`): a fill ask sent
+    between the review and Apply makes the unlock refuse (RUN_CHANGED), nothing written; the same box applies."""
+    bot, ev, ms = locked_event(reg, rs)
+    op = ConfigOp(op="run_unlock", target=ev.key)
+    revs = configops.board_revs(reg, [op], rs)
+    key = configops.op_run_key(reg, op, rs)
+    assert configops.op_rev(op, key, revs) == cq.unlock_box(reg, ev, rs)["fp"]
+    fill_ask(rs.events[ev.key], ms[9])
+    with pytest.raises(RegistryError, match="changed this event"):
+        run(configops.apply_async(reg, op, "Officer", True, bot=bot, rev=configops.op_rev(op, key, revs)))
+    assert rs.events[ev.key].state == "locked"
+    revs = configops.board_revs(reg, [op], rs)
+    run(configops.apply_async(reg, op, "Officer", True, bot=bot, rev=configops.op_rev(op, key, revs)))
+    assert rs.events[ev.key].state == "open"
 
 
 def test_mcp_unlock_run_posts_the_route(monkeypatch):
@@ -280,3 +365,30 @@ def test_mcp_unlock_reaches_the_engine_through_the_site(reg, rs, web_bot):
     assert r.status_code == 200 and rs.events[ev.key].state == "open", r.text
     r = web_bot.c.post(f"/api/run/{ev.key}/unlock", json={}, headers=H())
     assert r.status_code == 400 and r.json()["error"] == rc.UNLOCK_OPEN
+
+
+
+def test_unlock_and_start_now_decide_the_officer_live():
+    """As End's route (api_loot.writer): the Unlock and Start now routes decide the officer NOW (live_officer, PRIV_LIVE)
+    through live_body, so an officer demoted since the login's lookup can't press them. (The live check itself is
+    web/app.py's, pinned by the guide library's demoted-officer test.)"""
+    src = (ROOT / "src" / "oibot_gm" / "web" / "api.py").read_text()
+    gate = src[src.index("    async def live_body(request: Request):"):]
+    gate = gate[:gate.index("\n\n")]
+    assert "await live_officer(v)" in gate and 'HTTPException(403, "Officers only.")' in gate
+    for route in ('"/api/run/{key}/unlock")', '"/api/run/{key}/start")'):
+        body_ = src[src.index(route):]
+        body_ = body_[:body_.index("@app.")]
+        assert "v, d = await live_body(request)" in body_ and "await body(request" not in body_, route
+
+
+def test_a_reviewed_start_now_carries_its_box_too(reg, rs):
+    bot, ev, ms = locked_event(reg, rs)
+    op = ConfigOp(op="run_start", target=ev.key)
+    revs = configops.board_revs(reg, [op], rs)
+    key = configops.op_run_key(reg, op, rs)
+    seen = configops.op_rev(op, key, revs)
+    assert seen == cq.start_now_box(reg, ev, rs)["fp"]
+    with pytest.raises(RegistryError, match="changed this event"):
+        run(bot.start_now(reg, rs, ev, "Officer", seen="0" * 12))
+    assert rs.events[ev.key].start == ev.start

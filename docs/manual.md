@@ -1466,11 +1466,16 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    and DMs (*"The lock is still sending its cards and DMs, so the event can't be unlocked yet."*). Every raid of the event
    unlocks together.
    - **Where.** **Unlock** in the event's **More** menu on the Events page (once, for the whole event) and beside **End the
-     event** on the sheet card; **Unlock** on the Discord lock card's second row (greyed once the event has started) and
-     `/raid unlock` (it asks which event when several are locked); plain text *"unlock tonight's event"*, *"reopen the
-     roster for Tuesday"* or *"undo the lock"* (always reviewed first; *"reopen …"* of an event that **ended** is Reopen, not
-     this); MCP `unlock_run`. Where it is refused the control is greyed with the refusal under it (the site) or the screen
-     shows the refusal with only Back (Discord).
+     event** on the sheet card; **Unlock** on the Discord lock card's second row (greyed once the event's first raid has
+     started, and while a loot council is open on that raid) and `/raid unlock` (it asks which event when several are
+     locked); plain text *"unlock tonight's event"*, *"reopen the roster for Tuesday"* or *"undo the lock"* (always reviewed
+     first, and Apply refuses with *"Someone changed this event a moment ago…"* when the event changed after the review;
+     *"reopen …"* of an event that **ended** is Reopen, not this); MCP `unlock_run`. On the site Unlock shows only for a
+     locked event: an open, ended or cancelled event has no Unlock at all, and a started event or one with a loot council
+     open shows it greyed with the refusal under it. In Discord a refused press shows the refusal with only Back. Plain
+     text names the other verb when it is the wrong one: reopening a locked event answers *"… is locked, not ended, so
+     unlock it to change its roster."*, unlocking an ended one *"This event has ended, so reopen it within the hour after
+     its end instead."* The site's Unlock and Start now check that you are still an officer at the press.
    - **It asks first**, the same box everywhere: *"The event goes back to open signup with its rosters on the board."*
      (an event of several raids: *"The whole event goes back to open signup, with every raid's rosters on the board."*),
      then *"Nobody gets a DM."* — followed, when fill asks are out, by *", and the 2 people asked to fill a seat see their

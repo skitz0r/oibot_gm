@@ -1390,15 +1390,15 @@ UNLOCK_AGAIN = "Auto Lock is turned off, so an officer locks it again."
 def unlock_facts(reg: Registry, ev: rc.RaidEvent, rs) -> tuple[int, int, int]:
     """What an unlock (rc.unlock) will touch, read BEFORE it: (raids it unlocks — every locked raid of the event,
     confirmation asks that stay open — rc.open_placement_rows on the first raid, as rc.Unlocked.asks_kept counts them,
-    fill asks still out that it withdraws)."""
+    PEOPLE holding a fill ask still out that it withdraws — one member asked on two raids of a lineup is one person)."""
     first = rc.first_part(rs, ev)
     locked = [p for p in rc.event_parts(rs, first) if p.state == "locked"]
-    fills = sum(1 for p in locked for a in p.fill_asks if a.pending)
+    fills = len({a.discord_id for p in locked for a in p.fill_asks if a.pending})
     return len(locked), len(rc.open_placement_rows(reg, first)), fills
 
 
 def _unlock_told(asks: int, fills: int) -> str:
-    """Who is told at an unlock: nobody gets a DM; then the one fact the reader would not expect. Fill asks withdrawn win
+    """Who is told at an unlock (`fills` = people, not asks): nobody gets a DM; then the one fact the reader would not expect. Fill asks withdrawn win
     over confirmation asks kept when both apply: a withdrawn ask takes an offer back from someone, a kept ask is the
     unlock leaving a person alone."""
     if fills:
