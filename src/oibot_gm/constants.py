@@ -182,7 +182,7 @@ PAGE_WORDS = {
         # read from raid_scheduler (the lock step skips an event with Auto Lock off) and the lock's fill choice (issue 14)
         "auto_lock": "At the lock time, the bot locks the roster by itself. "
                      "With Auto Lock off, nothing happens at the lock time and the sheet stays open until an officer locks it. "
-                     "Asks sent before then still close at their own deadline.",
+                     "Asks an officer sends while the sheet is open then stay open until the event starts.",
         "auto_lock_fill": "When Auto Lock locks the roster, the bot fills its open seats from those who joined. "
                           "Everyone on the board keeps their place. "
                           "With Auto-fill on Auto Lock off, that lock rosters exactly the names on the board.",

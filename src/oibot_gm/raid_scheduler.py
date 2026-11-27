@@ -15,6 +15,12 @@ from .registry import RegistryError
 log = logging.getLogger(__name__)
 
 
+def expired_asks_line(expired) -> str:
+    """The run thread's one line for asks that ran out without an answer (a locked event's fill asks, an Auto Lock off
+    event's pre-lock asks at its start)."""
+    return f"⌛ no answer from {', '.join(a.display_name for a in expired)} — counts as no"
+
+
 class RaidSchedulerMixin:
     """The scheduler loop; mixed into OibotGM next to RaidMixin (the client starts `self.scheduler()` on ready)."""
 
@@ -241,8 +247,11 @@ class RaidSchedulerMixin:
             if state == "open" and now >= hard and not rc.is_follow(ev) and not rc.auto_lock(reg, ev):
                 # Auto Lock off (issue 14): no lock by the clock and its pre-lock asks run on; an officer locks it. A later
                 # raid reaches here only once every raid before it is locked: it follows its first raid's lock as ever.
-                # An ask past its own deadline counts as no, its card edited as a locked event's is (never a new DM)
+                # An ask past its own deadline (the start: rc.prelock_deadline) counts as no, said in the run's thread and
+                # its card edited as a locked event's are (never a new DM)
                 expired, released = rc.expire_fill_asks(reg, rs, ev)
+                if expired:
+                    await self.post_run_update(reg, ev, expired_asks_line(expired))
                 for a in expired:
                     await self.close_ask_card(reg, ev, a, f"it closed <t:{int(now.timestamp())}:t> without an answer")
                 for a in released:
@@ -297,7 +306,7 @@ class RaidSchedulerMixin:
                 continue
             expired, released = rc.expire_fill_asks(reg, rs, ev)
             if expired:
-                await self.post_run_update(reg, ev, f"⌛ no answer from {', '.join(a.display_name for a in expired)} — counts as no")
+                await self.post_run_update(reg, ev, expired_asks_line(expired))
                 for a in expired:  # the expired ask's own card: its final state, no live Yes / No (never a new DM)
                     await self.close_ask_card(reg, ev, a, f"it closed <t:{int(now.timestamp())}:t> without an answer")
                 for a in released:

@@ -481,6 +481,8 @@ def _timing_phrases(reg: Registry, start, changed: dict, team: dict, first_raid:
         elif k == "auto_lock":
             out.append("the bot locks it at the lock time" if v else "an officer locks it")
         elif k == "auto_lock_fill":
+            if not changed.get("auto_lock", rc.team_setting(team, "auto_lock")):
+                continue  # no lock by the clock: what that lock would fill says nothing
             out.append("Auto Lock fills the open seats" if v else "Auto Lock rosters the board as it stands")
         elif k == "autofill":
             out.append("Automated Fill Requests are on" if v else "Automated Fill Requests are off")
@@ -509,8 +511,10 @@ _SHEET_TIMING = {"cutoff_hard_hours", "cutoff_soft_hours", "confirm_hours", "rem
 def _what_changes(reg: Registry, name: str, first: rc.RaidEvent, start, moves: bool, changed: dict) -> str:
     """The confirm's first sentence, built from what actually changes: the move, this run's own settings, or both.
     `changed` = the run dict's changes (rc.timing_changes), with `split` = the names of the raids whose split changes."""
+    auto = changed.get("auto_lock", rc.team_setting(rc.run_team(reg, first), "auto_lock"))
     names = [TIMING_NAMES[k] for k in TIMING_ORDER_OF if k in changed
-             and not (k == "cutoff_soft_hours" and "reminders" in changed)]  # the reminder's time and switch: "reminder"
+             and not (k == "cutoff_soft_hours" and "reminders" in changed)  # the reminder's time and switch: "reminder"
+             and not (k == "auto_lock_fill" and not auto)]  # with no lock by the clock its fill is never named
     whole = "sheet timing" if set(changed) <= _SHEET_TIMING else "settings"
     if moves:
         head = f"The event moves to {reg.local12(start)}"
@@ -521,7 +525,10 @@ def _what_changes(reg: Registry, name: str, first: rc.RaidEvent, start, moves: b
     several = len(rc.event_lineup(reg, first)) > 1
     if several and changed.get("confirm"):  # only the first raid asks the rostered to confirm: the short form says so too
         names = [f"confirmation on {name}" if n == TIMING_NAMES["confirm"] else n for n in names]
-    detail = "For this event, " + _and(_timing_phrases(reg, first.start, changed, rc.run_team(reg, first), name if several else None)) + "."
+    phrases = _timing_phrases(reg, first.start, changed, rc.run_team(reg, first), name if several else None)
+    if not phrases:  # only the auto-fill of an Auto Lock that is off: it waits for Auto Lock, nothing else changes now
+        return "This event keeps its own Auto-fill on Auto Lock for when Auto Lock is on."
+    detail = "For this event, " + _and(phrases) + "."
     if _words(detail) <= 20:
         return detail
     listed = f"This event takes its own {_and(names)}."

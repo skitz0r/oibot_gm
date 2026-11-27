@@ -102,10 +102,11 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        Reschedule (§5.67 phase 3, C11): reschedule_refusal (MOVE_CLOSED, MOVE_STARTED, MOVE_PAST, MOVE_SAME / TIMING_SAME,
                        MOVE_CLASH via live_at, TIMING_LOCKED, TIMING_ORDER, TIMING_UNKNOWN), reschedule(reg, rs, ev, start=, timing=, by, save=) →
                        Moved = every part keeps its offset (after_minutes), `occurrence` / `schedule` NEVER change, confirm_by moves by the delta (or
-                       within MOVE_CONFIRM_GRACE when past — late_confirm_by(at, start, now), THE rule every lock shares), EVENT_TIMING = the settings an event takes as its own (the owner's tweaks B, 2026-11-24:
+                       within MOVE_CONFIRM_GRACE when past — late_confirm_by(at, start, now, lock=), THE rule every lock shares — a lock at or after the start gets now + grace, Reschedule passes no `lock`), EVENT_TIMING = the settings an event takes as its own (the owner's tweaks B, 2026-11-24:
                        the sheet timing, confirm, first_come, weights, split_policy — named_split / split_changes, a raid's run FILE split_strategy;
                        issue 14: auto_lock, auto_lock_fill — stamped at open by ensure_run from the schedule or the one-off's open form, read
-                       through auto_lock(reg, ev) / auto_lock_fill(reg, ev), a dict without them True; Moved.locks_now only with Auto Lock on);
+                       through auto_lock(reg, ev) / auto_lock_fill(reg, ev), a dict without them True; prelock_deadline(reg, ev, hard) = THE pre-lock
+                       ask deadline (the lock, or the start with Auto Lock off — send_plan stamps it, the DM card reads it); Moved.locks_now only with Auto Lock on);
                        AFTER_LOCK (fill_ask_hours, autofill) still change once locked, the rest is refused: TIMING_LOCKED, CONFIRM_LOCKED,
                        AUTO_LOCK_LOCKED, PRIORITY_LOCKED, consequences.STRATEGY_LOCKED; a lock-time change tells who answered (Moved.lock_moved, "<raid> now locks …");
                        run_weights = the run dict's own `weights` (stamped at open by ensure_run / _part_dict: fallback_weights; live_weights only
@@ -315,7 +316,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
   raid_scheduler.py    RaidSchedulerMixin: the minute loop (discord_armory.armory_tick → auctions → cleanup_ephemeral → _warn_gone_raids → open on cadence
                        → sync_stands_for + complete_parts per live first part → health → lock → expire → fill → close), calls RaidMixin. Lock (issue
                        14): an open FIRST raid past its lock time with rc.auto_lock off is never locked and its pre-lock asks are not closed —
-                       only an ask past its own deadline expires (rc.expire_fill_asks, its card closed); an open event is otherwise left alone
+                       only an ask past its own deadline (the start) expires (rc.expire_fill_asks, its card closed, expired_asks_line in the thread); an open event is otherwise left alone
                        past its start and close (no end, no confirmations, no fill). Open (§5.67
                        phase 3): rc.occurrences(lead=True), skipped when rc.event_of_occurrence finds that (schedule, occurrence) in any state — never
                        by a key, so a cancelled occurrence never opens again —, else open_run_and_post(schedule=); _warn_unopened / _warn_open_refused

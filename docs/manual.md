@@ -94,9 +94,10 @@ understands; it answers in the words below.
   - **Auto Lock** — at the lock time, the bot locks the roster by itself. With it off, nothing happens at the lock
     time: the sheet stays open until an officer locks it (**Lock now**, the officer card, `/raid lock`, plain text or
     MCP), and the *Details* *Locks* row says *An officer locks it.* — so do the signup sheet, the officers' card and the
-    sheet's opening and reminder DMs, instead of a lock time. A "could you come?" ask sent before then is not
-    closed at the lock time; it closes at its own deadline as no answer, its card edited, and an officer's lock closes
-    any still open. The reminder, the officers' check and confirm-by keep their times. Switching it back on after the
+    sheet's opening and reminder DMs, instead of a lock time. A "could you come?" ask sent while the sheet is open
+    stays open until the event starts, whether it went out before or after the lock time, and its DM says so. An officer's
+    lock closes any still open; one nobody answered by the start counts as no, its card edited and one line in the
+    event's thread. The reminder, the officers' check and confirm-by keep their times. Switching it back on after the
     lock time locks the event within a minute, and the box says so first.
   - **Auto-fill on Auto Lock** — when Auto Lock locks the roster, the bot fills its open seats from those who joined,
     and everyone on the board keeps their place. With it off, that lock rosters exactly the names on the board, each in

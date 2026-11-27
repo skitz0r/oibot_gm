@@ -7,7 +7,7 @@ officer locks it."""
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from conftest import open_test_run, weekly
 from test_edit_event import scheduled
@@ -98,35 +98,116 @@ def _past_its_lock(reg, rs):
     return ev, ask
 
 
-def test_the_scheduler_neither_locks_an_auto_lock_off_event_nor_closes_its_asks(reg, rs):
+def _short_night(reg, rs):
+    """The planner's worked example: a schedule's event short of roles, whose Ask (send_plan) sends real pre-lock asks."""
+    from test_roster_p2_planner import worked_example
+
+    ev, _people = worked_example(reg, rs)
+    return ev
+
+
+def _lock_passed(reg, ev):
+    """Move `ev`'s lock time (and its reminder) to an hour ago, its start where it is."""
+    team = reg.config.roster(ev.team)
+    h = (ev.start - reg.now_local()).total_seconds() / 3600 + 1
+    team["cutoff_hard_hours"], team["cutoff_soft_hours"] = h, h + 1
+
+
+def _ask_all(bot, reg, rs, ev):
+    sent, _ = run(bot.send_plan(reg, rs, ev, rev=rc.role_plan(reg, rs, ev).rev, by="Jon"))
+    assert sent and all(a.phase == "prelock" for a in sent)
+    return sent
+
+
+def test_with_auto_lock_off_a_prelock_ask_runs_until_the_start(reg, rs):
+    """The owner's ruling: with Auto Lock off a pre-lock ask's deadline is the start, and nothing happens at the old lock
+    time — an ask sent before it and one sent after it are both still open a scheduler tick later."""
+    from test_raid_night import _view_text
+
     bot = NightBot(reg, rs)
-    ev, ask = _past_its_lock(reg, rs)
+    ev = _short_night(reg, rs)
     rc.reschedule(reg, rs, ev, timing={"auto_lock": False}, by="o")
-    run(bot._send_asks(reg, rs, ev, rc.run_team(reg, ev), [ask], phase="prelock", approved_by="Jon", deadline=ev.start.isoformat()))
-    for _ in range(2):
-        run(bot.scheduler_tick_guild(reg))
+    before = _ask_all(bot, reg, rs, ev)
+    assert all(a.expires_at == ev.start.isoformat() for a in before), "the start, never the lock time"
+    card = _view_text(bot.cards[before[0].dm_message_id].payload)
+    assert f"<t:{int(ev.start.timestamp())}:R>" in card and "No answer by the start" in card and "built at lock" not in card
+    _lock_passed(reg, ev)
+    rs.save(ev, "lock time passed")
+    run(bot.scheduler_tick_guild(reg))
     assert ev.state == "open" and not ev.lock_tried_at and not ev.all_rosters, "no lock by the clock"
-    assert ask.answer is None, "the pre-lock ask runs to its own deadline"
+    assert all(a.answer is None for a in before), "nothing closes them at the old lock time"
+    for a in before:  # asked again after the old lock time
+        a.answer = "no"
+    after = _ask_all(bot, reg, rs, ev)
+    assert all(a.expires_at == ev.start.isoformat() for a in after)
+    run(bot.scheduler_tick_guild(reg))
+    assert all(a.answer is None for a in after), "an ask sent after the old lock time is still open a tick later"
     assert not any("locked" in t for _lvl, t in bot.ops.lines)
-    ask.expires_at = (reg.now_local() - timedelta(minutes=1)).isoformat()  # its own deadline passes
+    after[0].expires_at = (reg.now_local() - timedelta(minutes=1)).isoformat()  # its deadline (the start) passes
     rs.save(ev, "deadline")
     run(bot.scheduler_tick_guild(reg))
-    assert ask.answer == "expired" and ev.state == "open"
+    assert after[0].answer == "expired" and ev.state == "open"
+    assert f"⌛ no answer from {after[0].display_name} — counts as no" in bot.updates, "the run thread says so, as a locked event's does"
 
 
 def test_auto_lock_on_still_closes_the_asks_at_the_lock_time(reg, rs, monkeypatch):
-    """The On path as today (the lock itself is test_raid_night's): the pre-lock asks close at the lock time."""
+    """The On path as today (the lock itself is test_raid_night's): a pre-lock ask's deadline is the lock time and the
+    clock's lock closes it there."""
+    from oibot_gm.raid_views import run_times
+
     bot = NightBot(reg, rs)
-    ev, ask = _past_its_lock(reg, rs)
-    run(bot._send_asks(reg, rs, ev, rc.run_team(reg, ev), [ask], phase="prelock", approved_by="Jon", deadline=ev.start.isoformat()))
+    ev = _short_night(reg, rs)
+    _soft, hard, _c = run_times(reg, ev, rc.run_team(reg, ev))
+    sent = _ask_all(bot, reg, rs, ev)
+    assert all(a.expires_at == min(hard, ev.start).isoformat() for a in sent)
+    _lock_passed(reg, ev)
+    rs.save(ev, "lock time passed")
     tried = []
 
-    async def lock_run(reg_, rs_, ev_, *a, **k):  # Task 2 passes fill=rc.auto_lock_fill here
-        tried.append(ev_.key)
+    async def lock_run(reg_, rs_, ev_, *a, **k):
+        tried.append((ev_.key, k.get("fill")))
         return "locked"
     monkeypatch.setattr(bot, "lock_run", lock_run)
     run(bot.scheduler_tick_guild(reg))
-    assert tried == [ev.key] and ask.answer == "released"
+    assert tried == [(ev.key, True)] and all(a.answer == "released" for a in sent)
+
+
+def test_a_lock_after_the_start_leaves_every_confirmation_open_a_tick_later(reg, rs, monkeypatch):
+    """The owner's ruling on a late lock: at or after the start the confirm deadline is an hour from now, never the start
+    already past, so nobody's seat is freed at the next tick."""
+    from conftest import by_role, join
+    from test_raid_night import fast_propose
+
+    bot = NightBot(reg, rs)
+    ev = open_test_run(reg, rs, days=0)
+    rc.reschedule(reg, rs, ev, timing={"auto_lock": False}, by="o")
+    ev.starts_at = (reg.now_local() - timedelta(minutes=10)).isoformat()  # an officer locks it after its start
+    rs.save(ev, "started")
+    pool = reg.test_members()
+    join(reg, rs, ev, pool)
+    roles = by_role(reg)
+    seated = roles["tank"][:2] + roles["healer"][:3] + (roles["melee"] + roles["ranged"])[:5]
+    monkeypatch.setattr(rc, "propose", fast_propose([m.display_name for m in seated]))
+    run(bot.lock_run(reg, rs, ev, by="Jon"))
+    assert ev.state == "locked"
+    now = reg.now_local()
+    assert now < datetime.fromisoformat(ev.confirm_by) <= now + rc.MOVE_CONFIRM_GRACE
+    asks = [a for m in seated for a in reg.members[m.discord_id].placement_asks if a.get("roster") == ev.team]
+    assert asks and all(a.get("answer") is None for a in asks)
+    run(bot.scheduler_tick_guild(reg))
+    asks = [a for m in seated for a in reg.members[m.discord_id].placement_asks if a.get("roster") == ev.team]
+    assert all(a.get("answer") is None for a in asks), "every confirmation ask still open"
+    assert all(ev.seat_of(m) for m in seated), "nobody's seat freed"
+
+
+def test_late_confirm_by_keeps_reschedules_rule(reg):
+    """Reschedule passes no `lock`: a new start a few minutes in the past keeps that start as the deadline, as before."""
+    now = reg.now_local()
+    past, ahead = now - timedelta(minutes=4), now + timedelta(hours=3)
+    assert rc.late_confirm_by(past, past, now) == past
+    assert rc.late_confirm_by(past, past, now, lock=True) == now + rc.MOVE_CONFIRM_GRACE
+    assert rc.late_confirm_by(past, ahead, now, lock=True) == now + rc.MOVE_CONFIRM_GRACE == rc.late_confirm_by(past, ahead, now)
+    assert rc.late_confirm_by(ahead, ahead, now, lock=True) == ahead
 
 
 def test_turning_auto_lock_on_after_the_lock_time_says_it_locks_within_a_minute(reg, rs):
@@ -161,10 +242,14 @@ def test_the_site_edits_both_and_the_box_reads_the_editors_words(reg, rs, web_bo
     body = {"edit": True, "timing": {"auto_lock": False, "auto_lock_fill": False}}
     b = web_bot.c.post(url, json={**body, "preview": True}, headers=H()).json()["box"]
     assert "Auto Lock: On → Off" in b["diff"] and "Auto-fill on Auto Lock: On → Off" in b["diff"], b["diff"]
-    assert b["sentences"][0] == "For this event, an officer locks it and Auto Lock rosters the board as it stands.", b["sentences"]
+    assert b["sentences"][0] == "For this event, an officer locks it.", "the clock's fill is not described when no clock locks it"
+    fill_only = cq.reschedule_consequence(reg, rs, ev, None, {"auto_lock_fill": False})
+    assert fill_only[0] == "For this event, Auto Lock rosters the board as it stands.", fill_only
     ok = web_bot.c.post(url, json={**body, "seen": b["fp"]}, headers=H())
     assert ok.status_code == 200, ok.text
     assert rc.auto_lock(reg, ev) is False and rc.auto_lock_fill(reg, ev) is False
+    waits = cq.reschedule_consequence(reg, rs, ev, None, {"auto_lock_fill": True})
+    assert waits[0] == "This event keeps its own Auto-fill on Auto Lock for when Auto Lock is on.", waits
     j = web_bot.c.get(f"/api/event/{ev.key}", headers=H()).json()
     assert j["edit"]["values"]["auto_lock"] is False and {"auto_lock", "auto_lock_fill"} <= set(j["edit"]["fields"])
 

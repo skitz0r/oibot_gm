@@ -367,6 +367,14 @@ def auto_lock_fill(reg: Registry, ev: "RaidEvent") -> bool:
     return bool(team_setting(run_team(reg, ev), "auto_lock_fill"))
 
 
+def prelock_deadline(reg: Registry, ev: "RaidEvent", hard: datetime) -> datetime:
+    """THE deadline of a pre-lock ask ("Could you come?") on `ev`, its lock time being `hard`: the lock time (never
+    after the start) while Auto Lock is on, as ever — the lock closes it there. With Auto Lock off nothing happens at
+    the lock time, so the ask runs until the event starts (the owner's ruling, issue 14). send_plan stamps it; the
+    ask's DM card and the inbox print the ask's own `expires_at`."""
+    return min(hard, ev.start) if auto_lock(reg, ev) else ev.start
+
+
 def run_team(reg: Registry, ev: "RaidEvent") -> dict:
     """The roster dict a run belongs to; a bare stand-in when the ephemeral roster is gone (cleanup, old files)."""
     if t := reg.config.team(ev.team):
@@ -1545,12 +1553,18 @@ MOVE_OFFICER_ONLY = "Only an officer moves an event or changes its timing."
 MOVE_CONFIRM_GRACE = timedelta(hours=1)  # a confirm-by the move leaves in the past: within the hour instead (never past the start)
 
 
-def late_confirm_by(at: datetime, start: datetime, now_: datetime) -> datetime:
+def late_confirm_by(at: datetime, start: datetime, now_: datetime, *, lock: bool = False) -> datetime:
     """THE late-deadline rule (Reschedule and every lock share it): a confirm deadline `at` that is not in the future at
     `now_` becomes the earlier of the start and MOVE_CONFIRM_GRACE from now — so a lock after its own confirm-by (an
     officer's lock with Auto Lock off, a lock after an unlock) never asks people with a deadline already past. A deadline
-    still ahead is kept."""
-    return min(start, now_ + MOVE_CONFIRM_GRACE) if at <= now_ else at
+    still ahead is kept. `lock`: a LOCK at or after the start (the owner's ruling, issue 14) gets MOVE_CONFIRM_GRACE from
+    now, never the start already past. Reschedule passes no `lock` and reads exactly as before (its new start is at most
+    PAST_GRACE_MINUTES in the past, and there the start stays the deadline)."""
+    if at > now_:
+        return at
+    if lock and start <= now_:
+        return now_ + MOVE_CONFIRM_GRACE
+    return min(start, now_ + MOVE_CONFIRM_GRACE)
 
 
 MOVE_GAP = "That time doesn't exist that night because the clocks go forward. Pick another time."

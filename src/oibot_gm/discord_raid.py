@@ -670,7 +670,7 @@ class RaidMixin:
             team = rc.run_team(reg, ev)
             _soft, hard, _confirm = run_times(reg, ev, team)
             prelock = plan.phase == "prelock"
-            deadline = (min(hard, ev.start) if prelock else rc.ask_deadline(reg, ev)).isoformat()  # pre-lock asks expire at lock time
+            deadline = (rc.prelock_deadline(reg, ev, hard) if prelock else rc.ask_deadline(reg, ev)).isoformat()  # pre-lock: at the lock, or the start with Auto Lock off
             sent = await self._send_asks(reg, rs, ev, team, asks, phase=plan.phase, approved_by=by, deadline=deadline)
             if sent and not prelock and ev.state == "locked":  # a cancel during the fan-out keeps its own fill state
                 ev.fill_state = "asking"
@@ -970,7 +970,7 @@ class RaidMixin:
             if ev.state != "open":  # cancelled while the roster was being built
                 raise RegistryError(f"{run_title(reg, ev)} was {ev.state} before the roster was ready, so it was not locked.")
             _, _, confirm = run_times(reg, ev, team)
-            confirm = rc.late_confirm_by(confirm, ev.start, reg.now_local())  # a late lock never asks with a deadline already past
+            confirm = rc.late_confirm_by(confirm, ev.start, reg.now_local(), lock=True)  # a late lock never asks with a deadline already past
             confirms = rc.run_confirms(reg, ev)  # off (ad hoc): no confirmation DMs and no deadline — no seat ever expires
             ev.rosters = trial.rosters
             ev.log.extend(trial.log[seen:])  # the solver's lines; lines written on the live run meanwhile stay

@@ -804,9 +804,13 @@ def prelock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, ask, cls: s
         if partner:
             lines.append(f"{partner.display_name} is being asked to cover your {ask.vacates} seat; it only happens if you both say yes.")
     _soft, hard, _c = run_times(reg, ev, team)
+    # the ask's own deadline (rc.prelock_deadline: the lock, or with Auto Lock off the start, when no clock locks it)
+    until = datetime.fromisoformat(ask.expires_at) if ask.expires_at else rc.prelock_deadline(reg, ev, hard)
+    tail = (f"the roster is still built at lock (<t:{int(until.timestamp())}:R>). No answer by then counts as no." if rc.auto_lock(reg, ev)
+            else f"an officer builds the roster when they lock it. No answer by the start (<t:{int(until.timestamp())}:R>) counts as no.")
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(_header(reg, ev, f"Could you help? · {rd.get('name', ev.instance)}", lines), ui.Separator(),
-                               ui.TextDisplay(f"-# Yes puts you down as Join with that; the roster is still built at lock (<t:{int(hard.timestamp())}:R>). No answer by then counts as no."),
+                               ui.TextDisplay(f"-# Yes puts you down as Join with that; {tail}"),
                                ui.ActionRow(FillButton(reg.key, ev.key, ask.discord_id, "yes", label=f"Yes, as {ask.spec}"[:80]), FillButton(reg.key, ev.key, ask.discord_id, "no", label="No")),
                                accent_colour=0xE0A448))
     return view

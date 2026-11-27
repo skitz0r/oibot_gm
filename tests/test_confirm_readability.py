@@ -1146,6 +1146,10 @@ def reschedule_cases(reg, rs, runs, ms, dump):
     add("timing only, Auto Lock off", ev, None, {"auto_lock": False})
     add("timing only, Auto Lock and its auto-fill off", ev, None, {"auto_lock": False, "auto_lock_fill": False})
     add("timing only, the lock and Auto Lock off", ev, None, {"lock_hours_before": 6, "auto_lock": False})
+    team = rc.run_team(reg, ev)
+    was_auto, team["auto_lock"] = team.get("auto_lock", True), False
+    add("timing only, the auto-fill of an Auto Lock that is off", ev, None, {"auto_lock_fill": False})
+    team["auto_lock"] = was_auto
     add("timing only, two times", ev, None, {"lock_hours_before": 6, "nudge_hours_before": 12})
     add("timing only, everything", ev, None, {"lock_hours_before": 6, "nudge_hours_before": 12, "confirm_hours_before": 2,
                                               "nudge": False, "autofill": False, "fill_ask_hours": 2})
