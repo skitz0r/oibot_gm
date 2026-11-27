@@ -95,7 +95,7 @@ class FakeBot(LootMixin):
         self.calls.append(("set_answer", ev.key, m.display_name, status, character, by) + ((spec,) if spec else ()))
         return f"✅ {m.display_name} {status}"
 
-    async def lock_run(self, reg, rs, ev, by, fill=True):
+    async def lock_run(self, reg, rs, ev, by, fill=True, by_person=False):
         self.calls.append(("lock_run", ev.key, by) + (() if fill else ("as it stands",)))
         return f"{ev.key}: locked"
 

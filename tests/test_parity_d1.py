@@ -641,7 +641,7 @@ def test_card_lock_button_answers_a_busy_or_locked_run_quietly(reg, rs, why):
     ev = open_test_run(reg, rs)
     feed, log = Feed(), []
 
-    async def lock_run(reg_, rs_, ev_, by="scheduler", fill=True):
+    async def lock_run(reg_, rs_, ev_, by="scheduler", fill=True, by_person=False):
         if why == "busy":
             raise rc.SolverBusy()
         raise configops.RegistryError(f"{ev_.key} is already locked")

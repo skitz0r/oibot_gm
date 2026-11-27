@@ -181,7 +181,7 @@ def test_scheduler_closes_prelock_asks_as_released_at_lock_time(reg, rs, monkeyp
     run(bot.send_plan(reg, rs, ev, rev=plan.rev, by="Officer"))
     seen = []
 
-    async def lock_run(reg_, rs_, ev_, by="scheduler", fill=True):
+    async def lock_run(reg_, rs_, ev_, by="scheduler", fill=True, by_person=False):
         seen.extend(a.answer for a in ev_.fill_asks)
         raise RegistryError("not locking in this test")
     bot.lock_run = lock_run

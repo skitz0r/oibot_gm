@@ -64,6 +64,15 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        Raid night (design §5.39): expire_confirmations expires only a held ask (locked runs only); unasked_seats (the lock's recovery: only
                        RaidEvent.lock_seats, the seats at the flip — never a fill-seated or later seat; legacy_lock_sent = a pre-field run is stamped); cancel_effects;
                        reopen_refusal/reopen_run (an END by mistake, REOPEN_GRACE_HOURS, never a cancelled run); remind_refusal; end_refusal;
+                       Unlock (issue 14): unlock_refusal(reg, rs, ev, at=None) (UNLOCK_OPEN/DONE/CANCELLED/STARTED/LOOT, the first raid decides;
+                       loot_open_on = a live council's file) and unlock(reg, rs, ev, by) → Unlocked (raids, asks_kept, fills + fills_withdrawn,
+                       returned, notices): every locked raid back to open, layout = the locked rosters' groups, placed_by {name: 0} (nobody's
+                       Undo), rosters cleared, Auto Lock off on every raid's dict, fill asks withdrawn (withdraw_fill_asks), seats freed after the
+                       lock with a source in UNLOCK_RETURNS (no-confirm, moved to bench) and no callout back to Join (source "unlock"), the
+                       Not rostered notices taken back (Registry.remove_notices); confirmation asks untouched. The relock's reconcile reads
+                       standing_yes (latest ask on the event since created_at answered yes, not lapsed), lapse_yes (seat_gone stamps a yes whose
+                       seat went), relock_drops; leftover_notices(…, also=) never writes a second Not rostered notice for a raid (has_notice).
+                       lock_all_off = everyone who joined kept off (a person's lock refuses it).
                        open_when/which_run/open_preview (THE open-time resolver, DST-safe); spec_switches / regulars_not_rostered / fill_state_text /
                        asks_on_site / log_rows (RaidEvent.log_at stamped by RaidStore.save) for ev_json; upcoming_rows (each active schedule's next three runs whatever the horizon, can_open + open_row_refusal's why) / short_why (a run card's short clause) — §5.56; FillAsk.channel dm|web (a failed DM = web)
                        Identity (§5.67 phase 3): a run's key is new_run_key(reg, rs, raid) = '<abbr>-<6 of KEY_ALPHABET>' (no 0/1/i/l/o/r), the run
@@ -210,7 +219,14 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        with the first's choice; confirm_by = rc.late_confirm_by. The scheduler passes fill = auto_lock_fill (a later raid's retry:
                        its first raid's lock_fill). Surfaces a person presses (POST /api/run/{key}/lock `fill`, lock_decide, configops
                        run_lock, MCP lock_run `autofill`) pass consequences.lock_fill(…, their choice) — default False — and refuse
-                       rc.lock_empty_refusal themselves, so a person's lock never takes the failure path.
+                       rc.lock_empty_refusal themselves, so a person's lock never takes the failure path; and pass by_person=True, so lock_run
+                       re-checks under board_lock and RAISES the refusal (lock_empty_refusal, lock_all_off) instead of recording a failed lock.
+                       A relock (after an unlock) reconciles in reconcile_asks: left off → ask closed `unrostered` / yes lapsed, card edited,
+                       Not rostered notice; kept open ask → card redrawn (edit_live_card); send_confirmations skips a standing yes.
+                       unlock_run(reg, rs, ev, by, by_id=None, *, via) = THE unlock verb: solving + every raid's board_lock, rc.unlock, late fill
+                       asks closed under plan_lock, fill cards edited, lock cards and lock_line deleted (_delete_message, failure-quiet), a fresh
+                       health card when the event had one, refresh_sheet / refresh_cards, one thread line, one audit line, no DM.
+                       after_placement_answer on an OPEN event (an ask kept by an unlock): a Can't sets the answer out (source declined), off the board.
                        raid_views.locks_line / dm_locks_line: the sheet's, the officers' card's and the open / reminder DMs' lock words — with
                        Auto Lock off PAGE_WORDS officer_locks, the Details Locks row's sentence.
                        lock_preview solves with rc.run_strategy and the lock's own budget (rc.SOLVE_TIME_LIMIT_S), so it shows the roster Lock builds;

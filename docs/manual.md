@@ -1455,6 +1455,39 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    Automated Fill Requests are on (paused or off, the sentence says the seat waits for **Fill seats**). A
    drag started on the open board and dropped after the event locked is refused ("The event locked while you were
    dragging") and the board shows the roster — it is never applied as a change to the locked roster.
+   A lock a person presses that the board can no longer make — the last placed name taken off after the box was
+   shown, or everyone who joined kept off — is refused with the box's sentence (*"Nobody is on the board, so place
+   someone or lock with auto-fill to fill the open slots."*); nothing is recorded as a failed lock and the sheet's footer
+   stays as it was. Only the scheduled lock records a failure and tries again 15 minutes later.
+   **Unlock** puts a locked event back into open signup with its rosters still on the board, so it can be changed and
+   locked again. It works for any event, test or not, while it is locked and before its start; it is refused, one sentence
+   each, once the event has started (*"This event has already started, so it can't be unlocked."*), while a loot council
+   is open on it, and for an event that is still open, ended or cancelled. Every raid of the event unlocks together.
+   - **The board is the locked roster.** Every rostered name stays in the group the lock, a later drag or a fill put it in,
+     and counts as placed by hand: the next lock keeps it there, and nobody's **Undo my moves** takes it off. Joiners who
+     weren't rostered are in *Not placed*, Bench answers in *Bench*. Locking again as it stands with nothing changed
+     rosters exactly the same people in the same groups.
+   - **Who comes back.** Someone whose seat went after the lock without them saying so — their confirmation ran out, or an
+     officer dragged them off the roster — is a joiner again, in *Not placed*. Someone who pressed *Can't make it*,
+     called out, is marked away, or whom an officer set to *No thanks* stays out. On a later raid of a lineup, someone an
+     officer took off that raid alone stays out of it (the bot can't tell that apart from leaving early).
+   - **Confirmations are kept.** An answer already given stays. An unanswered Confirm / Can't make it ask stays open and
+     can still be answered: *Confirm* is recorded, *Can't make it* sets the answer to *No thanks* and takes the name off
+     the board. While the event is open no confirmation expires, no seat is freed for silence and **Remind the
+     unanswered** can't be pressed.
+   - **Fill asks are withdrawn.** Each one still out is closed and its DM card edited to say the officer unlocked the
+     event to change the roster.
+   - **Auto Lock goes off** for this event, so the clock does not lock it again; an officer locks it, or switches Auto
+     Lock back on in **Edit event**. Automated Fill Requests paused at the lock are no longer paused.
+   - The lock cards in the officer channel and the *"🔒 … is locked"* line in the signup channel are deleted (an event
+     locked before the bot kept that line's id keeps the line); the health card comes back if the event had one. The
+     lock's *Not rostered* notices are taken off the Me page. Nobody gets a DM. One line in the event's thread and one
+     audit line say who unlocked it.
+   - **The next lock** works like any lock, from the board. Someone rostered again who already confirmed is not asked
+     again; someone rostered again whose ask is still open keeps it, and its card shows their group now; someone newly
+     rostered is asked. Someone who held an ask or a yes and is not rostered now has the ask closed, their card edited
+     (*"… locked again without you on the roster, so this question is closed."*), and gets the *Not rostered* notice —
+     never two of them for one raid.
 5. **Confirmation deadline** — `confirm_hours_before` [6 h] before the slot, anyone who hasn't answered
    counts as out; their seat is released and their confirmation card is edited to say so (never a new DM). Only someone who
    was actually asked can time out: a seat whose confirmation never went out (an interrupted lock) is never freed for

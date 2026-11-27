@@ -47,7 +47,7 @@ class FakeBot:
         s = rc.set_signup(reg, rs, ev, m, character, status, source="officer")
         return f"✅ {m.display_name}: **{s.character}** {rc.LABELS[status]}"
 
-    async def lock_run(self, reg, rs, ev, by, fill=True):
+    async def lock_run(self, reg, rs, ev, by, fill=True, by_person=False):
         self.calls.append(("lock_run", ev.key, by) + (() if fill else ("as it stands",)))
         ev.state, ev.locked_at = "locked", rc.now()
         rs.save(ev, "locked (fake)")

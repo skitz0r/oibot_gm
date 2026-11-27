@@ -5496,6 +5496,185 @@ def reopen_run(reg: Registry, rs: RaidStore, ev: RaidEvent, by: str) -> str:
     return back
 
 
+# ---------------------------------------------------------------- unlock (issue 14): a locked event back to open signup
+
+UNLOCK_OPEN = "This event is still open for signup, so there is nothing to unlock."
+UNLOCK_DONE = "This event has ended, so it can't be unlocked."
+UNLOCK_CANCELLED = "A cancelled event can't be unlocked."
+UNLOCK_STARTED = "This event has already started, so it can't be unlocked."
+UNLOCK_LOOT = "A loot council is open on this event, so it can't be unlocked."
+# the signup sources a seat freed AFTER the lock leaves (free_seat writes its `why` there) that were not the member's own
+# word: their confirmation ran out, or an officer moved them off the roster on the board. An unlock puts them back to Join
+UNLOCK_RETURNS = ("no-confirm", "moved to bench")
+
+
+def loot_open_on(rs: RaidStore, ev: RaidEvent) -> bool:
+    """A loot council is live on `ev`: its session file (LootSession.rel_path — the run's key, or '<key>-r<n>' per roster
+    of a split run) is still in the guild's events folder (an ended council is archived out of it)."""
+    d = rs.store.root / rs.key / "events"
+    return (d / f"{ev.key}.json").exists() or any(d.glob(f"{ev.key}-r*.json")) if d.exists() else False
+
+
+def unlock_refusal(reg: Registry, rs: RaidStore, ev: RaidEvent, at: datetime | None = None) -> str | None:
+    """Why the event `ev` belongs to can't be unlocked now, or None (issue 14): its first raid must be locked and not yet
+    started, and no raid of it may hold a live loot council. One sentence each."""
+    first = first_part(rs, ev)
+    if first.state == "open":
+        return UNLOCK_OPEN
+    if first.state == "done":
+        return UNLOCK_DONE
+    if first.state == "cancelled":
+        return UNLOCK_CANCELLED
+    t = at or datetime.now(first.start.tzinfo)
+    if t >= first.start:
+        return UNLOCK_STARTED
+    if any(loot_open_on(rs, p) for p in event_parts(rs, first)):
+        return UNLOCK_LOOT
+    return None
+
+
+class Unlocked(BaseModel):
+    """What an unlock did, for the box, the thread line and the caller's card edits: the raids put back to open, how
+    many confirmation asks stay open, the fill asks it withdrew (their DM cards are the caller's to edit), the names put
+    back to Join (a seat lost to silence or an officer's move after the lock) and the Not rostered notices taken back."""
+
+    raids: list[str] = Field(default_factory=list)
+    asks_kept: int = 0
+    fills: list[FillAsk] = Field(default_factory=list)
+    returned: list[str] = Field(default_factory=list)
+    notices: int = 0
+
+    @property
+    def fills_withdrawn(self) -> int:
+        return len(self.fills)
+
+
+def withdraw_fill_asks(ev: RaidEvent, by: str) -> list[FillAsk]:
+    """Close every fill ask on `ev` still in play (`withdrawn`, by `by`): the unlock takes back seats it offered. The
+    caller saves and edits the DM cards. → the asks closed."""
+    gone = [a for a in ev.fill_asks if a.pending]
+    for a in gone:
+        a.answer, a.answered_at, a.answered_by, a.held = "withdrawn", now(), by, False
+    if gone:
+        ev.log.append(f"fill: {len(gone)} ask(s) withdrawn by {by} at the unlock")
+    return gone
+
+
+def _event_asks(m: Member, ev: RaidEvent) -> list[dict]:
+    """`m`'s placement asks on `ev` (its roster key, asked since the event opened: an older run's key is reused week to
+    week, so last week's answer never counts here)."""
+    since = ev.created_at or ""
+    return [a for a in m.placement_asks if a["roster"] == ev.team and (a.get("asked_at") or "") >= since]
+
+
+def standing_yes(m: Member | None, ev: RaidEvent) -> dict | None:
+    """`m`'s Confirm on `ev` that still holds: their latest ask on the event answered yes, and no seat they held has gone
+    since (lapse_yes). A lock after an unlock does not ask them again."""
+    asks = _event_asks(m, ev) if m is not None else []
+    last = asks[-1] if asks else None
+    return last if last is not None and last.get("answer") == "yes" and not last.get("lapsed_at") else None
+
+
+def lapse_yes(reg: Registry, ev: RaidEvent, uid: int) -> bool:
+    """`uid`'s yes on `ev` no longer holds a seat (the seat went, or a lock after an unlock left them off): stamped, so the
+    next lock asks again instead of counting it. True when one was stamped."""
+    m = reg.members.get(int(uid))
+    yes = standing_yes(m, ev)
+    if yes is None:
+        return False
+    yes["lapsed_at"] = now()
+    reg.save(m, f"{m.display_name}'s confirmation for {ev.team} holds no seat now")
+    return True
+
+
+def relock_drops(reg: Registry, ev: RaidEvent) -> list[tuple[Member, dict]]:
+    """At a lock: everyone who holds an OPEN Confirm ask or a standing yes on `ev` and is not rostered now (a lock after
+    an unlock that left them off). Their ask closes and they get the Not rostered notice (RaidMixin.lock_run)."""
+    out = []
+    for m in reg.members.values():
+        if ev.seat_of(m.discord_id) is not None:
+            continue
+        asks = _event_asks(m, ev)
+        last = asks[-1] if asks else None
+        if last is not None and (last.get("answer") is None or standing_yes(m, ev) is not None):
+            out.append((m, last))
+    return out
+
+
+def lock_all_off(reg: Registry, rs, ev: RaidEvent) -> bool:
+    """Everyone who joined `ev` is kept off its roster (a pin, the comp policy): a lock would roster nobody."""
+    joined = {s.display_name for s in ev.by_status("in")}
+    return ev.state == "open" and bool(joined) and joined <= set(lock_forces(reg, rs, ev).kept_off)
+
+
+def _returns(ev: RaidEvent, sg: Signup) -> bool:
+    """A signup an unlock puts back to Join: out because a seat went after the lock for a reason that was not their own
+    word (UNLOCK_RETURNS), and no callout of theirs is on the event."""
+    return (sg.status == "out" and sg.source in UNLOCK_RETURNS
+            and not any(c.discord_id == sg.discord_id for c in ev.callouts))
+
+
+def unlock(reg: Registry, rs: RaidStore, ev: RaidEvent, by: str) -> Unlocked:
+    """THE unlock (issue 14; RaidMixin.unlock_run is the surfaces' verb): the event `ev` belongs to goes back to open
+    signup WITH ITS ROSTERS ON THE BOARD, every locked raid of it together. Per raid: the board (`layout`) is the locked
+    roster group for group, every name a hand placement (placed_by 0: nobody's own move, so no officer's Undo my moves
+    takes the roster off; auto_placed empty), the rosters cleared, state open, no lock time, deadline or failed lock,
+    pending fill asks withdrawn, the fill engine idle and its pause lifted. A seat lost after the lock to silence or an
+    officer's board move goes back to Join (UNLOCK_RETURNS); a Can't make it, a callout or an absence stays out. Auto Lock
+    goes off on every raid's settings, so the clock leaves it alone. Confirmation asks are NOT touched: answers stay,
+    open asks stay open (nothing expires while open). The lock's Not rostered notices are taken back. One store batch.
+    RegistryError with unlock_refusal's sentence otherwise."""
+    why = unlock_refusal(reg, rs, ev)
+    if why:
+        raise RegistryError(why)
+    first = first_part(rs, ev)
+    parts = [first if p.key == first.key else p for p in event_parts(rs, first)]
+    out = Unlocked()
+    for p in parts:
+        if p.state != "locked":
+            continue
+        flat = board_layout(reg, p)  # the locked rosters, padded to whole rosters: (roster, group) stays where it was
+        names: list[list[str]] = []
+        for g in flat:
+            row = []
+            for n in g:
+                uid = uid_of_name(p, n)
+                sg = p.signups.get(str(uid)) if uid is not None else None
+                row.append(sg.display_name if sg is not None else n)  # a nick changed since the lock: the board's name is today's
+            names.append(row)
+        placed = [n for g in names for n in g]
+        for n in placed:  # a rostered name kept off by a pin would leave the board at the next save: the roster stands
+            sg = signup_by_name(p, n)
+            if sg is not None and p.pins.get(str(sg.discord_id)) == "out":
+                p.pins.pop(str(sg.discord_id))
+        p.layout = names if placed else None
+        p.placed_by, p.auto_placed, p.drag_pins, p.placed_as = {n: 0 for n in placed}, [], {}, {}
+        p.rosters = []
+        p.state, p.locked_at, p.confirm_by, p.lock_error = "open", None, None, None
+        p.lock_seats, p.confirmations_sent_at, p.lock_fill = None, None, None
+        p.autofill_paused, p.autofill_paused_by, p.fill_state = False, None, "idle"
+        out.fills += withdraw_fill_asks(p, by)
+        p.log.append(f"unlocked by {by}: back to open signup with its rosters on the board")
+        out.raids.append(p.key)
+        t = reg.config.team(p.team)
+        if t is not None:
+            t["auto_lock"] = False
+    for sg in first.signups.values():
+        if _returns(first, sg):
+            sg.status, sg.source, sg.updated_at = "in", "unlock", now()
+            sg.joined_at = sg.joined_at or now()
+            out.returned.append(sg.display_name)
+    if out.returned:
+        first.log.append("back to Join at the unlock: " + ", ".join(out.returned))
+    out.asks_kept = len(open_placement_rows(reg, first))
+    with reg.store.batch(f"{reg.key}: event {first.key} unlocked by {by}"):
+        reg.save_config(f"event {first.key} unlocked by {by}: Auto Lock off", notify=False)
+        for p in sorted((p for p in parts if p.key in out.raids or p is first), key=lambda e: e is first):
+            rs.save(p, f"unlocked by {by}")  # the first raid last: its save copies its answers onto the later raids
+        out.notices = sum(reg.remove_notices("not_rostered", k) for k in out.raids)  # each raid's lock wrote its own
+    return out
+
+
 def rostered_runs(reg: Registry, rs: RaidStore, m: Member) -> list[tuple[RaidEvent, str]]:
     """The live locked runs (not past their close) where `m` holds a seat, with the character seated — read from the run files (the member
     file keeps no per-run membership: RegisteredCharacter.rosters is for regular series, roster redesign Phase 0).
@@ -5586,6 +5765,8 @@ def unasked_seats(reg: Registry, ev: RaidEvent) -> list[tuple[int, int, Signup]]
                     continue
                 if any(a["roster"] == ev.team and (a.get("asked_at") or "") >= since for a in m.placement_asks):
                     continue
+                if standing_yes(m, ev) is not None or any(a.get("answer") is None for a in _event_asks(m, ev)):
+                    continue  # a lock after an unlock: a yes or an ask still open from before it is not "unasked"
                 out.append((i, gi, sg))
     return out
 
@@ -6385,7 +6566,8 @@ def seat_gone(reg: Registry, ev: RaidEvent, uid: int, why: str, *, notice: bool 
     refused from one place) and — unless it was their own doing, or an officer's on-behalf write that tells them
     itself — their inbox says why. `notice=False`: the member's own act by another road (retiring / deleting their own
     character) — no notice about what they just did. Never a DM (the card is RaidMixin.seat_released's to edit)."""
-    reg.close_placement_ask(uid, ev.team, "released")
+    if reg.close_placement_ask(uid, ev.team, "released") is None:
+        lapse_yes(reg, ev, uid)  # a yes given for the seat that just went holds no seat now (a lock after an unlock asks again)
     if not notice or why in ("declined", "callout", "callout (test)", "officer"):
         return
     reason = RELEASE_NOTICE.get(why, why)
@@ -6395,12 +6577,16 @@ def seat_gone(reg: Registry, ev: RaidEvent, uid: int, why: str, *, notice: bool 
 LEFTOVER_PAUSED = "An officer decides who takes an open seat."  # the Not rostered notice's second sentence while asks are paused
 
 
-def leftover_notices(reg: Registry, ev: RaidEvent) -> int:
+def leftover_notices(reg: Registry, ev: RaidEvent, also: list[int] | tuple = ()) -> int:
     """At lock: everyone who joined and was not rostered gets ONE notice (D26 — never a DM unless a seat is offered, the
     DM rule): how many seats, how many joined, and that a freed seat would reach them — or, while Automated Fill
     Requests are paused for the event (a lock as it stands with open seats pauses them), that an officer decides who
-    takes an open seat: no DM is promised. Returns how many were told."""
+    takes an open seat: no DM is promised. `also`: member ids a lock after an unlock left off who held an ask or a yes
+    (relock_drops) and answered Bench — told too (a Join is told anyway). Nobody holding a Not rostered notice for this raid gets a second
+    one. Returns how many were told."""
     left = [s for s in ev.by_status("in") if not ev.seat_of(s.discord_id)]
+    left += [s for uid in also if (s := ev.signups.get(str(uid))) is not None and s.status == "sub" and not ev.seat_of(uid)]
+    left = [s for s in left if not reg.has_notice(s.discord_id, "not_rostered", ev.key)]
     if not left or not ev.all_rosters:
         return 0
     seats = len(ev.all_rosters) * run_size(reg, ev)

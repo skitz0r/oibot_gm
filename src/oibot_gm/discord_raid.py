@@ -916,7 +916,7 @@ class RaidMixin:
         await asyncio.to_thread(rs.save, ev, f"lock preview by {by}")
         return rosters
 
-    async def lock_run(self, reg, rs, ev, by: str = "scheduler", fill: bool = True) -> str:
+    async def lock_run(self, reg, rs, ev, by: str = "scheduler", fill: bool = True, by_person: bool = False) -> str:
         """Lock the sheet, build the roster(s) from the signups (pins honoured), show them on the sheet and in the
         officer channel, and DM every rostered member for confirmation. One lock per run at a time (solving: a second
         caller gets rc.SolverBusy); the board lock is held from the snapshot to the state flip, so a move made during
@@ -928,13 +928,26 @@ class RaidMixin:
         the board AS IT STANDS (rc.board_as_it_stands: exactly the placed names in their groups, nobody added), fails
         with rc.LOCK_EMPTY_BOARD when people answered and nobody is placed, and — seats left open with Automated Fill
         Requests on — pauses those asks for the event. Every later raid of the event locks with the same choice
-        (lock_parts; stored as `ev.lock_fill`). A confirm deadline already past at the lock becomes rc.late_confirm_by's."""
+        (lock_parts; stored as `ev.lock_fill`). A confirm deadline already past at the lock becomes rc.late_confirm_by's.
+        `by_person` (a lock a person pressed: the site, Discord, plain text, MCP): a lock the board can't make — as it
+        stands with nobody placed (rc.lock_empty_refusal), or everyone who joined kept off (rc.lock_all_off) — raises
+        RegistryError with that sentence and writes nothing (no lock_error, no "lock failed" line): the box refused it a
+        moment ago or the board changed since. The scheduler keeps the failure path (its retry and back-off read it).
+        A lock after an unlock reconciles the Confirm asks: a rostered person with a yes on the event is not asked again,
+        one with an ask still open keeps it (its card redrawn with the new group), a newly rostered one is asked, and one
+        who held an ask or a yes and is off the roster now has it closed (`unrostered`, the card edited) and gets the Not
+        rostered notice — at most one per person per raid."""
         if rc.is_follow(ev) and any(p.state == "open" for p in rc.event_parts(rs, ev) if rc.part_no(p) < rc.part_no(ev)):
             raise RegistryError(rc.LATER_PART_LOCK.format(first=run_title(reg, rc.first_part(rs, ev))))
         team = rc.run_team(reg, ev)
         async with self.solving(reg, ev.key, lock=True), self.board_lock(reg, ev.key):
             if ev.state != "open":
                 raise RegistryError(f"{run_title(reg, ev)} is already {ev.state}.")
+            if by_person:  # read under board_lock: the board can't change between this and the lock
+                if not fill and (why := rc.lock_empty_refusal(reg, rs, ev)) is not None:
+                    raise RegistryError(why)
+                if fill and rc.lock_all_off(reg, rs, ev):
+                    raise RegistryError(rc.SOLVER_WORDS["all_off"])
             # solve on a copy first: the run only becomes locked once a roster exists, so a failed solve (or a crash
             # mid-way) leaves the sheet open rather than a locked run with no roster
             for _ in range(rc.LOCK_SOLVES):
@@ -1018,11 +1031,12 @@ class RaidMixin:
                 await self.post_lock_cards(reg, rs, ev, team, ch)
             else:
                 await self.ops.emit(reg.config, "warn", f"{run_title(reg, ev)}: no roster/ops channel set — lock cards not posted")
+            dropped = await self.reconcile_asks(reg, ev, team) if ev.state == "locked" else []
             sent = await self.send_confirmations(reg, rs, ev, team, by) if confirms and ev.state == "locked" else 0
         finally:
             confirming.discard((reg.key, ev.key))
         if ev.state == "locked":  # joiners left off: one notice each (D26), never a DM — a seat offered later is the DM
-            rc.leftover_notices(reg, ev)  # on the loop: member files are mutated where the buttons mutate them
+            rc.leftover_notices(reg, ev, also=dropped)  # on the loop: member files are mutated where the buttons mutate them
         if ev.state != "locked":  # cancelled during the fan-out: the cancel carried its own lines; no "is locked" line now
             return f"{run_title(reg, ev)}: locked by {by}, then {ev.state} before the confirmations finished ({sent} sent)"
         if confirms and ev.state == "locked":
@@ -1123,6 +1137,32 @@ class RaidMixin:
             ev.log.append(f"DM failed — waits on the site: {m.display_name}'s confirmation")
         return ok
 
+    async def reconcile_asks(self, reg, ev, team) -> list[int]:
+        """A lock's Confirm asks against the asks the event already holds (a lock after an unlock; on a first lock there
+        are none): everyone with an open ask or a standing yes who is off the roster now has the ask closed
+        (`unrostered`) or the yes lapsed, and their card edited to say so — never a new DM; everyone rostered with an ask
+        still open keeps it, its card redrawn with the group they are in now. → the ids left off (their Not rostered
+        notice is leftover_notices')."""
+        label = run_label(reg, ev)
+        dropped: list[int] = []
+        for m, ask in rc.relock_drops(reg, ev):
+            if ask.get("answer") is None:
+                reg.close_placement_ask(m.discord_id, ev.team, "unrostered", "the lock")
+            else:
+                rc.lapse_yes(reg, ev, m.discord_id)
+            ev.log.append(f"confirmation closed: {m.display_name} is not on the roster at this lock")
+            dropped.append(m.discord_id)
+            if ask.get("dm"):
+                await self.edit_ask_card(reg, ask["dm"][0], ask["dm"][1], f"{label} locked again without you on the roster, so this question is closed.")
+        for m, ask in rc.open_placement_rows(reg, ev):
+            seat, sg = ev.seat_of(m), ev.signups.get(str(m.discord_id))
+            if not ask.get("dm") or seat is None or sg is None:
+                continue
+            gi = next((k for k, g in enumerate(ev.all_rosters[seat[0]].groups) if seat[1].signup_name in g), 0)
+            await self.edit_live_card(reg, ask["dm"][0], ask["dm"][1],
+                                      confirm_layout(reg, ev, team, self.ico, sg, seat[0], gi, m.discord_id, reminder=bool(ask.get("reminded_at"))))
+        return dropped
+
     async def send_confirmations(self, reg, rs, ev, team, by: str, *, resume: bool = False) -> int:
         """The lock's Confirm / Can't fan-out (confirm_one per seat), re-checking the run is still locked before every
         ask (a cancel during the fan-out leaves no orphan asks). `resume`: the scheduler's recovery step — only the seats
@@ -1134,6 +1174,8 @@ class RaidMixin:
         for i, gi, sg in seats:
             if ev.state != "locked":
                 break
+            if sg and not resume and rc.standing_yes(reg.members.get(sg.discord_id), ev) is not None:
+                continue  # a lock after an unlock: they already confirmed this event, and their seat never went
             if sg and await self.confirm_one(reg, ev, sg, i, gi, by):
                 sent += 1
         if ev.state == "locked":
@@ -1457,7 +1499,15 @@ class RaidMixin:
         rs = self.raids.store(reg)
         ev = next((e for e in rs.live() if e.team == roster), None)
         m = reg.members.get(uid)
-        if ev and m and not yes:
+        if ev and m and not yes and ev.state == "open":  # an unlocked event (issue 14): the ask stayed open; a Can't is
+            await self.release_asks_of(reg, rs, ev, m, "answered Can't make it")  # their answer out, off the board
+            async with self.board_lock(reg, ev.key):
+                sg = ev.signups.get(str(uid))
+                if sg is not None and sg.status != "out":
+                    sg.status, sg.source, sg.joined_at, sg.benched_at, sg.updated_at = "out", "declined", None, None, rc.now()
+                    ev.log.append(f"{m.display_name} can't make it (answered their confirmation while the sheet was open)")
+                    await asyncio.to_thread(rs.save, ev, f"{m.display_name} out")  # prune_board takes the name off the board
+        elif ev and m and not yes:
             team = rc.run_team(reg, ev)
             await self.drop_seated(reg, rs, ev, team, m, "declined", None, announce=False)
         if ev:
@@ -1628,6 +1678,70 @@ class RaidMixin:
         await self.post_run_update(reg, ev, f"↺ reopened by {by} — {'locked again' if back == 'locked' else 'the sheet is open again'}")
         await ops_mod.audited(self.ops, reg, by, f"reopened {run_title(reg, ev)} ({back})", via=via, by_id=by_id)
         return f"Reopened {run_title(reg, ev)} — {'locked, roster as it was' if back == 'locked' else 'the sheet is open again'}."
+
+    async def unlock_run(self, reg, rs, ev, by: str, by_id: int | None = None, *, via: str = "discord") -> str:
+        """THE unlock (issue 14) behind every surface: the event `ev` belongs to goes back to open signup with its rosters
+        on the board (rc.unlock — every locked raid, any raid of it standing for its first). Under the first raid's solver
+        single flight and every raid's board lock (one order, as reschedule takes them), so a lock, a cancel or a board
+        write never interleaves; RegistryError with rc.unlock_refusal's sentence, nothing written. Then, as cancel_run
+        does: fill asks a fan-out added meanwhile close under plan_lock and every withdrawn fill ask's DM card is edited
+        to its final state; the officer channel's lock cards and the signup channel's "is locked" line are deleted (an id
+        missing or a message gone fails nothing); a fresh health card goes up when the event had one; the sheet and the
+        cards are redrawn. Confirmation asks stay as they are. One thread line, one audit line. Nobody is DMed."""
+        first = rc.first_part(rs, ev)
+        if (why := rc.unlock_refusal(reg, rs, first)) is not None:
+            raise RegistryError(why)
+        parts = rc.event_parts(rs, first)
+        async with self.solving(reg, first.key), contextlib.AsyncExitStack() as stack:
+            for key in sorted(p.key for p in parts):
+                await stack.enter_async_context(self.board_lock(reg, key))
+            had = {p.key: ({k: v for k, v in p.cards.items() if k.startswith("lock:")}, p.cards_channel_id, p.lock_line) for p in parts}
+            done = rc.unlock(reg, rs, first, by)  # re-checks the refusal now that nothing else writes the event
+        fills = list(done.fills)
+        for p in (x for x in parts if x.key in done.raids):
+            async with self.plan_lock(reg, p.key):  # an ask a fan-out in flight added after the flip closes too
+                late = rc.withdraw_fill_asks(p, by)
+                cards, ch_id, line = had[p.key]
+                for k in cards:
+                    p.cards.pop(k, None)
+                p.lock_line = None
+                await asyncio.to_thread(rs.save, p, "unlock: lock cards taken down" + (f", {len(late)} ask(s) withdrawn" if late else ""))
+            fills += late
+            for cid, mid in [(ch_id, m) for m in cards.values()] + ([tuple(line)] if line else []):
+                await self._delete_message(cid, mid)
+        label = run_label(reg, first)
+        for a in fills:
+            await self.edit_ask_card(reg, a.dm_channel_id, a.dm_message_id,
+                                     f"Never mind the {'swap' if a.swap else 'seat'} question for {label} — an officer unlocked the event to change the roster.")
+        if first.health_posted and "health" not in first.cards:  # the officers' open card again: counts, Suggested, Lock
+            ch = self.officer_channel(reg, first)
+            if ch is not None:
+                await self.post_health(reg, rs, first, ch, nudge=False)
+        await self.refresh_sheet(reg, first)
+        for p in (x for x in parts if x.key in done.raids):
+            await self.refresh_cards(reg, p)
+        bits = [f"{done.asks_kept} confirmation ask(s) still open"] if done.asks_kept else []
+        bits += [f"{len(fills)} fill ask(s) withdrawn"] if fills else []
+        bits += [f"back to Join: {', '.join(done.returned)}"] if done.returned else []
+        await self.post_run_update(reg, first, f"🔓 unlocked by {by}: back to open signup with the rosters on the board, Auto Lock off"
+                                   + (" · " + " · ".join(bits) if bits else ""))
+        await ops_mod.audited(self.ops, reg, by, f"unlocked {run_title(reg, first)}", via=via, by_id=by_id)
+        return f"Unlocked {run_title(reg, first)}: back to open signup with its rosters on the board. Auto Lock is off. Nobody was DMed."
+
+    async def _delete_message(self, channel_id: int | None, message_id: int | None) -> bool:
+        """Delete one message the bot posted (a lock card, the "is locked" line). An id missing, a channel or message
+        gone, or Discord refusing: False, nothing raised."""
+        if not channel_id or not message_id:
+            return False
+        try:
+            ch = self.get_channel(int(channel_id))
+            if ch is None and hasattr(self, "fetch_channel"):
+                ch = await self.fetch_channel(int(channel_id))
+            await (await ch.fetch_message(int(message_id))).delete()
+            return True
+        except Exception as e:  # noqa: BLE001 — the unlock is written; a message left behind is cosmetic
+            log.debug("delete failed (%s/%s): %s", channel_id, message_id, e)
+            return False
 
     async def reschedule_event(self, reg, rs, ev, *, start: datetime | None = None, timing: dict | None = None, by: str,
                                by_id: int | None = None, via: str = "discord", preview: bool = False, rev: str | None = None) -> list[str]:

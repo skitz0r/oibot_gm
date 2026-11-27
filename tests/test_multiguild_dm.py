@@ -104,7 +104,7 @@ def dm_bot(duo, members=None, flaky=None):
         bot.did.append(("signup", reg.key, status))
         await interaction.response.send_message("ok", ephemeral=True)
 
-    async def lock_run(reg, rs, ev, by="scheduler", fill=True):
+    async def lock_run(reg, rs, ev, by="scheduler", fill=True, by_person=False):
         bot.did.append(("lock", reg.key))
         return f"locked {ev.key}"
 

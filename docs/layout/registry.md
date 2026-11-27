@@ -5,6 +5,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
 
 ```
   registry.py          Member/RegisteredCharacter/Applicant/Absence + GuildConfig on the git store (one file per member);
+                       the inbox: notify (THE notice write), remove_notices(kind, run) (an unlock takes back the lock's not_rostered),
+                       has_notice(uid, kind, run); placement asks: ANSWER_WORDS (… `unrostered` = closed by a lock after an unlock that left
+                       them off), close_placement_ask, claim_placement;
                        schedules (norm_schedule/schedules_of/schedule_def_of; set_schedule(sid, fields, by, raid=) / remove_schedule(sid) through
                        _write_schedules = THE whole-list write of a raid's schedules, _check_schedules; follow {raid, rosters} (parse_follow,
                        follow_words) — §5.62);

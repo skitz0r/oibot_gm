@@ -6990,7 +6990,8 @@ class Registry:
         return [a for a in (m.placement_asks if m else []) if a.get("answer") is None]
 
     ANSWER_WORDS = {"yes": "yes", "no": "can't make it", "expired": "no answer in time", "cancelled": "the event was cancelled",
-                    "withdrawn": "withdrawn by an officer", "released": "the seat was released"}
+                    "withdrawn": "withdrawn by an officer", "released": "the seat was released",
+                    "unrostered": "not on the roster when the event locked again"}
 
     def close_placement_ask(self, discord_id: int, roster: str, answer: str, by: str | None = None, *, save: bool = True) -> dict | None:
         """Close a member's OPEN placement ask on `roster` without an answer from them (`released`: their seat went —
@@ -7045,6 +7046,24 @@ class Registry:
             return []
         out = [dict(n) for n in reversed(self._fresh_notices(m))]
         return [n for n in out if not n.get("read_at")] if unread else out
+
+    def remove_notices(self, kind: str, run: str) -> int:
+        """Take every `kind` notice about run `run` off every member's inbox, read or not (an unlock takes back the lock's
+        Not rostered notices: nobody reads "in line for a freed seat" on an open event). One quiet save per member
+        touched; the caller's store.batch makes it one commit. → how many notices went."""
+        gone = 0
+        for m in list(self.members.values()):
+            keep = [n for n in m.notices if not (n.get("kind") == kind and n.get("run") == run)]
+            if len(keep) != len(m.notices):
+                gone += len(m.notices) - len(keep)
+                m.notices = keep
+                self.save_quiet(m, f"{m.display_name}'s {kind} notice for {run} taken back")
+        return gone
+
+    def has_notice(self, discord_id: int, kind: str, run: str) -> bool:
+        """`discord_id` holds a `kind` notice about run `run` (read or not, inside NOTICE_DAYS)."""
+        m = self.members.get(int(discord_id))
+        return m is not None and any(n.get("kind") == kind and n.get("run") == run for n in self._fresh_notices(m))
 
     def mark_read(self, discord_id: int, ids: list[str] | None = None) -> int:
         """Mark notices read (`ids` None = all). Returns how many changed; nothing is saved when none did."""
