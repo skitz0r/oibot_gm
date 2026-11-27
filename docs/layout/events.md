@@ -244,7 +244,13 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        box's choice (a row's `scope`: "raid" when it helps fewer raids than they play). member_actions offers a joined
                        member's join as "Play another spec (or character)" before the lock when their character plays another spec (respec True). Unlock
                        reconciles: a switch the locked seat agrees with stays (no played_as beside it); a seat changed after the lock wins
-                       and the switch is dropped
+                       and the switch is dropped. Fix round: RaidSwitch.uid (a nick change re-keys it in prune_switches; each drop is one
+                       log line with its reason); drop_stale_switches(reg, rs, m) = a switch to a character retired, deleted, moved
+                       (Registry.move_character) or respecced away is dropped with a log line (after_character_change calls it);
+                       raid_switch_refusal(status=) lets a press that records a Join / Bench first pass NO_ANSWER, RAID_SWITCH_CLOSED /
+                       RAID_SWITCH_LEAVING; join_character = the character that Join answers with; event_raid resolves a size phrase
+                       ("the 10-mans") when one raid has that size, its refusal names the event's raids; the Role switches choice
+                       lists each raid a row helps (row `helps` = their keys; scope = a raid key | "event")
                        The final fix wave (§5.67 phase 4): earlier_counts(reg, rs, ev) = a later raid's `earlier` while a raid before it is OPEN
                        (Preview lock on a later raid solves the earlier raids through event_board_preview; BLOCKING); open_schedule matches a
                        schedule's night at ANY distance (never a one-off beside the run the schedule opens later); open_refusal(reg, rs, instance,
@@ -259,7 +265,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        cards + Confirm/Can't DMs, run_fill DMs, drop_seated, open/cancel runs, after_absence ripple; re-exports the raid_* names below.
                        set_raid_switch(reg, rs, part, m, character, spec, by, by_id, *, via) = every surface's per-raid switch (issue 15):
                        rc.set_raid_switch, ONE notice to the member (on_behalf_notice; none on the officer's own line, never a DM), the
-                       audited ops line, the officer card.
+                       audited ops line ("back to their answer" for the way back), every raid's officer card of the event; `status`
+                       (in | sub) records that answer first when theirs differs (the status is one per event, the spec per raid).
                        Phase 2 (§5.39): send_member_card + edit_ask_card (an outcome edits the ask's DM card — never an FYI DM; seat_released),
                        record_placement (check-and-set on the loop), lock_run resumable (lock_seats + confirmations_sent_at; recover_lock in the scheduler),
                        lock_preview, cancel_run(notify) under board_lock (no DMs), reopen_run, remind (the older card goes dead), set_autofill_paused, withdraw_sent_ask;

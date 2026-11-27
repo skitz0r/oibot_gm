@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal, Optional
@@ -111,6 +112,7 @@ class RaidSwitch(BaseModel):
     base: str
     by: str = ""
     at: str = Field(default_factory=now)
+    uid: Optional[int] = None  # the member: a display name changed since (a nick change) re-keys it (prune_switches)
 
 
 class Callout(BaseModel):
@@ -2489,6 +2491,7 @@ def move_on_runs(rs: RaidStore, uid: int, to, names: set[str], label: str, *, se
             if ev.layout:
                 ev.layout = [[to.display_name if n == old_name else n for n in g] for g in ev.layout]
             if old_name in ev.switched:  # a per-raid switch follows the board's name (issue 15)
+                ev.switched[old_name].uid = to.discord_id
                 ev.switched = {(to.display_name if n == old_name else n): v for n, v in ev.switched.items()}
             for field in ("lock_seats", "leaving", "nudged"):
                 ids = getattr(ev, field)
@@ -2998,6 +3001,8 @@ def bench_again(ev: RaidEvent, old: Signup | None, new: Signup) -> None:
 # (RaidEvent.switched) and read through plays_in; their answer stays for the other raids. Refusals, whole sentences:
 RAID_SWITCH_ONE = "{raid} is the event's only raid, so a switch there is for the whole event."
 RAID_SWITCH_LOCKED = "{raid} is locked, so a switch there is an ask under the event's Role switches."
+RAID_SWITCH_CLOSED = "{raid} has ended or was cancelled, so nobody can switch roles on it."
+RAID_SWITCH_LEAVING = "{name} leaves before {raid}, so they don't play it."
 RAID_SWITCH_NO_ANSWER = "{name} hasn't joined {raid}, so record their answer first."
 RAID_SWITCH_SAME = "{name} already plays {plays} for {raid}."
 # the board ⋮ menu's words for one raid (raid_switch_options): a spec the character plays, and the way back to their answer
@@ -3010,31 +3015,45 @@ def multi_raid(rs: "RaidStore", ev: RaidEvent) -> bool:
     return sum(1 for p in event_parts(rs, first_part(rs, ev)) if p.state != "cancelled") > 1
 
 
-RAID_NOT_IN_EVENT = "{raid} isn't one of this event's raids."
+RAID_NOT_IN_EVENT = "{raid} isn't one of this event's raids, which are {raids}."
+_SIZE_WORDS = re.compile(r"(\d+)\s*-?\s*m[ae]ns?\b|(\d+)s\b")
 
 
 def event_raid(reg: Registry, rs: "RaidStore", ev: RaidEvent, ref: str) -> RaidEvent:
-    """The raid of `ev`'s event that `ref` names — its key, its raid id or its name, any case (MCP set_answer's `raid`,
-    plain text's run_answer). RegistryError(RAID_NOT_IN_EVENT) otherwise."""
+    """The raid of `ev`'s event that `ref` names — its key, its raid id or its name, any case — or a size phrase ("the
+    10-mans", "the 20-man") when exactly one raid of the event has that size (MCP set_answer's `raid`, plain text's
+    run_answer). RegistryError(RAID_NOT_IN_EVENT, naming the event's raids) otherwise, an ambiguous size included."""
     want = str(ref or "").strip().lower()
-    for p in event_parts(rs, first_part(rs, ev)):
+    parts = [p for p in event_parts(rs, first_part(rs, ev)) if p.state != "cancelled"]
+    for p in parts:
         if want in (p.key.lower(), str(p.instance or "").lower(), _raid_name(reg, p.instance).lower()):
             return p
-    raise RegistryError(RAID_NOT_IN_EVENT.format(raid=str(ref or "").strip() or "That raid"))
+    if (hit := _SIZE_WORDS.search(want)) is not None:
+        size = int(hit.group(1) or hit.group(2))
+        same = [p for p in parts if run_size(reg, p) == size]
+        if len(same) == 1:
+            return same[0]
+    raise RegistryError(RAID_NOT_IN_EVENT.format(raid=str(ref or "").strip() or "That raid",
+                                                 raids=join_words([_raid_name(reg, p.instance) for p in parts])))
 
 
 def raid_switch_refusal(reg: Registry, rs: "RaidStore", part: RaidEvent, m: Member, character: str | None = None,
-                        spec: str | None = None) -> str | None:
+                        spec: str | None = None, *, status: str | None = None) -> str | None:
     """THE guard of a per-raid switch (set_raid_switch and every surface's box read it): an event of several raids,
-    this raid open, `m` with a Join or Bench answer there (not leaving before it), and — when given — a character of
-    theirs and a spec it plays (spec_role's "Nyx doesn't play Fire."). None when it may go ahead."""
+    this raid open, `m` with a Join or Bench answer there (not leaving before it) — or `status` ("in" | "sub"), the
+    answer the same press records first —, and when given a character of theirs and a spec it plays (spec_role's "Nyx
+    doesn't play Fire."). None when it may go ahead."""
     raid = _raid_name(reg, part.instance)
     if not multi_raid(rs, part):
         return RAID_SWITCH_ONE.format(raid=raid)
+    if part.state in ("done", "cancelled") or part.dropped:
+        return RAID_SWITCH_CLOSED.format(raid=raid)
     if part.state != "open":
         return RAID_SWITCH_LOCKED.format(raid=raid)
+    if m.discord_id in part.leaving:
+        return RAID_SWITCH_LEAVING.format(name=m.display_name, raid=raid)
     sg = part.signups.get(str(m.discord_id))
-    if sg is None or sg.status not in ("in", "sub"):
+    if status not in ("in", "sub") and (sg is None or sg.status not in ("in", "sub")):
         return RAID_SWITCH_NO_ANSWER.format(name=m.display_name, raid=raid)
     if character is not None:
         c = next((c for c in m.active() if c.label == character), None)
@@ -3068,10 +3087,18 @@ def set_raid_switch(reg: Registry, rs: "RaidStore", part: RaidEvent, m: Member, 
         part.log.append(f"{sg.display_name} plays {spec} again for {raid} (switched back by {by})")
         rs.save(part, f"{sg.display_name} plays {spec} again (by {by})")
         return "cleared"
-    part.switched[sg.display_name] = RaidSwitch(character=character, spec=spec, base=sg.character, by=by)
+    part.switched[sg.display_name] = RaidSwitch(character=character, spec=spec, base=sg.character, by=by, uid=m.discord_id)
     part.log.append(f"{sg.display_name} plays {_plays_words(character, spec, sg.character)} for {raid} (switched by {by})")
     rs.save(part, f"{sg.display_name} plays {spec} for {raid} (by {by})")
     return "set"
+
+
+def join_character(m: Member, sg: Signup | None, character: str) -> str:
+    """The character a Join (or Bench) recorded by a per-raid switch's press answers with: the one their answer already
+    names (a Bench, a No thanks), else the character the switch picked. It joins as that character's own spec."""
+    if sg is not None and any(c.label == sg.character for c in m.active()):
+        return sg.character
+    return character
 
 
 def raid_switch_options(reg: Registry, rs: "RaidStore", part: RaidEvent, m: Member) -> list[dict]:
@@ -3101,15 +3128,50 @@ def prune_switches(ev: RaidEvent) -> list[str]:
     keeps it, as it keeps a board place). Run by every RaidStore.save of an open run. → the names dropped."""
     if ev.state != "open" or not ev.switched:
         return []
-    gone = []
+    gone, keep = [], {}
     for n, sw in ev.switched.items():
         sg = signup_by_name(ev, n)
-        if sg is None or sg.status not in ("in", "sub") or sg.character != sw.base or (sg.character, sg.spec) == (sw.character, sw.spec):
-            gone.append(n)
-    if gone:
-        ev.switched = {n: sw for n, sw in ev.switched.items() if n not in gone}
-        ev.log.append("switch dropped: " + ", ".join(gone) + " (their answer changed)")
+        if sg is None and sw.uid is not None and (sg := ev.signups.get(str(sw.uid))) is not None:
+            n = sg.display_name  # a nick changed since: the switch follows the person, under the name the board uses now
+        if sg is None or sg.status not in ("in", "sub"):
+            why = "no longer joined"
+        elif sg.character != sw.base:
+            why = "their answer is another character now"
+        elif (sg.character, sg.spec) == (sw.character, sw.spec):
+            why = "their answer is the same now"
+        else:
+            keep[n] = sw
+            continue
+        gone.append(n)
+        ev.log.append(f"switch dropped: {n} ({why})")
+    ev.switched = keep
     return gone
+
+
+def drop_stale_switches(reg: Registry, rs: "RaidStore", m: Member) -> list[RaidEvent]:
+    """After a character change (retired, deleted, moved to another member, respecced): a per-raid switch of `m`'s to a
+    character they no longer have, or to a spec it no longer plays, is dropped with one log line per raid, each raid
+    saved — never kept silently. → the raids changed (the caller redraws them)."""
+    out = []
+    for ev in rs.live():
+        sg = ev.signups.get(str(m.discord_id))
+        sw = ev.switched.get(sg.display_name) if sg is not None and ev.state == "open" else None
+        if sw is None:
+            continue
+        c = next((c for c in m.active() if c.label == sw.character), None)
+        if c is not None:
+            try:
+                spec_role(reg, c, sw.spec)
+                continue
+            except RegistryError:
+                why = f"{sw.character} no longer plays {sw.spec}"
+        else:
+            why = f"{sw.character} is no longer theirs to play"
+        del ev.switched[sg.display_name]
+        ev.log.append(f"switch dropped: {sg.display_name} ({why})")
+        rs.save(ev, f"{sg.display_name}'s switch for this raid dropped")
+        out.append(ev)
+    return out
 
 
 def drop_raid_switches(rs: "RaidStore", first: RaidEvent, m: Member, by: str) -> list[RaidEvent]:
@@ -3837,15 +3899,17 @@ def switch_scopes(reg: Registry, rs: "RaidStore", part: RaidEvent, m: Member) ->
 
 
 def switch_box_for(reg: Registry, rs: "RaidStore", part: RaidEvent, m: Member, character: str, spec: str, *, plan_rev: str = "",
-                   viewer: int | None = None, swap: bool = True, scope: str | None = None) -> tuple[dict, str]:
+                   viewer: int | None = None, swap: bool = True, scope: str | None = None,
+                   helps: "list[RaidEvent] | None" = None) -> tuple[dict, str]:
     """(box, button word) for one Role switches row — the /switch route re-builds the box for `seen`. Before the lock
     the answer is one for the evening, so the box names the raids the write changes for THAT member (switch_raids):
     someone who joined → Switch (consequences.switch_box, a notice); the officer's own row → Switch said to them
     (switch_box own: nobody told); anyone else → Answer for them (answer_box: Join as that spec). After the lock it is
     an ask on `part` alone → Ask (switch_box locked, its rev the part's plan rev). Button words: PAGE_WORDS.
-    `scope` (before the lock, issue 15) "raid" | "event": where switch_scopes offers the choice, the box carries it as
-    `scope` {label, value, options [{value, label}]} and "raid" is a switch for `part` alone (consequences.raid_switch_box);
-    "event" (or no choice offered) is the whole-event box above."""
+    `scope` (before the lock, issue 15) a raid's key | "event" ("raid" = `part`'s): where switch_scopes offers the choice
+    for the raids the row helps (`helps`, default `part`), the box carries it as `scope` {label, value, options
+    [{value: each raid's key, label: its name}, {value: "event", label: SCOPE_EVENT}]} and a raid's key is a switch for
+    that raid alone (consequences.raid_switch_box); "event" (or no choice offered) is the whole-event box above."""
     from . import consequences as cq
     from .constants import PAGE_WORDS
 
@@ -3858,14 +3922,16 @@ def switch_box_for(reg: Registry, rs: "RaidStore", part: RaidEvent, m: Member, c
         own = viewer is not None and int(viewer) == m.discord_id
         if not own and (sg is None or sg.status != "in"):
             return cq.answer_box(reg, first, m, "join", character, spec, by_id=viewer, rev=rev), PAGE_WORDS["answer_button"]
-        offer = scope is not None and switch_scopes(reg, rs, part, m)
-        if offer and scope == "raid":
-            b = cq.raid_switch_box(reg, rs, part, m, character, spec, own=own, rev=rev)
+        choices = [p for p in (helps or [part]) if switch_scopes(reg, rs, p, m)] if scope is not None else []
+        on = next((p for p in choices if p.key == (part.key if scope == "raid" else scope)), None)
+        if on is not None:
+            b = cq.raid_switch_box(reg, rs, on, m, character, spec, own=own, rev=rev)
         else:
             b = cq.switch_box(reg, first, m, character, spec, raids, own=own, rev=rev, replaces=replaces)
-        if offer:
-            b = {**b, "scope": {"label": SCOPE_LABEL, "value": "raid" if scope == "raid" else "event",
-                                "options": [{"value": "raid", "label": _raid_name(reg, part.instance)}, {"value": "event", "label": SCOPE_EVENT}]}}
+        if choices:
+            b = {**b, "scope": {"label": SCOPE_LABEL, "value": on.key if on is not None else "event",
+                                "options": [{"value": p.key, "label": _raid_name(reg, p.instance)} for p in choices]
+                                + [{"value": "event", "label": SCOPE_EVENT}]}}
         return b, PAGE_WORDS["switch_button"]
     box = cq.switch_box(reg, part, m, character, spec, [part.instance], locked=True, swap=swap, rev=plan_rev + member_state_rev(part, m))
     return box, PAGE_WORDS["ask_button"]
@@ -3936,6 +4002,7 @@ def event_switches(reg: Registry, rs: "RaidStore", first: RaidEvent, *, viewer: 
                     has_row = True
                     if name not in rows[k]["raids"]:
                         rows[k]["raids"].append(name)
+                        rows[k]["helps"].append(p.key)
                     continue
                 m = reg.members.get(a.discord_id)
                 if m is None:
@@ -3958,22 +4025,23 @@ def event_switches(reg: Registry, rs: "RaidStore", first: RaidEvent, *, viewer: 
                     continue
                 has_row = True
                 rows[k] = {"uid": str(m.discord_id), "display_name": m.display_name, "role": a.role, "from": frm,
-                           "to": _plays_words(a.character, a.spec, base), "answered": joined, "button": button, "raids": [name],
+                           "to": _plays_words(a.character, a.spec, base), "answered": joined, "button": button, "raids": [name], "helps": [p.key],
                            "part": p.key, "seat": si, "option": oi, "character": a.character, "spec": a.spec, "box": box, "scope": None,
                            "_rank": (ROLES.index(a.role) if a.role in ROLES else len(ROLES), oi, pi, si)}
         if short:
             out["short"].append({"raid": name, "roles": short, "why": None if has_row else _short_why(plan, short, prelock)})
-    if prelock:  # the scope choice (issue 15): a row that helps fewer raids than they play opens on "this raid"
+    if prelock:  # the scope choice (issue 15): each raid the row helps, then the whole event
         by_key = {p.key: p for p in parts}
         for r in rows.values():
             m = reg.members.get(int(r["uid"]))
-            p = by_key.get(r["part"])
-            if m is None or p is None or r["button"] != PAGE_WORDS["switch_button"] or not switch_scopes(reg, rs, p, m):
+            helps = [by_key[k] for k in r["helps"] if k in by_key]
+            if m is None or not helps or r["button"] != PAGE_WORDS["switch_button"] or not any(switch_scopes(reg, rs, p, m) for p in helps):
                 continue
-            scope = "raid" if len(r["raids"]) < len(switch_raids(rs, first, m)) else "event"
+            # a row that helps fewer raids than they play opens on the first raid it helps, else on the whole event
+            scope = helps[0].key if len(helps) < len(switch_raids(rs, first, m)) else "event"
             try:
-                r["box"], _b = switch_box_for(reg, rs, p, m, r["character"], r["spec"], viewer=viewer, scope=scope)
-                r["scope"] = scope
+                r["box"], _b = switch_box_for(reg, rs, helps[0], m, r["character"], r["spec"], viewer=viewer, scope=scope, helps=helps)
+                r["scope"] = r["box"]["scope"]["value"]
             except RegistryError:
                 pass
     out["rows"] = sorted(rows.values(), key=lambda r: r["_rank"])
@@ -6897,6 +6965,8 @@ def after_character_change(reg: Registry, rs: RaidStore, m: Member, changes: lis
                         _reseat(ev, s, reg.key)
                         rs.save(ev, f"{m.display_name} seat follows {c.label}")
             touch(ev)
+    for ev in drop_stale_switches(reg, rs, m):  # a per-raid switch to a character retired, deleted or respecced away
+        touch(ev)
     return res
 
 

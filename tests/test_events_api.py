@@ -57,12 +57,15 @@ def tuesday(reg) -> str:
 
 def words_of(obj) -> list[str]:
     """Every string a person could read in a JSON answer (ids and machine fields left out)."""
-    skip = {"key", "schedule", "occurrence", "start_iso", "href", "fp", "uid", "raid", "id", "sheet", "sheet_url", "timing", "lineup", "open", "part", "revs"}
+    skip = {"key", "schedule", "occurrence", "start_iso", "href", "fp", "uid", "raid", "id", "sheet", "sheet_url", "timing", "lineup", "open", "part", "revs",
+            "helps"}  # a Role switches row's raid keys (issue 15)
     out = []
     if isinstance(obj, dict):
+        choice = "options" in obj or set(obj) == {"value", "label"}  # a choice (the box's scope): its value is a key, its label words
         for k, v in obj.items():
-            if k not in skip:
-                out += words_of(v)
+            if k in skip or (choice and k == "value") or (k == "scope" and isinstance(v, str)):
+                continue
+            out += words_of(v)
     elif isinstance(obj, list):
         for v in obj:
             out += words_of(v)

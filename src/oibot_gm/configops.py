@@ -3117,9 +3117,12 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         if want == "out" and note:  # a callout with its reason (RaidMixin.call_out): the note is for the officers only
             effect += f" — a callout; note for the officers: “{note}”"
         if (op.text or "").strip() and want != "out":  # a switch for ONE raid of the event (issue 15)
+            if not spec:
+                raise RegistryError(RAID_SWITCH_NEEDS_SPEC)
             part = rc.event_raid(reg, rs, ev, op.text)
             plays = f"{op.character}, {spec}" if op.character and cur is not None and op.character != cur.character else spec
-            return f"{label}: {m.display_name} plays {plays or '?'} for {rc._raid_name(reg, part.instance)} alone — their answer stays for the other raids ({now})"
+            answer = f" → {rc.LABELS[want]} for the whole event, and" if cur is None or cur.status != want else ""
+            return f"{label}: {m.display_name}{answer} plays {plays} for {rc._raid_name(reg, part.instance)} alone — their answer stays for the other raids ({now})"
         return f"{label}: {m.display_name} → {rc.LABELS[want]}{char} ({now}){effect}"
     if op.op == "confirm_for":
         m = _need_member(reg, op.member)
@@ -3913,8 +3916,8 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
                     raise RegistryError(RAID_SWITCH_NEEDS_SPEC)
                 part = rc.event_raid(reg, rs, ev, op.text)
                 sg = part.signups.get(str(m.discord_id))
-                character = op.character or (sg.character if sg else "")
-                line = await bot.set_raid_switch(reg, rs, part, m, character, spec, by, by_id=by_id, via=via or "discord")
+                character = op.character or (sg.character if sg else "") or (m.main.label if m.main else "")
+                line = await bot.set_raid_switch(reg, rs, part, m, character, spec, by, by_id=by_id, via=via or "discord", status=want)
             else:
                 line = await bot.set_answer(reg, rs, ev, m, want, op.character or None, by, by_id=by_id, **({"spec": spec, "via": via or "discord"} if spec else {}))
         except ValueError as e:

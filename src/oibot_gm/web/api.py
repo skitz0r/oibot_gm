@@ -1663,7 +1663,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 part = rc.event_raid(v.reg, rs, ev, str(d["raid"]))
                 sg = part.signups.get(str(m.discord_id))
                 character = d.get("character") or (sg.character if sg else None) or (m.main.label if m.main else "")
-                line = await bot.set_raid_switch(v.reg, rs, part, m, character, spec, v.name, by_id=v.uid, via=v.via)
+                line = await bot.set_raid_switch(v.reg, rs, part, m, character, spec, v.name, by_id=v.uid, via=v.via, status=status)
             else:
                 spec = str(d.get("spec") or "").strip() if status != "out" else ""  # a role switch (MCP set_answer's spec)
                 line = await maybe_await(bot.set_answer(v.reg, rs, ev, m, status, d.get("character") or None, v.name, by_id=v.uid,

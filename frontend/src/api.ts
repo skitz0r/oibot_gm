@@ -336,7 +336,7 @@ export interface EventEdit {
 export interface SwitchRow {
   uid: string; display_name: string; role: string; from: string; to: string; answered: boolean; button: string; raids: string[];
   part: string; seat: number; option: number; character: string; spec: string; box: Box;
-  /** the box's scope on opening (issue 15): "raid" (the row's raid alone) | "event"; null = no choice offered */
+  /** the box's scope on opening (issue 15): a raid's key (that raid alone) | "event"; null = no choice offered */
   scope?: string | null;
 }
 /** `short` = each raid short of a minimum (role → how many), `why` the sentence when it has no row; `revs` = each raid's plan rev. */

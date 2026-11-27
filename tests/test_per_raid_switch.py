@@ -333,18 +333,18 @@ def test_site_role_switches_box_offers_the_scope_and_writes_one_raid(web_bot, re
     fev = rc.later_parts(rs, lead)[0]
     sw = rc.event_switches(reg, rs, lead)
     row = next(r for r in sw["rows"] if r["uid"] == str(nyx.discord_id))
-    assert row["raids"] == ["Hyjal Summit"] and row["scope"] == "raid" and row["part"] == lead.key
+    assert row["raids"] == ["Hyjal Summit"] and row["scope"] == lead.key and row["part"] == lead.key
     scope = row["box"]["scope"]
-    assert scope["value"] == "raid" and scope["label"] == rc.SCOPE_LABEL
-    assert scope["options"] == [{"value": "raid", "label": "Hyjal Summit"}, {"value": "event", "label": "The whole event"}]
+    assert scope["value"] == lead.key and scope["label"] == rc.SCOPE_LABEL
+    assert scope["options"] == [{"value": lead.key, "label": "Hyjal Summit"}, {"value": "event", "label": "The whole event"}]
     assert row["box"]["sentences"][0] == "Nyx plays Holy for Hyjal Summit and stays Shadow for Barrow Deeps."
     body = {k: row[k] for k in ("uid", "character", "spec", "part", "seat", "option")} | {"rev": sw["revs"][row["part"]]}
     url = f"/api/run/{lead.key}/switch"
     whole = web_bot.c.post(url, json=body | {"preview": True, "scope": "event"}, headers=H()).json()["box"]
     assert whole["scope"]["value"] == "event" and whole["sentences"][0] == "Nyx plays Holy for Hyjal Summit and Barrow Deeps, not Shadow."
-    stale = web_bot.c.post(url, json=body | {"scope": "raid", "seen": whole["fp"]}, headers=H())
+    stale = web_bot.c.post(url, json=body | {"scope": lead.key, "seen": whole["fp"]}, headers=H())
     assert stale.status_code == 409 and stale.json()["box"]["fp"] == row["box"]["fp"]
-    r = web_bot.c.post(url, json=body | {"scope": "raid", "seen": row["box"]["fp"]}, headers=H())
+    r = web_bot.c.post(url, json=body | {"scope": lead.key, "seen": row["box"]["fp"]}, headers=H())
     assert r.status_code == 200, r.text
     lead, fev = rs.events[lead.key], rs.events[fev.key]
     assert lead.switched["Nyx"].spec == "Holy" and not fev.switched and lead.signups[str(nyx.discord_id)].spec == "Shadow"
@@ -431,8 +431,8 @@ def test_discord_raid_set_asks_for_which_raid(reg, rs, monkeypatch):
     monkeypatch.setattr(tf.wizard_harness.FakeInteraction, "__init__", init)
 
     class Bot(tf.FakeBot):
-        async def set_raid_switch(self, reg, rs, part, m, character, spec, by, by_id=None, via="discord"):
-            self.calls.append(("set_raid_switch", part.key, m.display_name, character, spec, by))
+        async def set_raid_switch(self, reg, rs, part, m, character, spec, by, by_id=None, via="discord", status=None):
+            self.calls.append(("set_raid_switch", part.key, m.display_name, character, spec, by, status))
             return f"✅ {m.display_name} plays {spec}"
 
     lead = rc.open_run(reg, rs, HYJAL, start_in(reg), by="t", lineup=EVENING)
@@ -455,7 +455,7 @@ def test_discord_raid_set_asks_for_which_raid(reg, rs, monkeypatch):
         assert "They get a notice, and nobody gets a DM." in h.text and not bot.calls
         await h.press("Switch")
     asyncio.run(go())
-    assert bot.calls == [("set_raid_switch", fev.key, "Nyx", "Nyx", "Holy", "Tester")]
+    assert bot.calls == [("set_raid_switch", fev.key, "Nyx", "Nyx", "Holy", "Tester", "in")]
 
     h2 = tf.Harness(reg, rs, client=bot)
 
@@ -496,3 +496,245 @@ def test_a_joined_members_spec_switch_is_marked_for_menus_without_a_spec_field(r
     lead, fev, ms = evening(reg, rs)
     join = next(a for a in rc.member_actions(reg, lead, ms[0]) if a["key"] == "join")
     assert join["label"] == "Play another spec or character" and join["characters"] == ["Nyx", "Nyxpal"] and join["respec"] is True
+
+
+# ---------------------------------------------------------------- fix round (review of 2026-11-27)
+
+def _flow_bot(monkeypatch):
+    import test_flows_raid as tf
+
+    from oibot_gm import discord_registry
+
+    monkeypatch.setattr(discord_registry, "is_officer", lambda i, r: True)
+
+    class Bot(tf.FakeBot):
+        async def set_raid_switch(self, reg, rs, part, m, character, spec, by, by_id=None, via="discord", status=None):
+            self.calls.append(("set_raid_switch", part.key, m.display_name, character, spec, by, status))
+            return f"✅ {m.display_name} plays {spec}"
+    return tf, Bot
+
+
+def test_discord_the_whole_event_with_their_own_spec_replaces_a_raids_switch(reg, rs, monkeypatch):
+    """Fix 1: Nyx answered Shadow and is Holy for Barrow Deeps; /raid set → Shadow → The whole event sends the spec, so
+    the switch for Barrow Deeps goes, and the box says so."""
+    import asyncio
+
+    from oibot_gm import inbox
+    from oibot_gm.wizard import FLOWS
+
+    tf, _Bot = _flow_bot(monkeypatch)
+    lead, fev, ms = evening(reg, rs)
+    nyx = ms[0]
+    holy_for_bd(reg, rs, fev, nyx)
+    bot = NightBot(reg, rs)
+
+    class Bot(tf.FakeBot):
+        async def set_answer(self, reg, rs, ev, m, status, character, by, by_id=None, spec=None, via=None):
+            self.calls.append(("set_answer", spec))
+            return await inbox.do_member_action(bot, reg, rs, ev, m, "join", character=character, spec=spec, by=by, by_id=by_id)
+    fb = Bot(rs)
+    h = tf.Harness(reg, rs, client=fb)
+
+    async def go():
+        await FLOWS["raid_set"](h.command(), reg, member=tf._user(nyx))
+        await h.pick("Pick the event", lead.key)
+        await h.press("Play another spec or character")
+        await h.pick("Pick the character", "Nyx")
+        await h.pick("Plays which spec?", "Shadow")
+        assert h.selects() == [rc.SCOPE_LABEL]
+        await h.pick(rc.SCOPE_LABEL, "event")
+        assert "This replaces their switch for Barrow Deeps." in h.text
+        await h.press("Record answer")
+    asyncio.run(go())
+    assert fb.calls[-1] == ("set_answer", "Shadow")
+    assert not rs.events[fev.key].switched and rs.events[lead.key].signups[str(nyx.discord_id)].spec == "Shadow"
+
+
+def test_a_bench_member_joins_and_is_switched_for_one_raid_on_every_surface(reg, rs, web_bot):
+    """Fix 2: the status is one per event, the spec per raid — a Bench answer + Join + one raid records both."""
+    from test_raid_night import H
+
+    from oibot_gm import configops
+    from oibot_gm import consequences as cq
+    from oibot_gm.configops import ConfigOp
+
+    lead, fev, ms = evening(reg, rs)
+    nyx = ms[0]
+    rc.set_signup(reg, rs, rs.events[lead.key], nyx, None, "sub", source="test")
+    b = cq.raid_switch_box(reg, rs, rs.events[fev.key], nyx, "Nyx", "Holy", status="in")
+    assert b["sentences"] == ["Nyx joins as Shadow and plays Holy for Barrow Deeps.", "They get a notice, and nobody gets a DM.",
+                              "You can change both until the lock."]
+    assert b["title"] == "Answer for Nyx and switch them to Holy for Barrow Deeps?"
+    # the site / MCP route
+    r = web_bot.c.post(f"/api/run/{lead.key}/set", json={"member": "Nyx", "status": "in", "spec": "Holy", "raid": "Barrow Deeps"}, headers=H())
+    assert r.status_code == 200 and r.json()["message"] == "Nyx joins as Nyx and plays Holy for Barrow Deeps", r.text
+    lead, fev = rs.events[lead.key], rs.events[fev.key]
+    sg = lead.signups[str(nyx.discord_id)]
+    assert (sg.status, sg.spec) == ("in", "Shadow") and fev.switched["Nyx"].spec == "Holy"
+    # plain text: Bench again, then "join Nyx as Holy for Barrow Deeps"
+    rc.set_raid_switch(reg, rs, fev, nyx, "Nyx", "Shadow", by="Jon")
+    rc.set_signup(reg, rs, rs.events[lead.key], nyx, None, "sub", source="test")
+    op = ConfigOp(op="run_answer", target=lead.key, member="Nyx", value="join", field="Holy", text="Barrow Deeps")
+    assert "Nyx → Join for the whole event, and plays Holy for Barrow Deeps alone" in configops.describe(reg, op)
+    run(configops.apply_async(reg, op, "Jon", True, bot=web_bot.bot, by_id=1))
+    assert rs.events[lead.key].signups[str(nyx.discord_id)].status == "in" and rs.events[fev.key].switched["Nyx"].spec == "Holy"
+
+
+def test_no_answer_yet_joins_and_is_switched_and_a_pure_switch_changes_no_answer(reg, rs):
+    lead, fev, ms = evening(reg, rs)
+    tavi = add(reg, 40, "Tavi", "Priest", "Shadow", "Holy")
+    bot = NightBot(reg, rs)
+    with pytest.raises(RegistryError, match="hasn't joined"):
+        run(bot.set_raid_switch(reg, rs, fev, tavi, "Tavi", "Holy", "Jon", by_id=1))  # a pure switch: nothing changes
+    assert str(tavi.discord_id) not in rs.events[lead.key].signups
+    line = run(bot.set_raid_switch(reg, rs, fev, tavi, "Tavi", "Holy", "Jon", by_id=1, status="in"))
+    assert line == "✅ Tavi joins as Tavi and plays Holy for Barrow Deeps"
+    assert rs.events[lead.key].signups[str(tavi.discord_id)].status == "in" and rs.events[rs.events[fev.key].key].switched["Tavi"].spec == "Holy"
+    from oibot_gm import inbox
+    notes = [n["text"] for n in inbox.notices_of(reg, tavi.discord_id)]
+    assert len(notes) == 1 and "set you to Join as Tavi and switched you to Holy" in notes[0]
+
+
+def test_discord_join_from_bench_with_one_raid_says_both(reg, rs, monkeypatch):
+    import asyncio
+
+    from oibot_gm.wizard import FLOWS
+
+    tf, Bot = _flow_bot(monkeypatch)
+    lead, fev, ms = evening(reg, rs)
+    nyx = ms[0]
+    rc.set_signup(reg, rs, rs.events[lead.key], nyx, None, "sub", source="test")
+    bot = Bot(rs)
+    h = tf.Harness(reg, rs, client=bot)
+
+    async def go():
+        await FLOWS["raid_set"](h.command(), reg, member=tf._user(nyx))
+        await h.pick("Pick the event", lead.key)
+        await h.press("Join")
+        await h.pick("Pick the character", "Nyx")
+        await h.pick("Plays which spec?", "Holy")
+        await h.pick(rc.SCOPE_LABEL, fev.key)
+        assert "Nyx joins as Shadow and plays Holy for Barrow Deeps." in h.text
+        await h.press("Switch")
+    asyncio.run(go())
+    assert bot.calls[-1] == ("set_raid_switch", fev.key, "Nyx", "Nyx", "Holy", "Tester", "in")
+
+
+def test_the_bots_context_reads_what_people_play_in_each_raid(reg, rs):
+    """Fix 3: help.run_lines' joined-by-role and joined list agree with needs for the switched raid."""
+    from oibot_gm import help as hp
+
+    lead, fev, ms = evening(reg, rs)
+    holy_for_bd(reg, rs, fev, ms[0])
+    fev = rs.events[fev.key]
+    lines = hp.run_lines(reg, rs, fev, is_officer=True)
+    role = next(ln for ln in lines if ln.strip().startswith("joined by role"))
+    assert f"healer {rc.gaps(reg, fev)['have']['healer']}" in role
+    assert "Nyx (Nyx Holy Priest)" in next(ln for ln in lines if ln.strip().startswith("joined:"))
+    assert "Nyx (Nyx Shadow Priest)" in next(ln for ln in hp.run_lines(reg, rs, rs.events[lead.key], is_officer=True) if ln.strip().startswith("joined:"))
+
+
+def test_the_box_lists_each_raid_the_row_helps(reg, rs):
+    """Fix 4: a row that helps two raids of three: each by name, then the whole event; any one can be picked."""
+    lead = rc.open_run(reg, rs, HYJAL, start_in(reg), by="t", lineup=EVENING + [{"raid": "onyxias_lair", "rosters": 1}])
+    nyx = add(reg, 0, "Nyx", "Priest", "Shadow", "Holy")
+    rc.set_signup(reg, rs, lead, nyx, None, "in", source="test")
+    hy, bd, ony = rc.event_parts(rs, rs.events[lead.key])
+    b, _ = rc.switch_box_for(reg, rs, bd, nyx, "Nyx", "Holy", scope=bd.key, helps=[bd, ony])
+    assert b["scope"]["options"] == [{"value": bd.key, "label": "Barrow Deeps"}, {"value": ony.key, "label": "Onyxia's Lair"},
+                                     {"value": "event", "label": "The whole event"}]
+    assert b["scope"]["value"] == bd.key and b["sentences"][0].startswith("Nyx plays Holy for Barrow Deeps")
+    b2, _ = rc.switch_box_for(reg, rs, bd, nyx, "Nyx", "Holy", scope=ony.key, helps=[bd, ony])
+    assert b2["scope"]["value"] == ony.key and b2["sentences"][0].startswith("Nyx plays Holy for Onyxia's Lair")
+
+
+def test_a_switch_to_a_retired_or_respecced_character_is_dropped_with_a_log_line(reg, rs):
+    """Fix 5."""
+    lead, fev, ms = evening(reg, rs)
+    nyx = ms[0]
+    rc.set_raid_switch(reg, rs, fev, nyx, "Nyxpal", "Holy", by="Jon")
+    pal = next(c for c in nyx.characters if c.label == "Nyxpal")
+    pal.spec = "Retribution"  # its spec edited: it no longer plays Holy
+    assert [e.key for e in rc.drop_stale_switches(reg, rs, nyx)] == [fev.key]
+    fev = rs.events[fev.key]
+    assert not fev.switched and "switch dropped: Nyx (Nyxpal no longer plays Holy)" in fev.log
+    pal.spec = "Holy"
+    rc.set_raid_switch(reg, rs, fev, nyx, "Nyxpal", "Holy", by="Jon")
+    pal.status = "retired"
+    res = rc.after_character_change(reg, rs, nyx, [])
+    assert fev.key in [e.key for e in res["touched"]] and not rs.events[fev.key].switched
+    assert "switch dropped: Nyx (Nyxpal is no longer theirs to play)" in rs.events[fev.key].log
+
+
+def test_naming_an_ended_raid_and_a_size_phrase(reg, rs):
+    """Fixes 6 and 7."""
+    lead, fev, ms = evening(reg, rs)
+    assert rc.event_raid(reg, rs, lead, "the 10-mans").key == fev.key
+    assert rc.event_raid(reg, rs, lead, "20-man").key == lead.key
+    with pytest.raises(RegistryError, match="isn't one of this event's raids, which are Hyjal Summit and Barrow Deeps."):
+        rc.event_raid(reg, rs, lead, "the 25-man")
+    fev.state = "done"
+    assert rc.raid_switch_refusal(reg, rs, fev, ms[0], "Nyx", "Holy") == "Barrow Deeps has ended or was cancelled, so nobody can switch roles on it."
+
+
+def test_a_raid_without_a_spec_is_refused_in_the_review(reg, rs):
+    """Fix 8."""
+    from oibot_gm import configops
+    from oibot_gm.configops import ConfigOp
+
+    lead, fev, ms = evening(reg, rs)
+    with pytest.raises(RegistryError, match=configops.RAID_SWITCH_NEEDS_SPEC):
+        configops.describe(reg, ConfigOp(op="run_answer", target=lead.key, member="Nyx", value="join", text="Barrow Deeps"), strict=True)
+
+
+def test_the_way_back_is_audited_as_back_to_their_answer(reg, rs):
+    """Fix 9 (the audit line)."""
+    lead, fev, ms = evening(reg, rs)
+    bot = NightBot(reg, rs)
+    seen = []
+
+    async def audited(ops, reg_, by, line, **kw):
+        seen.append(line)
+    import oibot_gm.discord_raid as dr
+    orig = dr.ops_mod.audited
+    dr.ops_mod.audited = audited
+    try:
+        run(bot.set_raid_switch(reg, rs, fev, ms[0], "Nyx", "Holy", "Jon", by_id=1))
+        run(bot.set_raid_switch(reg, rs, rs.events[fev.key], ms[0], "Nyx", "Shadow", "Jon", by_id=1))
+    finally:
+        dr.ops_mod.audited = orig
+    assert seen[0].startswith("switched Nyx to Holy for Barrow Deeps alone on ")
+    assert seen[1].startswith("switched Nyx back to their answer, Shadow, for Barrow Deeps on ")
+
+
+def test_the_confirm_card_says_an_officer_switched_them(reg, rs):
+    """Fix 10."""
+    from test_analytics_cards import text_of
+
+    from oibot_gm import raid_views as views
+
+    ico = lambda kind, key, *a, **k: f"<{kind}:{key}>"  # noqa: E731
+    lead, fev, ms = evening(reg, rs)
+    holy_for_bd(reg, rs, fev, ms[0])
+    names = [m.display_name for m in ms]
+    place_all(rs, rs.events[lead.key], names)
+    place_all(rs, rs.events[fev.key], names)
+    run(NightBot(reg, rs).lock_run(reg, rs, rs.events[lead.key], by="Jon", fill=False))
+    fev = rs.events[fev.key]
+    i = next(k for k, r in enumerate(fev.rosters) if any(p.signup_name == "Nyx" for p in r.selected))
+    gi = next(k for k, g in enumerate(fev.rosters[i].groups) if "Nyx" in g)
+    card = text_of(views.confirm_layout(reg, fev, rc.run_team(reg, fev), ico, fev.signups[str(ms[0].discord_id)], i, gi, ms[0].discord_id))
+    assert "An officer switched you to Holy for Barrow Deeps." in card and "you signed up as" not in card
+
+
+def test_a_nick_change_keeps_the_switch_on_the_person(reg, rs):
+    """Fix 12: the switch carries the member's id, so a re-answer under a new display name keeps it."""
+    lead, fev, ms = evening(reg, rs)
+    nyx = ms[0]
+    holy_for_bd(reg, rs, fev, nyx)
+    reg.rename(nyx.discord_id, "Nyxie", "t")
+    rc.set_signup(reg, rs, rs.events[lead.key], reg.members[nyx.discord_id], None, "in", source="member")
+    fev = rs.events[fev.key]
+    assert fev.signups[str(nyx.discord_id)].display_name == "Nyxie"
+    assert fev.switched["Nyxie"].spec == "Holy" and rc.plays_in(reg, fev, fev.signups[str(nyx.discord_id)]).spec == "Holy"
+    assert not any("switch dropped" in ln for ln in fev.log)

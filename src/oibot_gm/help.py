@@ -664,7 +664,8 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
     day = ev.start.astimezone(reg.tz).date().isoformat()
     fmt = CLOCK12  # 12-hour: what the asker sees in Discord and on the site
     size, n_rosters = rc.run_size(reg, ev), rc.run_rosters(reg, ev)
-    spec_of = {s.display_name: f"{s.character} {s.spec} {s.cls}" for s in ev.signups.values()}
+    # what each plays in THIS raid (rc.plays_in: a per-raid switch, an unlocked offspec seat), as needs and the health card count
+    spec_of = {s.display_name: f"{p.character} {p.spec} {p.cls}" for s in ev.signups.values() for p in [rc.plays_in(reg, ev, s)]}
     test = " · TEST EVENT (puppets + the tester only)" if team.get("test") else ""
     live = ev.state in ("open", "locked")
     head = (f"{'live event' if live else 'closed event'} {rd.get('name', ev.instance)} {reg.local12(ev.start, fmt)} ({ev.instance}, size {size}): state {ev.state}{test} · nudge {reg.local12(soft, fmt)} · lock {reg.local12(hard, fmt)} · confirmations expire {reg.local12(confirm, fmt)}"
@@ -686,7 +687,7 @@ def run_lines(reg: Registry, rs, ev, is_officer: bool = False, detail: bool = Fa
     # "not answered" = who the bot expects an answer from (the series' regulars; every main while it has none; ad hoc: nobody)
     unanswered = [m.display_name for m, _c in rc.not_answered(reg, ev)]
     whose = {"regulars": "regulars", "everyone": "everyone — no regulars set", "test": "test bench", "none": "one-off: nobody expected"}[rc.expected_from(reg, ev)]
-    ins = ev.by_status("in")
+    ins = rc.playing(reg, ev)  # as they play in this raid (the role counts agree with needs and the health card)
     out.append(f"  answers: {len(ins)} joined / {len(ev.by_status('sub'))} bench / {len(ev.by_status('out'))} no thanks / {len(unanswered)} not answered ({whose}) · {rc.pin_summary(ev)}")
     out.append("  joined by role: " + " · ".join(f"{r} {sum(1 for s in ins if s.role == r)}" for r in ROLES))
     out.append(f"  joined: {_names((f'{s.display_name} ({spec_of[s.display_name]})' for s in ins), max(MAX_LIST, size * n_rosters))}")

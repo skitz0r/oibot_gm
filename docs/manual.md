@@ -1816,12 +1816,16 @@ the board stands. With the fill the switch is fixed: the lock may leave them out
 another spec there. They need a Join or Bench answer, not a place on the board. Where:
 - the raid's board: the member's **⋮** offers each other spec their character plays (*Play as Holy in this raid*) and,
   once switched, the way back (*Play as Shadow again in this raid*);
-- **Role switches**: on an event of several raids the **Switch** box has a **For which raid?** choice inside it
-  (*Barrow Deeps* · *The whole event*). It opens on the raid when the line helps that raid alone, and on the whole
-  event when it helps every raid they play. The Signups row's *Switch: Holy* still means the whole event;
-- Discord: `/raid set` → *Play another spec* (or *Join as…*) → **Plays which spec?** → **For which raid?** (*The whole
-  event* or a raid by name);
-- plain text: "Nyx plays Holy for Barrow Deeps only" or "set Nyx to Holy in the 10-mans" switches that raid alone;
+- **Role switches**: on an event of several raids the **Switch** box has a **For which raid?** choice inside it: each
+  raid the line helps by name, then *The whole event*. It opens on the first raid the line helps when it doesn't help
+  every raid they play, else on the whole event. The Signups row's *Switch: Holy* still means the whole event;
+- Discord: `/raid set` → *Play another spec* (or *Join*) → **Plays which spec?** → **For which raid?** (*The whole
+  event* or a raid by name). For someone on Bench or with no answer, *Join* with one raid records both: they join for
+  the whole event as their own spec and play the picked spec in that raid (*"Nyx joins as Shadow and plays Holy for
+  Barrow Deeps."*). *The whole event* always replaces a switch for one raid, even with their own spec;
+- plain text: "Nyx plays Holy for Barrow Deeps only" or "set Nyx to Holy in the 10-mans" switches that raid alone (a
+  size names the raid when only one raid of the event has it; otherwise the bot names the event's raids). A Join or
+  Bench asked for in the same sentence is recorded too. A raid named without a spec is refused in the review;
   "…for the whole event", or no raid named, is the whole-event switch. A role switch is always reviewed first;
 - MCP: `set_answer` with `spec` and `raid` (its name or id; left out = the whole event).
 
@@ -1832,7 +1836,7 @@ and their Me page row for that raid (and the members' event page) says *You play
 signup sheet keeps showing their answer. Their own word wins: if they later answer with another character, or their
 answer becomes what the switch says, the switch is dropped with one line in the event's log; a Bench keeps it, a No
 thanks drops it. A later switch for the whole event replaces it, and its box says so (*"This replaces their switch
-for Barrow Deeps."*). A switch to another character uses that character's lockout for that raid. After the lock a
+for Barrow Deeps."*). A switch to another character puts that character on that raid's seat, and the loot records that character; if that character is later retired, moved to another member or no longer plays the spec, the switch is dropped with a line in the log. After the lock a
 switch is an ask for that raid, as above; after an **Unlock** the switch is back on the board with the event (if the
 locked seat was changed after the lock, the seat wins and the switch is dropped). A single-raid event has no such
 choice: a switch there is the whole event.

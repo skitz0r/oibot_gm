@@ -527,25 +527,55 @@ class RaidMixin:
         return line
 
     async def set_raid_switch(self, reg, rs, part, m, character: str, spec: str, by: str, by_id: int | None = None, *,
-                              via: str = "discord") -> str:
+                              via: str = "discord", status: str | None = None) -> str:
         """A role switch for ONE raid of an event (issue 15) — every surface's verb (the board ⋮ menu, the Role
-        switches box with "this raid", /raid set's "For which raid?", plain text, MCP `set_answer` with `raid`):
+        switches box with a raid picked, /raid set's "For which raid?", plain text, MCP `set_answer` with `raid`):
         rc.set_raid_switch writes it (or the way back to their answer) on `part` alone, with a log line naming `by`.
-        The member gets ONE notice naming the raid and the spec (never a DM; none on the officer's own line), the ops
-        feed gets the audited line, and the officer card follows. The public sheet keeps their answer. Returns a line."""
+        `status` ("in" | "sub": a Join or Bench the same press asked for — /raid set's Join, plain text's and MCP's
+        answer): when their answer on the event is not that yet, it is recorded first (the status is one per event, as
+        their answer's own spec: rc.join_character), then the switch. None = a pure switch, no answer changes. The member
+        gets ONE notice naming the raid and the spec (never a DM; none on the officer's own line), the ops feed gets the
+        audited line, and every raid's officer card of the event follows. The public sheet keeps their answer. Returns
+        a line."""
         mine = by_id is not None and int(by_id) == int(m.discord_id)
-        done = rc.set_raid_switch(reg, rs, part, m, character, spec, by)
+        first = rc.first_part(rs, part)
+        was = first.signups.get(str(m.discord_id))
+        joined = None
+        if status in ("in", "sub") and (was is None or was.status != status):
+            why = rc.raid_switch_refusal(reg, rs, part, m, character, spec, status=status)
+            if why:
+                raise RegistryError(why)
+            joined = rc.join_character(m, was, character)
+            keep = was.spec if was is not None and was.character == joined else None  # their answer's own spec stands
+            rc.set_signup(reg, rs, first, m, joined, status, source="member" if mine else "officer", spec=keep)
+            part = rs.events.get(part.key, part)
+            await self.refresh_sheet(reg, first)
         sg = part.signups.get(str(m.discord_id))
         raid = rc._raid_name(reg, part.instance)
         plays = rc._plays_words(character, spec, sg.character if sg else character)
-        what = f"switched you back to {plays}" if done == "cleared" else f"switched you to {plays}"
+        same = joined is not None and sg is not None and (sg.character, sg.spec) == (character, spec) and sg.display_name not in part.switched
+        done = None if same else rc.set_raid_switch(reg, rs, part, m, character, spec, by)
+        answer = f"set you to {rc.LABELS[status]} as {joined}" if joined else ""
+        what = (f"switched you back to {plays}" if done == "cleared" else f"switched you to {plays}") if done else ""
         if not mine:
-            rc.on_behalf_notice(reg, part, m.discord_id, what, by)
-        await ops_mod.audited(self.ops, reg, by, f"switched {m.display_name} to {plays} for {raid} alone on {run_title(reg, part)}", via=via, by_id=by_id)
-        if "health" in part.cards:
-            await self.refresh_cards(reg, part)
-        who = "You play" if mine else f"{m.display_name} plays"
-        return f"✅ {who} {plays}" + (" again" if done == "cleared" else "") + f" for {raid}"
+            rc.on_behalf_notice(reg, part, m.discord_id, " and ".join(x for x in (answer, what) if x), by)
+        if done == "cleared":
+            audit = f"switched {m.display_name} back to their answer, {plays}, for {raid} on {run_title(reg, part)}"
+        else:
+            audit = (f"set {m.display_name} to {rc.LABELS[status]} as {joined} and " if joined else "") + \
+                    (f"switched {'them' if joined else m.display_name} to {plays} for {raid} alone on {run_title(reg, part)}" if done
+                     else f"on {run_title(reg, part)}")
+        await ops_mod.audited(self.ops, reg, by, audit, via=via, by_id=by_id)
+        for p in rc.event_parts(rs, first):  # every raid's officer card: the first raid's carries the later raids' short lines
+            if "health" in p.cards:
+                await self.refresh_cards(reg, p)
+        who = "You" if mine else m.display_name
+        verb = "play" if mine else "plays"
+        tail = f"{verb} {plays} again for {raid}" if done == "cleared" else f"{verb} {plays} for {raid}"
+        if not joined:
+            return f"✅ {who} {tail}"
+        ans = ("join" if mine else "joins") if status == "in" else ("go to Bench" if mine else "goes to Bench")
+        return f"✅ {who} {ans} as {joined}" + (f" and {tail}" if done else "")
 
     async def refresh_sheet(self, reg, ev) -> None:
         team = rc.run_team(reg, ev)

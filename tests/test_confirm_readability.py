@@ -1364,6 +1364,13 @@ def box_cases(reg, rs, runs, ms, dump):
     add("raid_switch_box", "one raid", cq.raid_switch_box(reg, rs, bd, nyx, "Nyxe", "Holy"))
     add("raid_switch_box", "one raid, another character", cq.raid_switch_box(reg, rs, bd, nyx, "Nyxbear", "Guardian"))
     add("raid_switch_box", "the officer's own line", cq.raid_switch_box(reg, rs, bd, nyx, "Nyxe", "Holy", own=True))
+    rc.set_signup(reg, rs, rs.events[three.key], nyx, None, "sub", source="test")
+    bd = rs.events[bd.key]
+    add("raid_switch_box", "a Bench answer joins and is switched", cq.raid_switch_box(reg, rs, bd, nyx, "Nyxe", "Holy", status="in"))
+    add("raid_switch_box", "a Bench answer joins on another character", cq.raid_switch_box(reg, rs, bd, nyx, "Nyxbear", "Guardian", status="in"))
+    add("raid_switch_box", "the officer's own Join and switch", cq.raid_switch_box(reg, rs, bd, nyx, "Nyxe", "Holy", status="in", own=True))
+    rc.set_signup(reg, rs, rs.events[three.key], nyx, None, "in", source="test")
+    bd = rs.events[bd.key]
     rc.set_raid_switch(reg, rs, bd, nyx, "Nyxe", "Holy", by="Officer")
     bd = rs.events[bd.key]
     add("raid_switch_box", "the way back", cq.raid_switch_box(reg, rs, bd, nyx, "Nyxe", "Shadow"))

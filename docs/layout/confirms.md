@@ -69,7 +69,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        cancel_box (5, red; built for rc.cancel_target, so a part-ended event's box names the raids still to play), switch_box (6–7: locked=, swap=, own=,
                        replaces= the raids whose own switch a whole-event switch replaces — its last sentence), raid_switch_box(reg, rs, part, m,
                        character, spec, *, own, rev) = a switch for ONE raid (issue 15: what they play there and stay for the others,
-                       RAID_SWITCH_TOLD, the undo; the answer's own = the way back; refusals rc.raid_switch_refusal / RAID_SWITCH_SAME), answer_box (8, inbox.action_lines) = a thin call of
+                       RAID_SWITCH_TOLD, the undo; the answer's own = the way back; refusals rc.raid_switch_refusal / RAID_SWITCH_SAME;
+                       `status` = a Join / Bench the press records too: "Nyx joins as Shadow and plays Holy for Barrow Deeps."), answer_box (8, inbox.action_lines) = a thin call of
                        member_action_box(reg, ev, m, key, character, spec, *, by_id, rev, rs=None — with `rs` a Join with a spec says which raid's
                        own switch it replaces: action_lines(replaces=)) = THE box of whatever an officer records for
                        someone (/raid set's SetWizard, POST /api/admin/action's preview / seen, the row ⋮ menu): action_lines under

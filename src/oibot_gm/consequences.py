@@ -1603,16 +1603,34 @@ def switch_box(reg: Registry, ev: rc.RaidEvent, m, character: str | None, spec: 
     return box(f"Switch {name} to {spec}?", [head, "They get a notice.", tail], "Switch", rev=rev)
 
 
-def raid_switch_box(reg: Registry, rs, part: rc.RaidEvent, m, character: str, spec: str, *, own: bool = False, rev: str = "") -> dict:
+def raid_switch_box(reg: Registry, rs, part: rc.RaidEvent, m, character: str, spec: str, *, own: bool = False, rev: str = "",
+                    status: str | None = None) -> dict:
     """A role switch for ONE raid of an event (issue 15; rc.set_raid_switch): what they play there and what they stay
     for the other raids, who is told (a notice, never a DM), what can be undone. The character and spec of their answer
     is the way back ("plays Shadow again"). `own`: the officer's own line, said to them, nobody told. RegistryError with
     the write's refusal (rc.raid_switch_refusal, rc.RAID_SWITCH_SAME) so every surface prints that refusal box."""
-    why = rc.raid_switch_refusal(reg, rs, part, m, character, spec)
+    why = rc.raid_switch_refusal(reg, rs, part, m, character, spec, status=status)
     if why:
         raise RegistryError(why)
-    sg = part.signups[str(m.discord_id)]
     raid = _raid(reg, part.instance)
+    was = rc.first_part(rs, part).signups.get(str(m.discord_id))
+    if status in ("in", "sub") and (was is None or was.status != status):
+        # the press records their answer too (RaidMixin.set_raid_switch's `status`): both said in the first sentence
+        joined = rc.join_character(m, was, character)
+        c = next((x for x in m.active() if x.label == joined), None)
+        aspec = was.spec if was is not None and was.character == joined else (c.spec if c else spec)
+        ans = aspec if joined == character else f"{joined}, {aspec}"
+        plays = spec if joined == character else f"{character}, {spec}"
+        if own:
+            verb = "join" if status == "in" else "go to Bench"
+            head = f"You {verb} as {ans}." if (joined, aspec) == (character, spec) else f"You {verb} as {ans} and play {plays} for {raid}."
+            return box(f"Answer and switch to {spec} for {raid}?", [head, "You can change both until the lock."], "Switch", rev=rev)
+        verb = "joins" if status == "in" else "goes to Bench"
+        head = (f"{m.display_name} {verb} as {ans}." if (joined, aspec) == (character, spec)
+                else f"{m.display_name} {verb} as {ans} and plays {plays} for {raid}.")
+        return box(f"Answer for {m.display_name} and switch them to {spec} for {raid}?",
+                   [head, RAID_SWITCH_TOLD, "You can change both until the lock."], "Switch", rev=rev)
+    sg = part.signups[str(m.discord_id)]
     now = rc.plays_in(reg, part, sg)
     if (now.character, now.spec) == (character, spec):
         raise RegistryError(rc.RAID_SWITCH_SAME.format(name=m.display_name, plays=rc._plays_words(character, spec, sg.character), raid=raid))

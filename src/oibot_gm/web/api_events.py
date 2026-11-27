@@ -17,8 +17,8 @@ existing topics `run:` (any run saved), `member` and `config` (a schedule edited
 - POST /api/run/{key}/switch → one Role switches row (rc.event_switches): before the lock RaidMixin.set_answer (Join
   as that spec, on the first raid: the whole evening; a notice), after it RaidMixin.send_plan of that one seat on its
   raid (the ask). `preview` → {box}; `seen` → 409 with the fresh box; a changed plan → 409 with the fresh switches.
-  Before the lock `scope` "raid" | "event" (the box's choice, issue 15): "raid" is RaidMixin.set_raid_switch on the
-  row's raid alone.
+  Before the lock `scope` = a raid's key | "event" (the box's choice, issue 15: each raid the row helps, then the
+  whole event): a raid's key is RaidMixin.set_raid_switch on that raid alone.
 - POST /api/run/{key}/play-as → the board ⋮ menu's switch for raid `key` alone (consequences.raid_switch_box;
   RaidMixin.set_raid_switch)."""
 from __future__ import annotations
@@ -185,21 +185,23 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
             row = next((r for r in now["rows"] if (r["uid"], r["character"], r["spec"]) == (str(m.discord_id), character, spec)), None)
             if row is None:  # the raid stopped being short, or someone else covers it now
                 return gone(now)
-            # the box's scope choice (issue 15): "raid" = the row's raid alone, "event" = the answer for every raid; a
+            # the box's scope choice (issue 15): a raid's key = that raid alone, "event" = the answer for every raid; a
             # press without one is the row's own default (the box it showed)
             scope = str(d.get("scope") or row.get("scope") or "event")
-            on = rs.events.get(row["part"]) or first
+            helps = [p for k in row.get("helps") or [row["part"]] if (p := rs.events.get(k)) is not None]
             try:
                 fresh = row["box"] if scope == (row.get("scope") or "event") else (await asyncio.to_thread(
-                    lambda: rc.switch_box_for(reg, rs, on, m, character, spec, viewer=v.uid, scope=scope)))[0]
+                    lambda: rc.switch_box_for(reg, rs, helps[0] if helps else first, m, character, spec, viewer=v.uid, scope=scope, helps=helps)))[0]
             except RegistryError as e:
                 return _refused(e)
+            picked = (fresh.get("scope") or {}).get("value")
+            on = rs.events.get(picked) if picked and picked != "event" else None
             if d.get("preview"):
                 return {"box": fresh}
             if d.get("seen") and str(d["seen"]) != fresh["fp"]:
                 return JSONResponse({"error": CONFIRM_WORDS["changed"], "box": fresh}, status_code=409)
             try:
-                if (fresh.get("scope") or {}).get("value") == "raid":
+                if on is not None:  # one raid the row helps, picked in the box
                     line = await bot.set_raid_switch(reg, rs, on, m, character, spec, v.name, by_id=v.uid, via=v.via)
                 else:
                     line = await bot.set_answer(reg, rs, first, m, "in", character, v.name, by_id=v.uid, spec=spec, via=v.via)

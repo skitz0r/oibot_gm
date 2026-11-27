@@ -738,7 +738,10 @@ def confirm_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, sg, i: int,
     lines = [f"{ico('spec', f'{cls}:{spec}')} **{character}**" + (f" · Roster {i + 1}" if len(ev.all_rosters) > 1 else "") + f" · Group {gi + 1}"]
     found = reg.find(character)
     own = found[1] if found else None  # the character as registered: its main spec and offspec
-    if own is not None and spec != own.spec:  # an offspec the solver switched them to, or one they agreed to before lock
+    sw = ev.switched.get(sg.display_name)  # an officer's switch for this raid alone (issue 15): said as theirs, never the solver's
+    if sw is not None and (sw.character, sw.spec) == (character, spec):
+        lines.append(OFFICER_SWITCHED.format(spec=spec, raid=rd.get("name", ev.instance)))
+    elif own is not None and spec != own.spec:  # an offspec the solver switched them to, or one they agreed to before lock
         lines.append(f"You're rostered as **{spec}**" + (", your offspec" if spec == own.offspec else "")
                      + (" — as you agreed" if sg.spec == spec else f" — you signed up as {sg.spec}") + ".")
     head = _header(reg, ev, ("Reminder: confirm your seat" if reminder else "You're rostered") + f" · {rd.get('name', ev.instance)}", lines)
@@ -759,6 +762,7 @@ def confirm_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, sg, i: int,
     return view
 
 
+OFFICER_SWITCHED = "An officer switched you to {spec} for {raid}."  # the Confirm card of a per-raid switch's seat (issue 15)
 CONFIRM_OPEN = ("An officer unlocked the event to change the roster, so it is open for signup again. "
                 "Your answer still counts, and this question stays open until the next lock.")
 

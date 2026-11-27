@@ -3741,6 +3741,8 @@ class Registry:
             self.save(m, line)
             self.save(to, line)
             keys = rc.move_on_runs(rs, m.discord_id, to, low, c.label, series_add=set(kept_series), series_drop=left_series, by=by)
+            for who in (m, to):  # a per-raid switch to a character its owner no longer has is dropped, said in the log
+                keys += [e.key for e in rc.drop_stale_switches(self, rs, who) if e.key not in keys]
         if moved is not None:
             moved.extend(keys)
         return c
