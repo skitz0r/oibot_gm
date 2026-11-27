@@ -74,34 +74,16 @@ function useRecord(run: string, onDone: () => Promise<void> | void) {
   return [record, dialog] as const;
 }
 
-/** A role switch for this raid alone (the board ⋮ menu, issue 15): the SERVER's box (consequences.raid_switch_box
- *  through POST /api/run/{run}/play-as `preview`), then the write with the box's fp as `seen` — a member who changed
- *  meanwhile brings the fresh box back (409), a switch that no longer applies is the refusal box (400). */
+/** A role switch for this raid alone (the board ⋮ menu, issue 15): one press, no box (the owner, 2026-11-27 — the pick
+ *  says it and the same menu switches back). POST /api/run/{run}/play-as writes; the server's line is the toast, and a
+ *  switch that no longer applies is its refusal sentence. The board reloads either way. */
 function usePlayAs(run: string, onDone: () => Promise<void> | void) {
-  const [ask, dialog] = useConfirmBox(["run:", "member"]);
-  async function playAs(uid: string, o: RaidSwitchOption) {
-    const url = `/api/run/${encodeURIComponent(run)}/play-as`;
-    const body = { uid, character: o.character, spec: o.spec };
-    const preview = async (): Promise<Box> => {
-      try { return (await api.post<{ box: Box }>(url, { ...body, preview: true })).box; } catch (e) { const b = boxOf(e); if (b) return b; throw e; }
-    };
-    let reload = false;
+  return async function playAs(uid: string, o: RaidSwitchOption) {
     try {
-      let said = "";
-      const done = await ask({
-        box: await preview(),
-        refresh: preview,
-        act: async (fp) => {
-          try { said = (await api.post<{ message: string }>(url, { ...body, seen: fp })).message; return null; }
-          catch (e) { const b = boxOf(e); if (b) return b; throw e; }
-        },
-      });
-      if (done) ok(said);
-      reload = done;
-    } catch (e) { fail(e); reload = true; }
-    finally { if (reload) await onDone(); }
-  }
-  return [playAs, dialog] as const;
+      ok((await api.post<{ message: string }>(`/api/run/${encodeURIComponent(run)}/play-as`, { uid, character: o.character, spec: o.spec })).message);
+    } catch (e) { fail(e); }
+    finally { await onDone(); }
+  };
 }
 
 /** One "Move to…" destination in a board chip's menu (BoardView): a group, or Not placed / Not rostered. `onPick` is the
@@ -128,7 +110,7 @@ export function MemberMenu({ run, uid, name, onDone, moves, onAnswer, switches, 
 }) {
   const [list, setList] = useState<MemberActions | null>(null);
   const [record, dialog] = useRecord(run, onDone);
-  const [playAs, playDialog] = usePlayAs(run, onDone);
+  const playAs = usePlayAs(run, onDone);
   const raidSwitches = meta ? list?.raid_switches || [] : [];
   const load = () => { setList(null); if (uid) api.get<MemberActions>(`/api/admin/actions?run=${encodeURIComponent(run)}&member=${encodeURIComponent(uid)}`).then(setList).catch(fail); };
   return (
@@ -161,7 +143,6 @@ export function MemberMenu({ run, uid, name, onDone, moves, onAnswer, switches, 
         </Menu.Dropdown>
       </Menu>
       {dialog}
-      {playDialog}
     </>
   );
 }

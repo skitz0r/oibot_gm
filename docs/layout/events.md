@@ -43,8 +43,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        expire_confirmations, fill engine (after lock only: benched joiners + Bench first → pool → offspec → alt swaps, paired with a backfill
                        when the vacated role would go short; asks expire after fill_ask_hours). `nudge`/`nudge_hours_before`/`autofill`/`open_dm`
                        are the run dict's, seeded from its schedule at open (a run's own via reschedule). No LLM. Run states open | locked | done | cancelled; the member-facing word is "rostered", never "seated".
-                       THE run vocabulary (design §5.56 phase 2): RUN_STATE_WORDS, NO_CONFIRMATIONS, FIRST_COME, SHEET_ANSWERS (the open sheet's
-                       footer: Bench = call me if a seat would stay empty), bench_promise(reg, signup) (the Bench receipt's tail: "you may be rostered"
+                       THE run vocabulary (design §5.56 phase 2): RUN_STATE_WORDS, NO_CONFIRMATIONS, FIRST_COME (the open sheet has no legend footer: its buttons say it;
+                       the owner, 2026-11-27), bench_promise(reg, signup) (the Bench receipt's tail: "you may be rostered"
                        — others on the bench may be ahead — if a seat would otherwise stay empty — or a tank / healer short, for one who plays it — and among the first asked when one
                        opens later; never "only if": an officer may place them), BANK_WORDS (Not placed / Not rostered / Bench — the Events board's second bank section before the lock),
                        LEFTOVERS, PIN_WORDS, NOT_ANSWERED_WORDS, ASK_HOW (how an ask reaches someone), ASK_ANSWER_WORDS, fill_state_text (sentences),

@@ -436,7 +436,7 @@ function ScheduleEditor({ meta, edit }: { meta: Meta; edit: boolean }) {
     Promise.all([api.get<ScheduleList>("/api/schedules"), sid ? api.get<ScheduleView>(`/api/schedules/${encodeURIComponent(sid)}`) : Promise.resolve(null)])
       .then(([l, v]) => {
         setList(l); setView(v);
-        const first = v ? "" : l.editor.lineups[0]?.id || "";
+        const first = "";  // a new schedule starts from an empty lineup (the owner, 2026-11-27); Copy a lineup is a pick
         setFrom(first);
         const s = seedOf(l.editor, v, first);
         seed.current = s; setD(s);

@@ -6,7 +6,7 @@ nobody placed fails with rc.LOCK_EMPTY_BOARD (an event nobody answered still loc
 Automated Fill Requests for the event, and the Not rostered notice then promises no DM. A confirm deadline already
 past at any lock becomes the earlier of the start and an hour from now. The scheduler passes Auto-fill on Auto Lock;
 its failed lock as it stands waits 15 minutes like any failed lock. With Auto Lock off the sheet, the officers' card
-and the sheet's DMs say an officer locks it instead of a time."""
+and the sheet and its DMs show no lock time."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -393,7 +393,7 @@ def test_the_clocks_lock_with_auto_fill_on_passes_fill(reg, rs, monkeypatch):
 
 # ---------------------------------------------------------------- Auto Lock off: no lock time on the sheet or its DMs
 
-def test_auto_lock_off_the_sheet_card_and_dms_say_an_officer_locks_it(reg, rs):
+def test_auto_lock_off_the_sheet_card_and_dms_show_no_lock_line(reg, rs):
     bot = NightBot(reg, rs)
     ev = open_test_run(reg, rs, days=2)
     rc.reschedule(reg, rs, ev, timing={"auto_lock": False}, by="o")
@@ -401,13 +401,13 @@ def test_auto_lock_off_the_sheet_card_and_dms_say_an_officer_locks_it(reg, rs):
     team = rc.run_team(reg, ev)
     said = PAGE_WORDS["officer_locks"]
     embed, _view = sheet_message(reg, ev, team, bot.ico)
-    assert said in embed.description and "locks <t:" not in embed.description
+    assert said not in embed.description and "🔒" not in embed.description and "locks <t:" not in embed.description
     card = "\n".join(str(c.content) for c in health_layout(reg, rs, ev, team, bot.ico).walk_children() if hasattr(c, "content"))
-    assert said in card and "locks <t:" not in card
+    assert said not in card and "locks <t:" not in card
     team["open_dm"] = True
     run(bot.dm_on_open(reg, rs, ev, team))
     texts = [t for msgs in bot.dms.values() for t in msgs if isinstance(t, str)]
-    assert texts and all(said in t and "The roster locks" not in t for t in texts)
+    assert texts and all(said not in t and "The roster locks" not in t and not t.rstrip().endswith("-#") for t in texts)
     rc.reschedule(reg, rs, ev, timing={"auto_lock": True}, by="o")
     ev = rs.events[ev.key]
     embed, _view = sheet_message(reg, ev, rc.run_team(reg, ev), bot.ico)

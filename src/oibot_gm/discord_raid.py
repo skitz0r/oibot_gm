@@ -639,7 +639,7 @@ class RaidMixin:
                 continue
             s = ev.signups.get(str(m.discord_id))
             status = f"You're marked **{rc.LABELS.get(s.status, s.status)}** ({'away that day' if s.source == 'absence' else s.source})" if s else "You haven't answered yet"
-            if await self.send_member_dm(reg, m, f"{reg.config.name} · {run_label(reg, ev)} (<t:{unix}:R>). {status}. Join / Bench / No thanks:" + (f" (sheet: <#{ev.channel_id}>)" if ev.channel_id else "") + "\n-# " + dm_locks_line(reg, ev, hard), sheet_view(reg, ev.key), ev=ev):
+            if await self.send_member_dm(reg, m, f"{reg.config.name} · {run_label(reg, ev)} (<t:{unix}:R>). {status}. Join / Bench / No thanks:" + (f" (sheet: <#{ev.channel_id}>)" if ev.channel_id else "") + dm_locks_line(reg, ev, hard), sheet_view(reg, ev.key), ev=ev):
                 sent += 1
         ev.log.append(f"open DMs sent to {sent}")
         rs.save(ev, f"open DMs {sent}")
@@ -672,7 +672,7 @@ class RaidMixin:
             targets = [m for m, _c in rc.not_answered(reg, ev) if m.discord_id not in ev.nudged and not m.dm_opt_out]
             _soft, hard, _confirm = run_times(reg, ev, team)
             for m in targets:  # same buttons as the sheet (and the open DM), so they can answer right here
-                if await self.send_member_dm(reg, m, f"{reg.config.name}: the {run_label(reg, ev)} sheet is still waiting for you — Join, Bench or No thanks here or in <#{ev.channel_id}>.\n-# " + dm_locks_line(reg, ev, hard), sheet_view(reg, ev.key), ev=ev):
+                if await self.send_member_dm(reg, m, f"{reg.config.name}: the {run_label(reg, ev)} sheet is still waiting for you — Join, Bench or No thanks here or in <#{ev.channel_id}>." + dm_locks_line(reg, ev, hard), sheet_view(reg, ev.key), ev=ev):
                     ev.nudged.append(m.discord_id)
             if targets:
                 rs.save(ev, f"nudged {len(targets)}")

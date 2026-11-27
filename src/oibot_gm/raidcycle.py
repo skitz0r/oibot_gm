@@ -34,7 +34,6 @@ RUN_STATE_WORDS = {"open": "open for signup", "locked": "locked — the roster s
 NO_CONFIRMATIONS = "nobody is asked to confirm"
 # how an ad hoc run seats people (D4)
 FIRST_COME = "first come, first rostered"
-SHEET_ANSWERS = "Join = I'm coming · Bench = call me if a seat would stay empty"  # the open sheet's footer (raid_views.sheet_message)
 # the board's list of joiners who hold no seat: before the lock nobody is placed yet, after it they aren't rostered
 BANK_WORDS = {"open": "Not placed", "locked": "Not rostered", "bench": "Bench"}  # bench: the event board's second bank section before the lock
 # who the bot waits on before the lock (rc.expected_from) — the officers' box on the site and the health card

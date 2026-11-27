@@ -93,8 +93,8 @@ understands; it answers in the words below.
   (`schedule_set`, `reschedule_run`) name them `auto_lock` and `auto_lock_fill`.
   - **Auto Lock** — at the lock time, the bot locks the roster by itself. With it off, nothing happens at the lock
     time: the sheet stays open until an officer locks it (**Lock now**, the officer card, `/raid lock`, plain text or
-    MCP), and the *Details* *Locks* row says *An officer locks it.* — so do the signup sheet, the officers' card and the
-    sheet's opening and reminder DMs, instead of a lock time. A "could you come?" ask sent while the sheet is open
+    MCP), and the *Details* *Locks* row says *An officer locks it.* The signup sheet, the officers' card and the
+    sheet's opening and reminder DMs show no lock time then. A "could you come?" ask sent while the sheet is open
     stays open until the event starts, whether it went out before or after the lock time, and its DM says so. An officer's
     lock closes any still open; one nobody answered by the start counts as no, its card edited and one line in the
     event's thread. Moving the event, changing its lock time or switching Auto Lock moves every open ask's deadline
@@ -261,8 +261,7 @@ understands; it answers in the words below.
 - **#register (registration channel)** — read-only; the pinned card has four buttons: *Apply to join*
   (newcomers start here), *Register / plan my main*, *Add an alt*, *My status*. Anyone can press them. The card
   says when applications are closed and shows the recruitment note; the bot edits it in place when those change.
-- **Signup channel** — one sheet per event. An **open** sheet has **Join / Bench / No thanks** buttons (its
-  footer: *Join = I'm coming · Bench = call me if a seat would stay empty*). The sheet's title is a link to that event on the site: officers land on its event page,
+- **Signup channel** — one sheet per event. An **open** sheet has **Join / Bench / No thanks** buttons. The sheet's title is a link to that event on the site: officers land on its event page,
   everyone else on the same event on their **Events** page (§2a), with their own Join / Bench / No thanks, so you can
   answer on the site from Discord. Once the event has finished or was cancelled the page says so above the events
   still open; your loot and attendance are on the Me page. The sheet is a card: raid emblem, date and countdown, joined count and role counts,
@@ -1815,7 +1814,7 @@ them — its board, what it is short of, Auto-fill groups, Preview lock and the 
 the board stands. With the fill the switch is fixed: the lock may leave them out of that raid, never put them in
 another spec there. They need a Join or Bench answer, not a place on the board. Where:
 - the raid's board: the member's **⋮** offers each other spec their character plays (*Play as Holy in this raid*) and,
-  once switched, the way back (*Play as Shadow again in this raid*);
+  once switched, the way back (*Play as Shadow again in this raid*). One press switches them, with no box to confirm;
 - **Role switches**: on an event of several raids the **Switch** box has a **For which raid?** choice inside it: each
   raid the line helps by name, then *The whole event*. It opens on the first raid the line helps when it doesn't help
   every raid they play, else on the whole event. The Signups row's *Switch: Holy* still means the whole event;
@@ -2381,7 +2380,7 @@ picks, each a number or *Same as the raid*); the split. Each change shows as *wa
 changes** shows the Schedules page's Save box (*"Save Alt night?"* with each change and what it reaches: *"The change
 starts with the Tue 15 Dec event. The Tue 8 Dec event is already open and keeps its timing."*); **Pause**, **Resume**
 and **Remove** show theirs (Remove's verb is red: a removed schedule cannot be brought back). Pause, Resume, Remove or
-Back with changes not saved first ask *Leave without saving?* with **Discard edits** and **Keep editing**. **New schedule** asks the kind
+Back with changes not saved first ask *Leave without saving?* with **Discard edits** and **Keep editing**. **New schedule** starts from *An empty lineup* (*Copy a lineup* fills it from another schedule) and asks the kind
 (Weekly, Day N of each lockout, Opened by an officer) and a name, then opens the same screen; its box is *"Create Alt
 night?"*. A value the schedule refuses (a reminder after the lock) is the box's one sentence with Back, the draft kept.
 If someone changed the schedule meanwhile, the box is shown again under *"This changed while the box was open. Read it again before you press."*,

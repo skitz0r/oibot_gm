@@ -76,17 +76,16 @@ class BotProto(Protocol):
 # ---------------------------------------------------------------- rendering
 
 def locks_line(reg: Registry, ev: rc.RaidEvent, hard: datetime) -> str:
-    """The open sheet's and the officers' card's lock line: '🔒 locks <t:…:R>', or with Auto Lock off (issue 14) the
-    server's one sentence the Details Locks row also says (PAGE_WORDS officer_locks) — never a time that won't happen."""
-    return f"🔒 locks <t:{int(hard.timestamp())}:R>" if rc.auto_lock(reg, ev) else f"🔒 {PAGE_WORDS['officer_locks']}"
+    """The open sheet's and the officers' card's lock line: '🔒 locks <t:…:R>'. With Auto Lock off (issue 14) there is no
+    time to show and the cards say nothing ('' — the owner, 2026-11-27); the Details Locks row carries the sentence."""
+    return f"🔒 locks <t:{int(hard.timestamp())}:R>" if rc.auto_lock(reg, ev) else ""
 
 
 def dm_locks_line(reg: Registry, ev: rc.RaidEvent, hard: datetime) -> str:
-    """The opening and reminder DMs' lock sentence: when the roster locks, or with Auto Lock off the same officer_locks
-    sentence as the sheet and the Details Locks row."""
+    """The opening and reminder DMs' small last line ('\n-# …'): when the roster locks. With Auto Lock off, '' — no line."""
     if rc.auto_lock(reg, ev):
-        return f"The roster locks <t:{int(hard.timestamp())}:f>; no answer by then means you're not on it."
-    return PAGE_WORDS["officer_locks"]
+        return f"\n-# The roster locks <t:{int(hard.timestamp())}:f>; no answer by then means you're not on it."
+    return ""
 
 
 def run_times(reg: Registry, ev: rc.RaidEvent, team: dict) -> tuple[datetime, datetime, datetime]:
@@ -182,7 +181,7 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
         confirms = rc.run_confirms(reg, ev)
         e.title = f"{tag}{name}"
         e.description = (f"<t:{unix}:F> · <t:{unix}:R>" + "".join(f"\nthen {reg.follow_words({'raid': t.get('instance'), 'rosters': t.get('rosters') or 1})} <t:{int(rc.dict_start(reg, ev, t).timestamp())}:t>" for t in rc.later_dicts(reg, ev)) + f"\n**{len(ins)}** / {size * want}" + (f" · {runs} rosters" if runs > 1 else "") + "\u2003" + "\u2003".join(f"{ico('role', r)} {n}" for r, n in counts.items())
-                         + f"\n{locks_line(reg, ev, hard)}" + (f" · ✓ confirm by <t:{int(confirm.timestamp())}:f>" if confirms else ""))
+                         + "".join("\n" + x for x in [" · ".join(p for p in (locks_line(reg, ev, hard), f"✓ confirm by <t:{int(confirm.timestamp())}:f>" if confirms else "") if p)] if x))
         by_cls: dict[str, list] = {}
         for sg in ins:
             by_cls.setdefault(sg.cls, []).append(sg)
@@ -192,12 +191,12 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
         if not by_cls:
             e.add_field(name="\u200b", value="-# Nobody has joined yet.", inline=False)
         rows_field()
-        adhoc = rc.first_come_shown(reg, ev)  # the event's own seating (Edit event): first come, first rostered
-        failed = (f"Lock failed {reg.local12(ev.lock_tried_at, '%a %I:%M %p')} — the sheet stays open, retrying · " if ev.lock_error and ev.lock_tried_at
-                  else "Lock failed — the sheet stays open, retrying · " if ev.lock_error else "")
+        failed = (f"Lock failed {reg.local12(ev.lock_tried_at, '%a %I:%M %p')} — the sheet stays open, retrying" if ev.lock_error and ev.lock_tried_at
+                  else "Lock failed — the sheet stays open, retrying" if ev.lock_error else "")
         pins = rc.pin_counts(ev)  # numbers only (who is officer data): 'Pinned: 2 · Kept off: 1'
-        e.set_footer(text=failed + ("test event · " if test else "") + (rc.FIRST_COME.capitalize() + " · " if adhoc else "") + rc.SHEET_ANSWERS
-                     + (f" · {pins}" if pins else ""))
+        foot = " · ".join(p for p in (failed, "test event" if test else "", pins) if p)  # no legend: the buttons say it (the owner, 2026-11-27)
+        if foot:
+            e.set_footer(text=foot)
         return e, sheet_view(reg, ev.key)
     # locked | done: the roster(s) as the board shows them, a group per column
     rosters = ev.all_rosters
@@ -605,7 +604,7 @@ def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico, officer:
     sug = suggested_block(reg, ico, plan) if plan else ""
     if sug:
         parts += [ui.TextDisplay(sug), suggest_row(reg, ev, plan), ui.Separator()]
-    parts.append(ui.TextDisplay(locks_line(reg, ev, hard) + (f" · ✓ confirm by <t:{int(confirm.timestamp())}:f>" if rc.run_confirms(reg, ev) else f" · {rc.NO_CONFIRMATIONS}")))
+    parts.append(ui.TextDisplay(" · ".join(p for p in (locks_line(reg, ev, hard), f"✓ confirm by <t:{int(confirm.timestamp())}:f>" if rc.run_confirms(reg, ev) else rc.NO_CONFIRMATIONS) if p)))
     if officer:
         parts.append(run_actions_row(reg, ev, locked=False))
     worst = "red" if short or (plan and plan.short["roles"]) else "amber" if missing or waiting else "green"

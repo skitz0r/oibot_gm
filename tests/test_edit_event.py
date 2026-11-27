@@ -218,11 +218,11 @@ def _footer(reg, ev):
     from oibot_gm import raid_views
 
     e, _v = raid_views.sheet_message(reg, ev, rc.run_team(reg, ev), lambda *a, **k: "")
-    return e.footer.text, e.to_dict()
+    return e.footer.text or "", e.to_dict()
 
 
 def test_the_first_come_words_follow_the_events_own_seating(reg, rs):
-    """The sheet footer, the member's status line, the Me page's queue note and the help snapshot read the event's own
+    """The member's status line, the Me page's queue note and the help snapshot read the event's own
     seating (rc.first_come_shown), so switching it either way changes what every surface says."""
     from oibot_gm.help import run_lines
     from oibot_gm.web.api_me import sheet_row_extras
@@ -230,8 +230,8 @@ def test_the_first_come_words_follow_the_events_own_seating(reg, rs):
     one = open_one_off(reg, rs)
     m = real_people(reg, 1)[0]
     join(reg, rs, one, [m])
-    first_words = rc.FIRST_COME.capitalize()
-    assert first_words in _footer(reg, one)[0] and rc.FIRST_COME in rc.answer_receipt(reg, one, m)
+    first_words = rc.FIRST_COME.capitalize()  # never on the sheet: it has no legend footer (the owner, 2026-11-27)
+    assert first_words not in _footer(reg, one)[0] and rc.FIRST_COME in rc.answer_receipt(reg, one, m)
     assert sheet_row_extras(reg, one, m, rs)["queue_note"] and "first come" in " ".join(run_lines(reg, rs, one, True, True))
     rc.reschedule(reg, rs, one, timing={"first_come": False}, by="o")
     assert first_words not in _footer(reg, one)[0] and rc.FIRST_COME not in rc.answer_receipt(reg, one, m)
@@ -241,7 +241,7 @@ def test_the_first_come_words_follow_the_events_own_seating(reg, rs):
     join(reg, rs, ev, [m])
     assert first_words not in _footer(reg, ev)[0]
     rc.reschedule(reg, rs, ev, timing={"first_come": True}, by="o")
-    assert first_words in _footer(reg, ev)[0] and rc.FIRST_COME in rc.answer_receipt(reg, ev, m)
+    assert first_words not in _footer(reg, ev)[0] and rc.FIRST_COME in rc.answer_receipt(reg, ev, m)
     assert sheet_row_extras(reg, ev, m, rs)["queue_note"] and "· first come" in " ".join(run_lines(reg, rs, ev, True, True))
 
 

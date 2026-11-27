@@ -190,7 +190,7 @@ def test_adhoc_expects_nobody_and_reminds_nobody(reg, rs):
     body = text_of(views.health_layout(reg, rs, ev, rc.run_team(reg, ev), ico))
     assert "No answer" not in body and rc.NO_CONFIRMATIONS in body
     embed, _ = views.sheet_message(reg, ev, rc.run_team(reg, ev), ico)
-    assert embed.footer.text.startswith("First come, first rostered") and "confirm by" not in embed.description
+    assert not embed.footer.text and "confirm by" not in embed.description  # no legend footer on the sheet
 
 
 def test_adhoc_without_confirmations_asks_nothing_and_expires_nothing(reg, rs):
