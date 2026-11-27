@@ -1512,6 +1512,32 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
      Ticked, it says *"Everyone rostered who wasn't asked before gets the Confirm or Can't make it DM."*, or counts them
      when the board is the whole roster (*"The 2 newly rostered get …"*, *"Nobody new is asked to confirm."*). A first
      lock reads as before.
+
+   **Start now** starts a locked event this minute, before its scheduled start — for a raid that forms early, so it can
+   end when you are done. The first raid's start becomes the current minute (the seconds dropped) and every later raid of
+   the event moves by the same amount. It works for any locked event, test or not, until its start; it is refused, one
+   sentence each, for an event still open (*"This event is still open for signup, so lock it before starting it now."*),
+   once it has started (*"This event has already started, so there is nothing to start."*), ended or cancelled.
+   - **Where.** **Start now** in the event's **More** menu on the Events page (once, right under the greyed **End the
+     event** whose note says it hasn't started) and beside that greyed **End the event** on the sheet card; on Loot ›
+     Tonight beside End's refusal for a locked event with no council open; on the Discord lock card's second row (greyed
+     once the event has started), on **End the event**'s *"The event hasn't started yet…"* screen (a **Start now** button
+     beside Back) and `/raid start` (it asks which event when several are locked); plain text *"start tonight's raid
+     now"*, *"we're starting"* or *"start the raid"* (always reviewed first; *"start a sheet"* still opens a signup sheet
+     and *"start the loot council"* still opens the council); MCP `start_now`.
+   - **It asks first**, the same box everywhere, titled *Start the Wed 9 Dec 10:20 PM event now?*: *"The start moves to
+     this minute."* (an event of several raids: *"The start moves to this minute, and the later raids move by the same
+     amount."*), then *"The 10 who answered each get a notice, and nobody gets a DM."* — or, while confirmations are
+     unanswered, *"The 10 who answered each get a notice, and 3 confirmation asks keep their deadline."* —, then *"A
+     started event can't be moved back or edited."* If anything it counts changes while the box is open, the fresh box
+     is shown instead.
+   - **Confirmations stay open.** The confirmation deadline does not move, so an unanswered Confirm / Can't make it ask
+     keeps the deadline it had and nobody loses a seat because of Start now.
+   - **Who is told.** Everyone who answered gets the same *moved* notice a Reschedule sends (Me page, `/me view`); the
+     sheet, the lock cards and every open Confirm or fill-ask card are edited in place to the new time. Nobody gets a DM.
+     One line in the event's thread and one audit line say who started it.
+   - **Afterwards** the event has started like any other: **End the event** works, **Reschedule**, **Edit event** and
+     **Unlock** are closed, and a new fill ask closes at once because its deadline is the start.
 5. **Confirmation deadline** — `confirm_hours_before` [6 h] before the slot, anyone who hasn't answered
    counts as out; their seat is released and their confirmation card is edited to say so (never a new DM). Only someone who
    was actually asked can time out: a seat whose confirmation never went out (an interrupted lock) is never freed for
@@ -1560,7 +1586,8 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    ("Asking for open seats — waiting for answers (1 on the site)."; a closed event's is "The event is finished.").
 7. **Raid** — `/raid loot` (or the lock card's **Loot**, or Loot › Tonight on the site) opens the loot council;
    `/raid end` ends that raid and its council (§9) — so does **End the event** on the lock card's second row and on the
-   site's locked event (**More › End the event**), both after the scheduled start and both through one confirm screen with the same sentence
+   site's locked event (**More › End the event**), both after the scheduled start (before it: *"The event hasn't started
+   yet. Before the start, use Cancel instead."*, with **Start now** beside it — §Lock) and both through one confirm screen with the same sentence
    (*"Barrow Deeps on Wed 9 Dec is finished and its loot council closes with 6 awards and 1 override. The summary posts in the council's
    thread. Reopen works for an hour if this was a mistake."*; with no council: *"Barrow Deeps on Wed 9 Dec is finished. The sheet and the
    lock card close and no more fill asks go out. Reopen works for an hour if this was a mistake."*). Ended by mistake? The closed
@@ -1769,7 +1796,7 @@ then on the right — before the lock **Suggest…** · **Preview lock** · **Lo
 **⋮ menu** (top right) holds *Re-post sheet…*. The board's own tools sit above the groups: **Place the rest**, *Propose
 roster/splits…*, and *Clear* set apart. Officer cards in Discord use the same fixed order — Open the board · Lock now ·
 Fill seats… · Loot · Cancel event… (the *Suggested* block has its own row: **Ask** · **Suggest…**), and the lock card adds
-a second row: **Remind the unanswered** · **Pause Automated Fill Requests** · **End the event**. **One confirm screen, the same
+a second row: **Remind the unanswered** · **Pause Automated Fill Requests** · **Start now** · **Unlock** · **End the event**. **One confirm screen, the same
 words everywhere.** Before a lock, a cancel, clearing the test bench, deciding an application or approving / dismissing
 a news proposal, the bot shows one sentence computed from the event as it stands — for a lock: *"Everyone on the board keeps
 their place, and the lock fills the open slots from Not placed. 16 of the 18 rostered get the Confirm or Can't make it DM and 2 see it on the site. They have until Tue 9 Dec
@@ -1941,7 +1968,7 @@ edits that new family and leaves the one it shared alone.
   goes and what stays: *"Orrin's record goes, with Wrenna, their absences, wishlists and notices. Loot already awarded
   stays in the ledger, and nobody gets a DM. …"*); in Discord `/roster remove-record member:`; MCP `remove_record`. Refused
   while they're still in the server or hold a seat on a live event. Members can't delete their own record.
-- Events: `/raid open|sheet|health|fill|lock|unlock|set|cancel|reschedule|edit|lineup|list|loot|distribute|end` (officers) and `/raid out` (anyone).
+- Events: `/raid open|sheet|health|fill|lock|unlock|start|set|cancel|reschedule|edit|lineup|list|loot|distribute|end` (officers) and `/raid out` (anyone).
   `/raid reschedule` moves an event to a day and time picked from lists, and `/raid edit` changes the event's own settings
   (§4 *Moving an event, and its own sheet timing*); `/raid lineup` changes its raids before the lock (§4 *Changing the raids
   of an open event*).
@@ -2402,7 +2429,8 @@ next unopened events, so "groups for tonight" and "open Saturday's alt night" st
   first-roster-first" (balanced / first / rotation); "auto-fill the board for bd-…" (before lock); "remind the
   unconfirmed for tonight" (once an hour); "pause Automated Fill Requests on tonight's event" / "resume Automated Fill Requests" (every raid of the event); "lock and fill tonight's event" ("lock …" alone locks as the board stands); "withdraw the ask
   to Kestrel"; "reopen bd-k7m2qx" (an end by mistake, within the hour — never a cancelled event); "unlock tonight's event" /
-  "undo the lock" (a locked event back to open signup, its rosters on the board — always reviewed first).
+  "undo the lock" (a locked event back to open signup, its rosters on the board — always reviewed first); "start
+  tonight's raid now" / "we're starting" (a locked event starts this minute — always reviewed first).
 - *The board:* "move Ash to group 3" / "put Ash in 2.1" (roster 2, group 1) / "bench Ash" / "swap Ash and Dusk" —
   one person, like a drag (after lock: in from *Not rostered* = asked to confirm, out to it = seat freed); "groups for
   bd-…: Ash, Bright, Cinder | Dusk, Ember" sets the whole board — the layout the lock will use, or after lock the roster
@@ -2740,7 +2768,7 @@ news post says can make the review read or write another server.
 | `set_answer` · `pin` · `confirm_for` · `fill_answer` | Join / Bench / No thanks for someone (character swap; `out` is *Can't make it* — a callout like `/raid out` — unless `callout=false`, which is a plain No thanks with no record; a `note` goes with a callout only and is for officers) · pin in/out for the lock · answer a Confirm ask for them · answer a fill ask (seat or swap) for them. The member gets a notice on their Me page, never a DM |
 | `member_inbox` | a member's open asks (where each waits: DM or the site, its deadline) and notices, as their Me page shows them |
 | `propose_split` · `set_strategy` · `autofill` · `set_layout` | preview a split (nothing saved; says why there can't be more rosters and who is left over) · remember the strategy · the bot builds the groups on the board · set the groups (pass `rev` from `get_run`: a board someone changed since is refused, not overwritten) |
-| `remind_unconfirmed` · `pause_autofill` · `withdraw_ask` · `reopen_run` · `unlock_run` | the Confirm / Can't DM again to the unconfirmed (once an hour per event) · pause (`paused=true`) or resume the fill engine for every raid of one event · close an ask already sent to a member (their card says never mind) · undo an end by mistake within the hour (never a cancelled event) · a locked event back to open signup with its rosters on the board, before its start (nobody is DMed; fill asks withdrawn; Auto Lock off) |
+| `remind_unconfirmed` · `pause_autofill` · `withdraw_ask` · `reopen_run` · `unlock_run` · `start_now` | the Confirm / Can't DM again to the unconfirmed (once an hour per event) · pause (`paused=true`) or resume the fill engine for every raid of one event · close an ask already sent to a member (their card says never mind) · undo an end by mistake within the hour (never a cancelled event) · a locked event back to open signup with its rosters on the board, before its start (nobody is DMed; fill asks withdrawn; Auto Lock off) · a locked event starts this minute, before its start (confirmation deadlines stay; nobody is DMed) |
 | `lock_run` · `fill_seats` · `cancel_run` · `repost_sheet` | lock now (`autofill=false`, the default: exactly the board, refused with nobody on it; `autofill=true`: fill the empty slots) · preview who would be asked (before lock the suggestions, after lock the seats to fill — `plan.seats` with alternates and a `why`, `plan.lines`, `plan.batch_lines` = exactly what a send DMs, `plan.rev`), then `send=true` with the preview's `rev` sends exactly that batch (`picks` {seat: option} for an alternate; a changed plan is refused; without a `rev` a send is refused before lock, and after lock whenever the batch holds a role swap) · cancel with a reason (nobody is DMed: every open ask card says Cancelled and a fixed line goes to the signup channel unless `notify=false`; the reason stays with officers) · post a fresh copy of the sheet (the signup channel, or a channel you name) |
 | `raid_set` · `raid_reset` | a raid's own settings — one, or several as `fields` in one write (slots, weights, lockout and length, split policy, notes, first open; sheet timing is `schedule_set`'s, a minimum `set_minimum`'s) · back to defaults — the raid's schedules go too, so pass the preview's `revs` back: a schedule added or changed since is refused, never removed unseen |
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs (one field, or several as `fields` in one write; `family_new` = a new family by name) and stacking families (`value` = the whole map as an object, `value:<key>` = one beneficiary; no `family` + a `name` = a new family, its id made from the name) |
@@ -2968,7 +2996,10 @@ the summary in the thread (the awards, the overrides and anything left undecided
 never distributed, awards still waiting for a reason — so nothing anyone decided disappears), turns the card into the
 summary, archives the thread, marks the raid done and redraws its sheet and lock card closed. On every surface only a
 locked event ends (*"No locked event to end."*), and not while a Distribute is judging (*"Distributing already (…) — wait
-for it, or retry End"*). The bot ends a council by itself only after its raid's scheduled end, once it has been idle
+for it, or retry End"*). A locked event with no council open ends only after its scheduled start, on every surface —
+the lock card, `/raid end`, the site, Loot › Tonight, plain text and MCP `end_loot` alike (*"The event hasn't started yet.
+Before the start, use Cancel instead."*, with **Start now** beside it); with a council open End works before the start
+too. The bot ends a council by itself only after its raid's scheduled end, once it has been idle
 for 30 minutes with no pick waiting for Confirm and no drop nobody judged — after one *"closing in 15 min"* notice with
 **Keep open**. If picks or drops still wait, it says so once in the thread and leaves the council open for an officer;
 the raid itself is over either way (no more fill asks, nobody shows as rostered on it).

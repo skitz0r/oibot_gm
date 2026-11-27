@@ -697,6 +697,16 @@ def unlock_run(run: str, guild: Guild = None) -> str:
 
 
 @mcp.tool()
+def start_now(run: str, guild: Guild = None) -> str:
+    """Start a LOCKED event now, before its scheduled start: its first raid starts this minute and later raids move by
+    the same amount, so End is allowed (end_loot). Every confirmation deadline stays as it was, so no seat is freed.
+    Everyone who answered sees a "moved" notice, the sheet and cards are edited, nobody is DMed. A started event can't
+    be rescheduled, edited or unlocked. Refused while it is still open, once it has started, and for an ended event.
+    Look first (get_run)."""
+    return msg(api(guild).post(f"/api/run/{run}/start"))
+
+
+@mcp.tool()
 def confirm_for(run: str, member: str, yes: bool = True, guild: Guild = None) -> str:
     """Answer a member's Confirm / Can't make it ask on their behalf (yes = confirmed, no = can't make it, which frees
     the seat). Same ripple as the member pressing the button; use it when they told you out of band."""
@@ -1512,7 +1522,8 @@ def loot_discard(run: str, only: list[str] | None = None, batch_rev: str | None 
 def end_loot(run: str, preview: bool = False, guild: Guild = None) -> str:
     """End the run and its loot council(s) — what /raid end does: the summary (awards, overrides, anything left
     undecided) is archived and posted, the run is marked done. `preview=true` returns the sentence ("End …: 6 awards,
-    1 override, 2 drops never distributed") without ending; show it to the person first."""
+    1 override, 2 drops never distributed") without ending; show it to the person first. A locked event with no loot
+    council open is refused before its start ("The event hasn't started yet…"): start_now first, or cancel it."""
     data = api(guild).post(f"/api/loot/{run}/end", {"preview": True} if preview else {})
     return str(data.get("preview") or msg(data))
 

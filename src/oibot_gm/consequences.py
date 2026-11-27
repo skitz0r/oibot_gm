@@ -1423,6 +1423,45 @@ def unlock_box(reg: Registry, ev: rc.RaidEvent, rs) -> dict:
                rev=f"{rc.event_rev(reg, rs, ev)}|{asks}|{fills}")
 
 
+START_NOW_VERB = "Start now"
+START_NOW_FIXED = "A started event can't be moved back or edited."
+
+
+def start_now_facts(reg: Registry, ev: rc.RaidEvent, rs) -> tuple[int, int, int]:
+    """What a Start now (rc.start_now) touches, read BEFORE it: (raids of the event that move, people who get the
+    `moved` notice — rc.answered_ids on the first raid, as rc.reschedule tells them, confirmation asks still open on the
+    event's locked raids, which keep their deadline)."""
+    first = rc.first_part(rs, ev)
+    parts = [p for p in rc.event_parts(rs, first) if p.state not in ("done", "cancelled")]
+    asks = sum(len(rc.open_placement_rows(reg, p)) for p in parts if p.state == "locked")
+    return len(parts), len(rc.answered_ids(first)), asks
+
+
+def _start_now_told(told: int, asks: int) -> str:
+    """Who is told at a Start now: who answered gets the moved notice; then the open confirmation asks, which keep
+    their deadline (the owner's ruling) — else that nobody gets a DM."""
+    who = "" if told == 0 else "The one who answered gets a notice" if told == 1 else f"The {told} who answered each get a notice"
+    if asks:
+        kept = f"{_n(asks, 'confirmation ask')} {'keeps its' if asks == 1 else 'keep their'} deadline"
+        return f"{who}, and {kept}." if who else f"Nobody gets a DM, and {kept}."
+    return f"{who}, and nobody gets a DM." if who else "Nobody gets a DM."
+
+
+def start_now_box(reg: Registry, ev: rc.RaidEvent, rs) -> dict:
+    """Start a locked event now (issue 14; RaidMixin.start_now): what changes (the start moves to this minute, the later
+    raids by the same amount), who is told (_start_now_told: the moved notice, the confirmation asks that keep their
+    deadline), what can't be undone (START_NOW_FIXED: a started event is never moved or edited). Not red. Refused
+    (rc.start_now_refusal: still open, started, ended, cancelled) → the refusal box, Back alone. Its fp carries
+    rc.event_rev and the counts it printed."""
+    if (why := rc.start_now_refusal(reg, rs, ev)) is not None:
+        return refusal_box_for(why)
+    raids, told, asks = start_now_facts(reg, ev, rs)
+    head = ("The start moves to this minute, and the later raids move by the same amount." if raids > 1
+            else "The start moves to this minute.")
+    return box(f"Start the {event_title(reg, ev)} event now?", [head, _start_now_told(told, asks), START_NOW_FIXED], START_NOW_VERB,
+               rev=f"{rc.event_rev(reg, rs, ev)}|{told}|{asks}")
+
+
 BOARD_MOVE_TITLES = {"move": "Move {name}?", "roster": "Put {name} on the roster?", "swap": "Swap {name} and {other}?",
                      "substitute": "Put {name} in {other}'s seat?", "release": "Take {name} off the roster?"}
 BOARD_MOVE_VERBS = {"move": "Move", "roster": "Put on the roster", "swap": "Swap", "substitute": "Put in the seat",

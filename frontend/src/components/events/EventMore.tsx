@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ActionIcon, Menu, Modal, Text, Tooltip } from "@mantine/core";
-import { IconBell, IconDiamond, IconDots, IconEraser, IconFlagCheck, IconListCheck, IconLockOpen, IconPlayerPause, IconPlayerPlay, IconRotate, IconSend, IconUsersPlus } from "@tabler/icons-react";
+import { IconBell, IconDiamond, IconDots, IconEraser, IconFlagCheck, IconListCheck, IconLockOpen, IconPlayerPause, IconPlayerPlay, IconPlayerTrackNext, IconRotate, IconSend, IconUsersPlus } from "@tabler/icons-react";
 import { api, type Box, type EventView, type Meta, type Sheet } from "../../api";
 import { useConfirmBox } from "../ConfirmBox";
 import { boxOf as boxOf_ } from "./shared";
@@ -20,7 +20,8 @@ import css from "../board/board.module.css";
  *  the board (every open raid's groups back to Not placed, the server's box — consequences.clear_board_box). Each raid's split
  *  moved to Edit event (the owner's tweaks, B) with the event's other own settings. Each verb is named as
  *  on Discord (meta.run_labels); what can't be pressed is greyed with the server's reason under it; Remind and End ask
- *  first with the server's box (remind_box, end_box); Unlock (issue 14) once for the whole event, with unlock_box; the fill and
+ *  first with the server's box (remind_box, end_box); Unlock and Start now (issue 14) once for the whole event, with unlock_box and
+ *  start_now_box — Start now sits right under the first raid's greyed End whose note says it hasn't started; the fill and
  *  re-post screens are the board's own. Nothing here composes a sentence. */
 export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; onChanged: () => void }) {
   const [ask, dialog] = useConfirmBox(["run:", "loot"]);
@@ -59,6 +60,7 @@ export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; 
   const clear = () => boxed(`/api/event/${encodeURIComponent(ev.key)}/clear`);
   const end = (s: NightSheet) => boxed(`/api/loot/${encodeURIComponent(s.key)}/end`);
   const unlock = (s: NightSheet) => boxed(`/api/run/${encodeURIComponent(s.key)}/unlock`);
+  const start = (s: NightSheet) => boxed(`/api/run/${encodeURIComponent(s.key)}/start`);
 
   /** one raid's items */
   const items = ({ p, s }: (typeof parts)[number], i: number) => {
@@ -77,6 +79,9 @@ export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; 
         out.push(<Menu.Item key={`${p.key}:asks`} leftSection={<IconListCheck size={14} />} onClick={() => setAsks(s)}>Asks and callouts…</Menu.Item>);
       }
       if (locked) out.push(<Menu.Item key={`${p.key}:end`} color="red" leftSection={<IconFlagCheck size={14} />} disabled={!s.may_end} onClick={() => end(s)}>{L.end}{why(s.may_end ? null : s.end_note)}</Menu.Item>);
+      // Start now acts on the whole event (RaidMixin.start_now): once, right under the first raid's greyed End whose note
+      // says it hasn't started, while the server offers it (locked, before the start); the box is consequences.start_now_box
+      if (i === 0 && s.may_start) out.push(<Menu.Item key="start" leftSection={<IconPlayerTrackNext size={14} />} onClick={() => start(s)}>{L.start}</Menu.Item>);
     } else if (s.state === "done" && (s.may_reopen || s.reopen_note)) {
       // an END by mistake goes back to locked within the hour (rc.reopen_refusal); a cancelled event never reopens
       out.push(<Menu.Item key={`${p.key}:reopen`} leftSection={<IconRotate size={14} />} disabled={!s.may_reopen} onClick={() => post(`/api/run/${encodeURIComponent(s.key)}/reopen`)}>{L.reopen}{why(s.may_reopen ? null : s.reopen_note)}</Menu.Item>);

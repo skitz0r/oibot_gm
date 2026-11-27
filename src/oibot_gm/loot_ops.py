@@ -232,6 +232,10 @@ def describe(reg: Registry, op, *, why: str | None = None) -> str:
     if f == "end":
         if ev.state != "locked" and not sessions:  # LootMixin.end_run's rule, refused at the diff already (every surface)
             raise RegistryError("No locked event to end." if ev.state not in ("done", "cancelled") else f"{title} is already {ev.state}.")
+        from .raidcycle import end_refusal
+
+        if not sessions and (why := end_refusal(ev)):  # before the start, as every End (issue 14): Start now first
+            raise RegistryError(why)
         n_aw = sum(1 for s in sessions for a in s.awards if not a.void)
         n_p = sum(len(s.proposals) for s in sessions)
         n_u = sum(len(s.undistributed()) for s in sessions)

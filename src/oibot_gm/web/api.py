@@ -1080,6 +1080,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         reopen_no = rc.reopen_refusal(reg, ev) if ev.state in ("done", "cancelled") else None
         first_locked = rc.first_part(rs, ev).state == "locked"  # Unlock is offered while the event's first raid is locked
         unlock_no = rc.unlock_refusal(reg, rs, ev) if first_locked else None
+        start_no = rc.start_now_refusal(reg, rs, ev) if first_locked else None  # Start now: the same while, before the start
         return {"lock_error": failed,
                 "fill_state_text": rc.fill_state_text(reg, ev),
                 "short_why": rc.short_why(reg, ev),  # the clause after the short line's role icons (asks out / who hasn't answered)
@@ -1096,6 +1097,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "may_end": end_no is None, "end_note": end_no,
                 "may_reopen": ev.state == "done" and reopen_no is None, "reopen_note": reopen_no,
                 "may_unlock": first_locked and unlock_no is None, "unlock_note": unlock_no,
+                "may_start": first_locked and start_no is None,
                 "closed_at": t12(reg, ev.closed_at) if ev.closed_at else None}
 
     def discord_url(reg, channel_id, message_id=None) -> str | None:
@@ -1913,6 +1915,29 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             return r
         try:
             line = await bot.unlock_run(v.reg, rs, ev, by=v.name, by_id=v.uid, via=v.via)
+        except RegistryError as e:
+            return box_refused(e, 409)
+        return {"message": rc.site_words(v.reg, line)}
+
+    @app.post("/api/run/{key}/start")
+    async def run_start(request: Request, key: str):
+        """Start a locked event now (issue 14; RaidMixin.start_now): its start becomes this minute, later raids move with
+        it, every confirm-by stays; nobody is DMed. Asks first (§7b): `preview` → {box} (consequences.start_now_box,
+        nothing written); `seen` = its fp → 409 with the fresh box when it changed while open, 400 with the refusal box
+        (rc.start_now_refusal) when it can't go. No `seen` (MCP): the start itself, its refusal a 400. Any raid's key
+        answers for its event; start_now writes the audit line."""
+        v, d = await body(request, officer=True)
+        rs = bot.raids.store(v.reg)
+        ev = rs.events.get(key) or find_live(v.reg, rs, key)  # an ended event, named by its key, answers with its refusal box
+        fresh = cq.start_now_box(v.reg, ev, rs)
+        if fresh["verb"] is None:
+            return box_refused(fresh["sentences"][0])
+        if d.get("preview"):
+            return {"box": fresh}
+        if (r := box_stale(d, fresh)) is not None:
+            return r
+        try:
+            line = await bot.start_now(v.reg, rs, ev, by=v.name, by_id=v.uid, via=v.via)
         except RegistryError as e:
             return box_refused(e, 409)
         return {"message": rc.site_words(v.reg, line)}

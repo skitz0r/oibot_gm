@@ -190,6 +190,10 @@ Runs (officer; target = the event key like bd-k7m2qx from the live-events list, 
     ("unlock tonight's raid", "reopen the roster for Tuesday", "undo the lock", "put it back to signup"); answers and
     open confirmation asks stay, fill asks are withdrawn, Auto Lock goes off so an officer locks it again. Never for an
     event that ended (that is run_reopen).
+  run_start: target — a LOCKED event starts NOW, before its scheduled start ("start tonight's raid now", "we're starting",
+    "start the raid", "we're starting early"): its start becomes this minute and its later raids move with it, so it can end
+    when they are done; confirmation deadlines stay. Never for opening a signup sheet (that is run_open: "start a sheet",
+    "start signups for Tuesday") nor for the loot council (that is loot field=open: "start the loot council").
   run_fill: target, value=preview|send — who could cover the run's shortfall. Before lock ("suggest fixes for Tuesday's run",
     "who could tank?"): the planner's suggestions for the tank/healer minimums (cheapest first, with alternates) — preview
     shows them, send DMs those people a Yes/No ask ("send them", "ask them"). After lock: the asks a send would DM (role
@@ -263,7 +267,7 @@ class ConfigOp(BaseModel):
     # with no field at all (2026-10-30: "remove enchanting from Jonster" → a bare character op), every time.
     # Keep this schema small (≤13 fields): the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (target/field/value/reason) rather than adding their own.
-    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, confirm_for, run_remind, run_pause, run_withdraw, run_reopen, run_unlock, run_reschedule, run_lineup, character, absence_clear, dm, regular, test, recruit, application, proposal, job, policy, plain, loot, wishlist, tier, loot_weights")
+    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, confirm_for, run_remind, run_pause, run_withdraw, run_reopen, run_unlock, run_start, run_reschedule, run_lineup, character, absence_clear, dm, regular, test, recruit, application, proposal, job, policy, plain, loot, wishlist, tier, loot_weights")
     member: Optional[str] = Field(default=None, description="member display name, mention <@id>, or one of their character names; empty = the requester; application: the applicant")
     character: Optional[str] = Field(default=None, description="a character name: the one to act on (character, rank, confirm, set_main) or the one they'd play (run_answer); empty on character add = a planned character")
     path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|loot_channel|loot_log|public|news_keywords|ask_audience|about|error_dms")
@@ -521,7 +525,7 @@ CHANNEL_PATHS = ("signup_channel", "ops_channel", "applications_channel", "roste
 
 
 RUN_OPS = {"run_open", "run_answer", "run_lock", "run_cancel", "run_fill", "run_strategy", "run_autofill", "run_board", "run_move", "run_propose", "run_sheet", "confirm_for",
-           "run_remind", "run_pause", "run_withdraw", "run_reopen", "run_unlock", "run_reschedule", "run_lineup"}
+           "run_remind", "run_pause", "run_withdraw", "run_reopen", "run_unlock", "run_start", "run_reschedule", "run_lineup"}
 # a run's start, timing and lineup (phase 3): Apply passes the run's rc.event_rev seen at preview (a changed run is refused)
 EVENT_OPS = {"run_reschedule", "run_lineup"}
 # the ops that write a run's board: Apply passes the board fingerprint seen at preview (a changed board is refused)
@@ -539,6 +543,7 @@ OP_GROUP = {
     "run_autofill": "runs", "run_board": "runs", "run_move": "runs", "run_propose": "runs", "run_sheet": "runs", "confirm_for": "runs",
     "run_remind": "runs", "run_pause": "runs", "run_withdraw": "runs", "run_reopen": "runs",  # raid-night levers (phase 2 A, D15/D18/B6)
     "run_unlock": "runs",  # issue 14: a locked event back to open signup, its rosters on the board
+    "run_start": "runs",  # issue 14: a locked event starts this minute
     "run_reschedule": "runs", "run_lineup": "runs",  # move / re-time a run, change its raids (phase 3; officers live, C17)
     "pin": "runs",  # D16: a pin is a run decision (who the lock seats), not comp policy
     "comp_target": "comp", "comp_target_clear": "comp", "comp_groups": "comp", "policy_append": "comp",
@@ -1789,7 +1794,7 @@ PIN_NOW = {"in": "pinned to the roster", "out": "kept on the bench"}  # what a m
 ACTION_WORDS = {"run_open": "Open", "run_answer": "An answer on", "run_lock": "Lock", "run_cancel": "Cancel", "run_fill": "Fill seats on",
                 "run_strategy": "The split on", "run_autofill": "Auto-fill", "run_board": "The board of", "run_move": "A board move on",
                 "run_propose": "Proposed groups for", "run_sheet": "The sheet of", "confirm_for": "A confirmation on", "run_remind": "A reminder on",
-                "run_pause": "Automated Fill Requests on", "run_withdraw": "Withdrawing an ask on", "run_reopen": "Reopen", "run_unlock": "Unlock",
+                "run_pause": "Automated Fill Requests on", "run_withdraw": "Withdrawing an ask on", "run_reopen": "Reopen", "run_unlock": "Unlock", "run_start": "Start now",
                 "run_reschedule": "Move", "run_lineup": "The raids of", "pin": "A pin on",
                 "character": "Characters", "absence_clear": "An absence", "dm": "DMs", "regular": "Regulars", "test": "Test bench",
                 "loot": "Loot council", "wishlist": "Wishlist", "tier": "Item tiers", "loot_weights": "Loot scoring",
@@ -1808,7 +1813,7 @@ def refused_line(reg: Registry, op: ConfigOp, e: Exception) -> str:
                 subject = reg.raid_def(op.target).get("name", "") if op.target in reg.profile.raids else ""
             elif op.op == "run_reopen":
                 subject = run_words(reg, _ended_event(reg, op.target)[1])
-            elif op.op == "run_unlock":
+            elif op.op in ("run_unlock", "run_start"):
                 subject = run_words(reg, _unlock_event(reg, op.target)[1])
             else:
                 subject = run_words(reg, _live_event(reg, op.target)[1])
@@ -2119,7 +2124,7 @@ def _ended_event(reg: Registry, target: str | None, raids=None):
 
 
 def _unlock_event(reg: Registry, target: str | None, raids=None):
-    """run_unlock's event: any event by its key (an ended one answers with rc.unlock_refusal's own sentence, not "can't
+    """run_unlock's and run_start's event: any event by its key (an ended one answers with rc.unlock_refusal's own sentence, not "can't
     change now"), else the live event a raid names, as every run op finds it."""
     from . import raidcycle as rc
 
@@ -2148,7 +2153,7 @@ def _lock_fill_value(op: ConfigOp) -> bool:
     return "fill" in v.replace(" ", "") or v.strip() in ("true", "yes", "on")
 
 
-RUN_VERBS_AUDITED = {"run_cancel", "run_remind", "run_pause", "run_withdraw", "run_reopen", "run_unlock", "run_reschedule", "run_lineup"}  # the RaidMixin verb writes ops.audited itself
+RUN_VERBS_AUDITED = {"run_cancel", "run_remind", "run_pause", "run_withdraw", "run_reopen", "run_unlock", "run_start", "run_reschedule", "run_lineup"}  # the RaidMixin verb writes ops.audited itself
 CANCEL_QUIET = {"quiet", "silent", "no line", "no notice", "no announcement", "none", "false", "off", "no"}
 
 
@@ -3012,6 +3017,14 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         if b["verb"] is None:
             raise RegistryError(b["sentences"][0])
         return f"unlock {run_words(reg, rc.first_part(rs, ev))}. " + " ".join(b["sentences"])
+    if op.op == "run_start":  # the Start now box's own sentences (consequences.start_now_box), its refusal first
+        from .consequences import start_now_box
+
+        rs, ev = _unlock_event(reg, op.target)
+        b = start_now_box(reg, ev, rs)
+        if b["verb"] is None:
+            raise RegistryError(b["sentences"][0])
+        return f"start {run_words(reg, rc.first_part(rs, ev))} now. " + " ".join(b["sentences"])
     # the run ops: resolve the live run first so the line names it
     rs, ev = _live_event(reg, op.target)
     label = run_words(reg, ev)
@@ -3831,6 +3844,9 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
     if op.op == "run_unlock":  # RaidMixin.unlock_run: the lock card's Unlock, /raid unlock, POST /api/run/{key}/unlock, MCP
         rs, ev = _unlock_event(reg, op.target, rs)
         return await bot.unlock_run(reg, rs, ev, by=by, by_id=by_id, via=via)
+    if op.op == "run_start":  # RaidMixin.start_now: the lock card's Start now, /raid start, POST /api/run/{key}/start, MCP
+        rs, ev = _unlock_event(reg, op.target, rs)
+        return await bot.start_now(reg, rs, ev, by=by, by_id=by_id, via=via)
     rs, ev = _live_event(reg, op.target, rs)
     if op.op == "run_reschedule":  # RaidMixin.reschedule_event: the site's Reschedule and MCP's reschedule_run share it
         start, timing = _reschedule_args(reg, op)
@@ -4757,6 +4773,7 @@ WARN_OPS: dict[str, Callable[[Registry, ConfigOp], bool]] = {
     "plain": _warn_plain_or_memory,  # plain text on the ops channel or in DMs, a channel's memory turned Off, an officers' channel shared
     "run_lock": _always, "run_cancel": _always, "proposal": _always,
     "run_unlock": _always,  # issue 14: the roster goes back on the board and Auto Lock goes off
+    "run_start": _always,  # issue 14: the start becomes this minute, never moved back
     "run_reschedule": _always, "run_lineup": _always,  # everyone who answered sees a notice; a removed raid takes its board
     "test": lambda reg, op: (op.value or "").strip().lower().startswith("clear"),
     "loot_weights": _always,  # every future award's score (phase 4, §5.48): reviewed with the profile default beside each number

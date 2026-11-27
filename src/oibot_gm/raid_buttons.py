@@ -35,21 +35,24 @@ RUN_WORDS = {"fill": "Fill seats…", "lock": "Lock now", "locked": "Locked", "p
              # the Discord lock screen's two verbs when the box offers the fill choice (issue 14; the site's checkbox)
              "lock_as_is": "Lock as it stands", "lock_fill": "Lock and auto-fill",
              # issue 14: a locked event back to open signup, its rosters on the board (consequences.unlock_box's verb too)
-             "unlock": "Unlock"}
+             "unlock": "Unlock",
+             # issue 14: a locked event starts this minute (consequences.start_now_box's verb too)
+             "start": "Start now"}
 
 
-class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<key>[A-Za-z0-9_\-]+):(?P<action>fill|lock|cancel|suggest|ask|loot|remind|pause|unlock|end|reopen)(?::(?P<rev>[0-9a-f]{6,16}))?"):
+class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<key>[A-Za-z0-9_\-]+):(?P<action>fill|lock|cancel|suggest|ask|loot|remind|pause|unlock|start|end|reopen)(?::(?P<rev>[0-9a-f]{6,16}))?"):
     """Officer buttons on the health and lock cards: Fill seats (the suggestions screen: the batch, then Send), Lock now, Cancel run, and
     the Suggested block's Ask (sends what the card shows; the plan fingerprint it was drawn with rides in the id, so a
     stale card is refused and redrawn) and Suggest… (every seat with its alternates: pick, then send). The lock card's
     raid-night row (dual interfaces phase 2): Remind the unanswered (once an hour), Pause / Resume automatic asks, End the
-    run now (after the start; the decide screen), Unlock (before the start: back to open signup, the decide screen); the
-    closed card's Reopen (an end by mistake, within the hour)."""
+    run now (after the start; the decide screen), Unlock (before the start: back to open signup, the decide screen), Start
+    now (before the start: the start becomes this minute, the decide screen); the closed card's Reopen (an end by
+    mistake, within the hour)."""
     LABELS = {k: (RUN_WORDS[k], style) for k, style in (
         ("fill", discord.ButtonStyle.secondary), ("lock", discord.ButtonStyle.secondary), ("cancel", discord.ButtonStyle.danger),
         ("loot", discord.ButtonStyle.secondary), ("ask", discord.ButtonStyle.success), ("suggest", discord.ButtonStyle.secondary),
         ("remind", discord.ButtonStyle.secondary), ("pause", discord.ButtonStyle.secondary), ("unlock", discord.ButtonStyle.secondary),
-        ("end", discord.ButtonStyle.danger),
+        ("start", discord.ButtonStyle.secondary), ("end", discord.ButtonStyle.danger),
         ("reopen", discord.ButtonStyle.secondary))}
 
     def __init__(self, gk: str | None, key: str, action: str, disabled: bool = False, label: str | None = None, rev: str | None = None):
@@ -151,6 +154,9 @@ class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\
             return
         if self.action == "unlock":
             await unlock_decide(interaction, bot, reg, rs, ev)
+            return
+        if self.action == "start":
+            await start_decide(interaction, bot, reg, rs, ev)
             return
         if self.action == "end":
             await end_decide(interaction, bot, reg, rs, ev)
@@ -303,7 +309,8 @@ async def end_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=Non
     (LootMixin.end_box over end_sentences — the site's End the run and Loot › Tonight's End print the same) through
     Wizard.decide_box, then LootMixin.end_run — the verb the site, MCP and the scheduler share (every council of the run
     is archived with its summary). Before the start (rc.end_refusal) the refusal box, unless a loot council is open on
-    the run (LootMixin.end_box decides then, as the site's Loot › Tonight). The line after names the run and
+    the run (LootMixin.end_box decides then, as the site's Loot › Tonight); that refusal keeps a **Start now** button
+    beside Back when the event can start now (it opens start_decide). The line after names the run and
     how long Reopen works, then each council's summary. `wiz`: the caller's wizard (the loot flows' guard)."""
     from .consequences import refusal_box_for
 
@@ -333,6 +340,37 @@ async def end_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=Non
             return
         line = ended_line(reg, cur)
         await wiz.finish(i, (f"{line}\n\n{text}" if had and text else line)[:1800])
+
+    async def start(i: discord.Interaction) -> None:  # the "hasn't started" refusal's way on: THE Start now screen
+        wiz.title = f"Start {raid_name(reg, ev)} now"
+        await start_decide(i, bot, reg, rs, rs.events.get(key) or ev, wiz=wiz)
+
+    b = box()
+    can_start = b["verb"] is None and b["sentences"] == [rc.END_NOT_STARTED] and rc.start_now_refusal(reg, rs, rs.events.get(key) or ev) is None
+    refused = [wiz.button(RUN_WORDS["start"], start, discord.ButtonStyle.success)] if can_start else []
+    await wiz.decide_box(interaction, b, do=do, refresh=box, refused=refused)
+
+
+async def start_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=None) -> None:
+    """THE Start now screen — the lock card's Start now, End's "hasn't started" refusal and /raid start alike (issue
+    14): the server's box (consequences.start_now_box — the site's Start now prints the same) through Wizard.decide_box,
+    then RaidMixin.start_now, the verb the site, plain text and MCP share. A refusal (rc.start_now_refusal: still open,
+    started, ended, cancelled) is the refusal box, Back alone. Nobody is DMed."""
+    from .consequences import start_now_box
+
+    wiz = wiz or officer_wizard(bot, reg, interaction, f"Start {raid_name(reg, ev)} now")
+    key = ev.key
+
+    def box() -> dict:
+        return start_now_box(reg, rs.events.get(key) or ev, rs)
+
+    async def do(i: discord.Interaction, _values: dict) -> None:
+        cur = rs.events.get(key) or ev
+        try:
+            line = await bot.start_now(reg, rs, cur, by=i.user.display_name, by_id=i.user.id, via="discord")
+        except RegistryError as e:
+            line = str(e)
+        await wiz.finish(i, line)
 
     await wiz.decide_box(interaction, box(), do=do, refresh=box)
 

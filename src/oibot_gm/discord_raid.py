@@ -1803,6 +1803,27 @@ class RaidMixin:
             mv = rc.reschedule(reg, rs, first, start=start, timing=timing, by=by)
         name = reg.raid_def(first.instance).get("name", first.instance)
         when = reg.local12(first.start)
+        moved = first.start != old
+        edited = await self._after_move(reg, rs, first, parts, mv, moved)
+        cards = "" if not edited else " · 1 open card shows the new time" if edited == 1 else f" · {edited} open cards show the new time"
+        timing_only = set(mv.timing) <= {"cutoff_hard_hours", "cutoff_soft_hours", "confirm_hours", "reminders", "autofill", "fill_ask_hours",
+                                         "auto_lock", "auto_lock_fill"} and not mv.splits
+        own = "sheet timing" if timing_only else "settings"
+        line = (f"🕒 {name} moved by {by} to {when}" if moved else f"🕒 {name}: its own {own} set by {by}") + cards
+        await self.post_run_update(reg, first, line)
+        what = f"moved {name} from {reg.local12(old)} to {when}" if moved else f"set {name}'s own {own} for {when}"
+        if moved and (mv.timing or mv.splits):
+            what += f" and set its own {own}"
+        await ops_mod.audited(self.ops, reg, by, what, via=via, by_id=by_id)
+        return [f"{name} now starts {when}." if moved else f"{name} keeps its start. Its own {own} {'is' if timing_only else 'are'} saved."]
+
+    async def _after_move(self, reg, rs, first, parts, mv, moved: bool) -> int:
+        """What a moved start (or a re-timed run) tells, shared by reschedule_event and start_now: the sheet edited in
+        place (same message), every live raid's officer cards, every card still in play — an open Confirm / Can't ask
+        and an open fill ask — edited to the new time with its buttons (edit_live_card: the ask stands, nobody answers
+        again), and the `moved` notice (Me page, /me view) to everyone in `mv.told`. Nobody is DMed. → cards edited."""
+        name = reg.raid_def(first.instance).get("name", first.instance)
+        when = reg.local12(first.start)
         live = [p for p in parts if p.state in ("open", "locked")]
         await self.refresh_sheet(reg, first)
         edited = 0
@@ -1819,21 +1840,38 @@ class RaidMixin:
             for a in p.fill_asks:
                 if a.open and a.dm_message_id:
                     edited += await self.edit_live_card(reg, a.dm_channel_id, a.dm_message_id, fill_layout(reg, p, team, self.ico, a))
-        moved = first.start != old
         locks = reg.local12(first.start - timedelta(hours=float(rc.team_setting(rc.run_team(reg, first), "cutoff_hard_hours"))))
         for uid in mv.told:  # an outcome, never a DM (the DM rule): the Me page and /me view say it — one member save each
             reg.notify(uid, "moved", f"{name} now starts {when}." if moved else f"{name} now locks {locks}.", run=first.key)
+        return edited
+
+    async def start_now(self, reg, rs, ev, by: str, by_id: int | None = None, *, via: str = "discord") -> str:
+        """THE Start now (issue 14) behind every surface: a locked event before its start starts this minute
+        (rc.start_now — the first raid's start becomes now, later raids move by the same amount, every confirm-by stays,
+        so no unanswered confirmation expires and no seat is freed by it). Under every raid's board lock (one order, as
+        reschedule takes them); RegistryError with rc.start_now_refusal's sentence, nothing written. Then reschedule's
+        tells (_after_move: the sheet and cards edited in place, open ask cards show the new time, the `moved` notice to
+        everyone who answered). One thread line, one audit line. Nobody is DMed. → the done line."""
+        first = rc.first_part(rs, ev)
+        if (why := rc.start_now_refusal(reg, rs, first)) is not None:
+            raise RegistryError(why)
+        parts = rc.event_parts(rs, first)
+        async with contextlib.AsyncExitStack() as stack:
+            for key in sorted(p.key for p in parts):  # one order everywhere: no lock cycle with a cancel or a lock
+                await stack.enter_async_context(self.board_lock(reg, key))
+            if (why := rc.start_now_refusal(reg, rs, first)) is not None:  # again, now that nothing else writes the event
+                raise RegistryError(why)
+            old = first.start
+            rc.stamp_before_change(reg, rs, parts)  # a run the start's stamping missed: stamped from its night, written below
+            mv = rc.start_now(reg, rs, first, by)
+        name = reg.raid_def(first.instance).get("name", first.instance)
+        when = reg.local12(first.start)
+        edited = await self._after_move(reg, rs, first, parts, mv, True)
         cards = "" if not edited else " · 1 open card shows the new time" if edited == 1 else f" · {edited} open cards show the new time"
-        timing_only = set(mv.timing) <= {"cutoff_hard_hours", "cutoff_soft_hours", "confirm_hours", "reminders", "autofill", "fill_ask_hours",
-                                         "auto_lock", "auto_lock_fill"} and not mv.splits
-        own = "sheet timing" if timing_only else "settings"
-        line = (f"🕒 {name} moved by {by} to {when}" if moved else f"🕒 {name}: its own {own} set by {by}") + cards
-        await self.post_run_update(reg, first, line)
-        what = f"moved {name} from {reg.local12(old)} to {when}" if moved else f"set {name}'s own {own} for {when}"
-        if moved and (mv.timing or mv.splits):
-            what += f" and set its own {own}"
-        await ops_mod.audited(self.ops, reg, by, what, via=via, by_id=by_id)
-        return [f"{name} now starts {when}." if moved else f"{name} keeps its start. Its own {own} {'is' if timing_only else 'are'} saved."]
+        await self.post_run_update(reg, first, f"▶️ {name} started now by {by}, at {when} (was {reg.local12(old)})" + cards)
+        await ops_mod.audited(self.ops, reg, by, f"started {name} now: moved from {reg.local12(old)} to {when}", via=via, by_id=by_id)
+        told = "Everyone who answered sees a notice. " if mv.told else ""
+        return f"{name} started now, at {when}. {told}Nobody was DMed."
 
     async def edit_lineup(self, reg, rs, ev, lineup: list[dict], *, by: str, by_id: int | None = None, via: str = "discord",
                           preview: bool = False, rev: str | None = None) -> list[str]:

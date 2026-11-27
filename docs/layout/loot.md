@@ -15,7 +15,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        policy sentences from the ACTIVE precedents (route distil, refs validated, nothing written — policy.append_rule is the write;
                        the <policy>/<rules>/<precedents> blocks go through llm.provider.unfence)
   discord_loot.py      LootMixin: THE loot verbs open_loot · tick · distribute · override · confirm · discard · set_reason · correct · end_run
-                       (+ remove_candidate · set_scores_only · keep_open), each (reg, session, …, by, by_id, via) under loot_lock; loot_ctx / loot_roster
+                       (+ remove_candidate · set_scores_only · keep_open), each (reg, session, …, by, by_id, via) under loot_lock (end_run, end_box and
+                       loot_ops' end review refuse a locked event with no council before its start — rc.end_refusal, as end_decide; issue 14); loot_ctx / loot_roster
                        (live from the run) / loot_live (run locked); open_council (one session per roster of a split run, <run>-r<N>); auto-distribute;
                        held companion events in <guild>/loot/held.json (expired → ops warn "NOT recorded"); loot_restore; loot_may_close (scheduler auto-end:
                        only LootSession.blocks_close — picks/undistributed — holds it, once announced; reasons/conflicts outlive it: set_reason/correct take a

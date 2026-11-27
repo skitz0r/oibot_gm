@@ -801,7 +801,9 @@ export interface LootCouncil {
   distributing: { by: string; since_label: string; drops: number } | null; interrupted: { since_label: string; drops: number } | null; scores_only: { by: string; at_label: string } | null;
   closing: { notice_label: string; keep_open_label: string }; last_change: string | null; opened_by: string | null; opened_label: string; batch_rev: string; drops_rev: string;
 }
-export interface LootRun { key: string; title: string; when: string; state: string; instance: string; test: boolean; rosters: number; councils: LootCouncil[]; end_consequence: string }
+export interface LootRun { key: string; title: string; when: string; state: string; instance: string; test: boolean; rosters: number; councils: LootCouncil[]; end_consequence: string;
+  /** End's refusal before the start with no council open (rc.end_refusal), and whether Start now is offered beside it */
+  end_note?: string | null; may_start?: boolean }
 export interface Companion { character: string; client?: string; state: "live" | "quiet" | "disconnected"; last_seen_label: string; events?: number; routes_to?: string | null }
 export interface LootLogState { state: "off" | "channel" | "no_channel"; channel_id: string | null; text: string }
 export interface LootOverview {

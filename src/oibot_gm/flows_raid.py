@@ -627,6 +627,26 @@ async def open_raid_unlock(interaction: discord.Interaction, reg: Registry, **_s
                    prefer=lambda e: not rc.is_follow(e))
 
 
+@flow("raid_start")
+async def open_raid_start(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
+    """/raid start (issue 14) — the event picker when several are locked (an event once: its first raid), then THE
+    Start now screen (raid_buttons.start_decide: consequences.start_now_box, Start now · Back) — the lock card's Start
+    now and End's "hasn't started" refusal show the same screen. Nothing is asked that a parser must read."""
+    if not await officer_only(interaction, reg):
+        return
+
+    async def body(i: discord.Interaction, wiz: Wizard, rs, ev) -> None:
+        if not ev or ev.state != "locked":
+            await wiz.finish(i, "No event is locked, so there is nothing to start now.")
+            return
+        from .raid_buttons import start_decide
+
+        wiz.title = f"Start {raid_name(reg, ev)} now"
+        await start_decide(i, i.client, reg, rs, rc.first_part(rs, ev), wiz=wiz)
+    await with_run(interaction, reg, title="Start an event now", then=body, states=("locked",), officer=True,
+                   prefer=lambda e: not rc.is_follow(e))
+
+
 @flow("raid_loot")
 async def open_raid_loot(interaction: discord.Interaction, reg: Registry, *, key: str | None = None, **_seed) -> None:
     """/raid loot (the run picker when several are locked) or the lock card's Loot button (`key`: that card's run,

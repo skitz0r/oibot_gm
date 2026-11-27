@@ -1099,6 +1099,8 @@ class LootMixin:
         sessions = [s for s in self.events.values() if s.guild == reg.key and s.run_key == ev.key]
         if ev.state != "locked" and not sessions and ev.state not in ("done", "cancelled"):
             return refusal_box_for(END_REFUSAL)
+        if not sessions and ev.state == "locked" and (why := rc.end_refusal(ev)):  # before the start: End everywhere refuses
+            return refusal_box_for(why)
         rev = json.dumps([ev.state, [self.loot_summary(reg, s) for s in sessions]], sort_keys=True, default=str)
         return end_box(reg, ev, self.end_sentences(reg, rs, ev), rev=rev)
 
@@ -1144,10 +1146,13 @@ class LootMixin:
         inside), the run flips to done, the sheet and lock card are redrawn closed (`refresh`; the scheduler redraws
         them itself), the summary text is returned (posting it is the surfaces': loot_ended). /raid end, the End
         button, the web, MCP, plain text and the scheduler all come here — one rule for all: only a LOCKED run (or one
-        whose council is still open) ends, and never while a Distribute is judging (wait or retry)."""
+        whose council is still open) ends, a locked run without a council only after its start (rc.end_refusal, as
+        end_decide — Start now is the way before it), and never while a Distribute is judging (wait or retry)."""
         sessions = [s for s in list(self.events.values()) if s.guild == reg.key and s.run_key == ev.key]
         if ev.state != "locked" and not sessions:
             raise RegistryError("No locked event to end." if ev.state not in ("done", "cancelled") else f"That event is already {ev.state}.")
+        if not sessions and (why := rc.end_refusal(ev)):  # before the start, as every End refuses (a council open still ends)
+            raise RegistryError(why)
         self._end_busy(sessions)
         texts = []
         for s in sessions:

@@ -83,7 +83,11 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        remind_box (POST /api/run/{key}/remind), unlock_box(reg, ev, rs) (issue 14: S1 open signup with the rosters on the board —
                        "The whole event…" with several raids; S2 _unlock_told: "Nobody gets a DM", then the fill asks it withdraws, else the
                        confirmation asks that stay open — unlock_facts reads both BEFORE the unlock; S3 UNLOCK_AGAIN; verb UNLOCK_VERB; rc.unlock_refusal
-                       → the refusal box; POST /api/run/{key}/unlock, unlock_decide, run_unlock's review), end_box (LootMixin.end_box builds it from end_sentences, its fp covering the councils; POST /api/loot/{run}/end) and
+                       → the refusal box; POST /api/run/{key}/unlock, unlock_decide, run_unlock's review), start_now_box(reg, ev, rs) (issue 14
+                       Task 6: S1 the start moves to this minute — the later raids by the same amount with several; S2 _start_now_told: who
+                       answered gets a notice, then the confirmation asks that keep their deadline, else "nobody gets a DM" — start_now_facts
+                       reads them BEFORE; S3 START_NOW_FIXED; verb START_NOW_VERB; rc.start_now_refusal → the refusal box; POST
+                       /api/run/{key}/start, start_decide, run_start's review), end_box (LootMixin.end_box builds it from end_sentences, its fp covering the councils; POST /api/loot/{run}/end) and
                        board_move_box (over rc.board_move_kind: a locked board's Move to / swap / take off, POST /api/run/{key}/move);
                        event_title, count_words.
                        A route takes `preview` → {box} and `seen` (the fp pressed) → 409 {error: CONFIRM_WORDS changed, box: fresh}, nothing written;

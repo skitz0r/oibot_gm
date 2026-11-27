@@ -6202,6 +6202,39 @@ and store save / batch / commit messages (held to the retired words only) — an
 the same check over `docs/manual.md` line by line, backticked text dropped, with `MANUAL_ALLOW` holding only §1a's
 older-words paragraph. The pending-files list is gone.
 
+**Lock, unlock, start now built (2026-11-26, issue 14).** Spec `docs/superpowers/specs/2026-11-26-lock-unlock-start-design.md`,
+plan `docs/superpowers/plans/2026-11-26-lock-unlock-start.md`. *Two settings* (Task 1): a schedule and an event carry
+**Auto Lock** and **Auto-fill on Auto Lock** (`auto_lock`, `auto_lock_fill`, missing = True), stamped on the event at open
+and editable through Edit event until the lock (`rc.AUTO_LOCK_LOCKED` after it); with Auto Lock off the scheduler neither
+locks nor closes the pre-lock asks, which run to the start (`rc.restamp_prelock_asks` re-stamps their deadline whenever the
+start, the lock time or Auto Lock moves; none goes out after the start, `rc.PRELOCK_STARTED`). *The lock's fill choice*
+(Task 2): `RaidMixin.lock_run(..., fill=True)` — `fill=False` rosters the board **as it stands** (`rc.board_as_it_stands`,
+name for name, group for group, every raid of a lineup with the first's choice), refuses an empty board up front
+(`rc.LOCK_EMPTY_BOARD`, a lineup whole), pauses Automated Fill Requests when slots stay open, and every lock's confirm-by
+goes through `rc.late_confirm_by` (one rule with Reschedule; a lock at or after the start gets an hour). The clock passes
+`rc.auto_lock_fill`; a person's surface passes the choice and defaults it to False. *The lock box* (Task 3):
+`consequences.lock_box(..., fill)` leads with the open slots whenever a roster has some and carries the checkbox *Auto-fill
+empty roster slots* (unticked); Discord's screen offers **Lock as it stands** · **Lock and auto-fill**; pause and resume act
+on the whole event. *Unlock* (Tasks 4–5): `rc.unlock` / `RaidMixin.unlock_run` put a locked event back to open signup with
+every locked raid's roster on the board as hand placements, Auto Lock off, fill asks withdrawn, confirmation asks kept
+(nothing expires while open), the lock's Not rostered notices and cards taken back; the next lock reconciles the asks (a yes
+is not asked again, an open ask is kept, someone left off has it closed and one notice). `consequences.unlock_box` on the
+site (More, the sheet card), Discord (the lock card, `/raid unlock`), plain text `run_unlock` and MCP `unlock_run`. *Start
+now* (Task 6): `rc.start_now` makes a locked event's start this minute (later raids by the same amount) through
+`rc.reschedule(..., keep_confirm=True)` — the owner's ruling: every confirm-by stays, so no unanswered confirmation expires
+and no seat is freed by it; `rc.start_now_refusal` (open, started, ended, cancelled); `RaidMixin.start_now` shares
+`_after_move` with `reschedule_event` (the sheet and cards edited in place, the `moved` notice, no DM) and writes one thread
+and one audit line. `consequences.start_now_box` on the site (Events › More under End, beside the sheet card's greyed End,
+Loot › Tonight), Discord (the lock card's fifth button, End's "hasn't started" refusal screen, `/raid start`), plain text
+`run_start` (always reviewed) and MCP `start_now`. *The loot End gap* (Task 6): `LootMixin.end_run`, `end_box`, POST
+`/api/loot/{run}/end` (so MCP `end_loot`) and plain text's loot end now apply `rc.end_refusal` (`rc.END_NOT_STARTED`) like
+every other End, unless a loot council is open. *Rulings* (progress.md): the empty-board refusal applies only when people
+joined; with Auto Lock off a pre-lock ask's deadline is the start; an as-it-stands lock is refused before any raid locks
+when a raid that people answered has nobody placed; the lock box's slots sentence and choice appear whenever any roster
+has open slots; never two Not rostered notices held at once per raid. Tests: `tests/test_auto_lock.py`,
+`tests/test_lock_as_it_stands.py`, `tests/test_lock_box_choice.py`, `tests/test_unlock.py`, `tests/test_unlock_surfaces.py`,
+`tests/test_start_now.py`.
+
 **Later** (in no plan yet): the activity log's code nouns, the older pages' Apply N changes. Phases 1 and 2's tests:
 `tests/test_guild_schedules.py`, `tests/test_schedule_timing.py`, `tests/test_minimums.py`, `tests/test_minimums_solver.py`,
 `tests/test_officer_raids.py`.

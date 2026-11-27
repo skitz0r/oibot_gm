@@ -943,6 +943,9 @@ def test_end_refuses_an_unlocked_run_on_the_web_mcp_and_plain_text(w):
     with pytest.raises(RegistryError, match="No locked event to end"):
         run(configops.apply_async(w.reg, op, "Officer", False, bot=w.bot, by_id=OFFICER, via="chat"))  # Apply: the verb refuses too
     assert w.rs.events[sheet.key].state == "open", "the signup sheet lives on"
+    r = w.c.post(f"/api/loot/{w.ev.key}/end", json={}, headers=H)  # issue 14: no council, before its start: End refuses
+    assert r.status_code == 400 and r.json()["error"] == rc.END_NOT_STARTED, r.text
+    rc.start_now(w.reg, w.rs, w.ev, "t")  # started first, deliberately: then a locked run ends
     assert w.c.post(f"/api/loot/{w.ev.key}/end", json={}, headers=H).status_code == 200, "a locked run still ends"
 
 

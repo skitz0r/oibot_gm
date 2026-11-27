@@ -32,8 +32,11 @@ frontend/              React + Mantine app (Vite). components/board/* (SheetCard
                        after Join and before Bench (MemberMenu.withSwitches); the Test bench and the members' page pass none; board/MemberMenu's useRecord = every other ⋮ pick — callouts with a note field, pins, the confirm / fill
                        answers — through POST /api/admin/action preview → the server's box → seen, the Test bench's SheetCard too); EventDetails; ActivitySection; EventMore = the ⋯ More menu: Suggest… / Fill seats…, Remind, Pause / Resume, Re-post
                        the sheet…, Split strategy…, Loot, the asks out, End, Reopen, Unlock (once for the whole event, while its first raid is locked:
-                       the first raid's sheet may_unlock / unlock_note — greyed with the refusal under it) — Remind, End and Unlock print the server's
-                       box (remind_box, end_box, unlock_box via POST /api/run/{key}/unlock) and press with `seen`; SheetCard's Unlock beside End does the same through useConfirmBox; a locked board's Move to / swap / take off (BoardView) asks POST /move's preview box and presses with `seen`
+                       the first raid's sheet may_unlock / unlock_note — greyed with the refusal under it), Start now (right under the first raid's
+                       End while its sheet's may_start) — Remind, End, Unlock and Start now print the server's
+                       box (remind_box, end_box, unlock_box / start_now_box via POST /api/run/{key}/unlock | start) and press with `seen`; SheetCard's Unlock beside End
+                       and its Start now beside a greyed End (e.may_start) do the same through useConfirmBox; loot/Tonight's RunCard prints the run's end_note
+                       (End's refusal before the start, no council open) with Start now beside it (run.may_start, start_now_box); a locked board's Move to / swap / take off (BoardView) asks POST /move's preview box and presses with `seen`
                        (a 409 draws the fresh box and board); New event / New schedule count edits that differ from their seed (the leave guard); RescheduleBox.tsx (useRescheduleBox: the picker inside box 3, Locks only while open); LockBox.tsx (useLockBox(meta, onDone) = THE lock box of
                        the Events page's Lock now AND the SheetCard's Lock / Preview lock — SheetCard's own LockModal is gone: the server's box
                        (POST /lock preview `fill`) with box.choice as a checkbox, unticked, re-asked through replace on change; Preview lock =

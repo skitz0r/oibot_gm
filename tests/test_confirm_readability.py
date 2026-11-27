@@ -1040,6 +1040,39 @@ def unlock_cases(reg, rs, add):
     add("unlock_box", "an ended event", cq.unlock_box(reg, ev, rs))
 
 
+def start_now_cases(reg, rs, add):
+    """Issue 14, Task 6: the Start now box (consequences.start_now_box) — everyone answered, confirmation asks open (one,
+    many: they keep their deadline), a lineup (the later raids move too), and each refusal."""
+    ev = open_test_run(reg, rs, days=12)
+    pool = reg.test_members()[:10]
+    join(reg, rs, ev, pool)
+    lock_with_board(reg, rs, ev, [m.display_name for m in pool[:8]])
+    for m in pool:  # nothing left over from another case on this roster
+        m.placement_asks = [a for a in m.placement_asks if a["roster"] != ev.team]
+    b = cq.start_now_box(reg, ev, rs)
+    assert b["sentences"] == ["The start moves to this minute.", "The 10 who answered each get a notice, and nobody gets a DM.",
+                              cq.START_NOW_FIXED], b
+    add("start_now_box", "every confirmation answered", b)
+    for n, case in ((1, "one confirmation ask open"), (8, "eight confirmation asks open")):
+        for m in pool[:n]:
+            m.placement_asks.append({"roster": ev.team, "answer": None, "asked_at": rc.now(), "channel": "dm"})
+        b = cq.start_now_box(reg, ev, rs)
+        kept = "1 confirmation ask keeps its deadline" if n == 1 else f"{n} confirmation asks keep their deadline"
+        assert b["sentences"][1] == f"The 10 who answered each get a notice, and {kept}.", b
+        add("start_now_box", case, b)
+        for m in pool[:n]:
+            m.placement_asks = [a for a in m.placement_asks if a["roster"] != ev.team]
+    four = next(e for e in rs.events.values() if e.state == "locked" and not rc.is_follow(e) and len(rc.event_parts(rs, e)) == 4)
+    b = cq.start_now_box(reg, rc.event_parts(rs, four)[1], rs)
+    assert b["sentences"][0].endswith("the later raids move by the same amount."), b
+    add("start_now_box", "four raids", b)
+    add("start_now_box", "an open event", cq.start_now_box(reg, open_test_run(reg, rs, days=11), rs))
+    rc.start_now(reg, rs, ev, "t")
+    add("start_now_box", "a started event", cq.start_now_box(reg, ev, rs))
+    rc.end_run(reg, rs, ev, "t")
+    add("start_now_box", "an ended event", cq.start_now_box(reg, ev, rs))
+
+
 def box_cases(reg, rs, runs, ms, dump):
     """Every box generator across its cases (each variant of the §7b table, DMs on and off, 0 / 1 / many): the title is
     linted as a line of its own, then the sentences as one confirm."""
@@ -1352,6 +1385,7 @@ def box_cases(reg, rs, runs, ms, dump):
     lock_choice_cases(reg, rs, add)  # last: its own schedule's nights would move the harness's recurring_run indices
     relock_cases(reg, rs, add)  # its own schedule too; it locks and unlocks only its own events
     unlock_cases(reg, rs, add)  # after it: it locks the four-raid event
+    start_now_cases(reg, rs, add)  # after it: it starts the four-raid event's locked raids from the unlock cases
 
 
 def reschedule_cases(reg, rs, runs, ms, dump):

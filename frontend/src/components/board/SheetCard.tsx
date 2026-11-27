@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Accordion, ActionIcon, Alert, Anchor, Badge, Box, Button, Checkbox, Group, Menu, Modal, Stack, Text, Textarea, Tooltip } from "@mantine/core";
 import { WhenPicker, wallTime } from "../WhenPicker";
-import { IconBell, IconCalendarTime, IconDiamond, IconDotsVertical, IconFlagCheck, IconLock, IconLockOpen, IconMessageCircle, IconPlayerPause, IconPlayerPlay, IconSend, IconUsersPlus } from "@tabler/icons-react";
+import { IconBell, IconCalendarTime, IconDiamond, IconDotsVertical, IconFlagCheck, IconLock, IconLockOpen, IconMessageCircle, IconPlayerPause, IconPlayerPlay, IconPlayerTrackNext, IconSend, IconUsersPlus } from "@tabler/icons-react";
 import { Link } from "react-router-dom";
 import { api, type Box as ConfirmBoxT, type Meta, type Person, type RunPreview, type Sheet, type Signup } from "../../api";
 import { MemberMenu, RepostSheetModal, SomeoneElse } from "./MemberMenu";
@@ -83,11 +83,12 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
     if (!(await ask({ title: `End ${name}?`, message: preview, confirmLabel: L.end, cancelLabel: "Back", color: "red" }))) return;
     await onAct(`end${e.key}`, `/api/loot/${e.key}/end`);
   }
-  /** Unlock (issue 14) prints the SERVER's box (consequences.unlock_box, the Events page's More › Unlock and the Discord
-   *  lock card's too): the press sends its fp as `seen`, a box that changed while open comes back fresh (409) and waits
-   *  again, a refusal is its box with Back alone. */
-  async function unlock() {
-    const url = `/api/run/${encodeURIComponent(e.key)}/unlock`;
+  /** Unlock and Start now (issue 14) print the SERVER's box (consequences.unlock_box / start_now_box, the Events page's
+   *  More and the Discord lock card's too): the press sends its fp as `seen`, a box that changed while open comes back
+   *  fresh (409) and waits again, a refusal is its box with Back alone. */
+  const unlock = () => boxed(`/api/run/${encodeURIComponent(e.key)}/unlock`);
+  const startNow = () => boxed(`/api/run/${encodeURIComponent(e.key)}/start`);
+  async function boxed(url: string) {
     const preview = async (): Promise<ConfirmBoxT> => {
       try { return (await api.post<{ box: ConfirmBoxT }>(url, { preview: true })).box; } catch (err) { const b = boxOf(err); if (b) return b; throw err; }
     };
@@ -224,6 +225,8 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
           {/* after the lock, the raid-night levers the Discord lock card's second row has — the same labels (meta.run_labels) */}
           {locked && e.live && (e.may_unlock || e.unlock_note) && <Tooltip label={e.unlock_note || ""} disabled={!e.unlock_note}><span><Button size="xs" variant="subtle" leftSection={<IconLockOpen size={13} />} disabled={!e.may_unlock} onClick={unlock}>{L.unlock}</Button></span></Tooltip>}
           {locked && e.live && <Tooltip label={e.end_note || ""} disabled={!e.end_note}><span><Button size="xs" variant="subtle" color="red" leftSection={<IconFlagCheck size={13} />} disabled={!e.may_end} loading={busy === `end${e.key}`} onClick={endNow}>{L.end}</Button></span></Tooltip>}
+          {/* beside the greyed End whose note says the event hasn't started: Start now, while the server offers it */}
+          {locked && e.live && e.may_start && <Button size="xs" variant="subtle" leftSection={<IconPlayerTrackNext size={13} />} onClick={startNow}>{L.start}</Button>}
         </Group>
         <Group gap="xs" wrap="wrap">
           {locked && e.live && <Tooltip label={e.remind_note || ""} disabled={!e.remind_note}><span><Button size="xs" variant="default" leftSection={<IconBell size={13} />} disabled={!e.may_remind} loading={busy === `remind${e.key}`} onClick={remind}>{L.remind}</Button></span></Tooltip>}

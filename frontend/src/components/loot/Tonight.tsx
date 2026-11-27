@@ -4,6 +4,9 @@ import { IconChevronDown, IconChevronRight, IconX } from "@tabler/icons-react";
 import { api, type LootCouncil, type LootOverview, type LootProposal, type LootReply, type LootRun, type Meta } from "../../api";
 import { CardHeader, fail, ok } from "../Page";
 import { useConfirm } from "../ConfirmModal";
+import { useConfirmBox } from "../ConfirmBox";
+import { boxOf } from "../events/shared";
+import type { Box as ConfirmBoxT } from "../../api";
 import { useLive } from "../../hooks/useLive";
 import { usePoll } from "../../hooks/usePoll";
 import { ItemName } from "../ItemName";
@@ -74,7 +77,26 @@ export function Tonight({ meta, goItems }: { meta: Meta; goItems: () => void }) 
 
 function RunCard({ meta, run, onState, goItems, reload }: { meta: Meta; run: LootRun; onState: (r: LootRun) => void; goItems: () => void; reload: () => void }) {
   const [ask, dialog] = useConfirm();
+  const [askBox, boxDialog] = useConfirmBox(["run:", "loot"]);
   const [busy, setBusy] = useState(false);
+  /** Start now (issue 14): End's refusal before the start has the way on beside it — the SERVER's box
+   *  (consequences.start_now_box, as Events › More and the sheet card print it), its fp sent back as `seen`. */
+  async function startNow() {
+    const url = `/api/run/${encodeURIComponent(run.key)}/start`;
+    const preview = async (): Promise<ConfirmBoxT> => {
+      try { return (await api.post<{ box: ConfirmBoxT }>(url, { preview: true })).box; } catch (e) { const b = boxOf(e); if (b) return b; throw e; }
+    };
+    let first: ConfirmBoxT;
+    try { first = await preview(); } catch (e) { fail(e); return; }
+    const said = { text: "" };
+    const done = await askBox({
+      box: first, refresh: preview,
+      act: async (fp) => {
+        try { said.text = (await api.post<{ message: string }>(url, { seen: fp })).message; return null; } catch (e) { const b = boxOf(e); if (b) return b; throw e; }
+      },
+    });
+    if (done) { if (said.text) ok(said.text); reload(); }
+  }
   async function open() {
     setBusy(true);
     const r = await lootWrite(() => api.post<LootReply>(`/api/loot/${run.key}/open`, {}), onState);
@@ -95,10 +117,13 @@ function RunCard({ meta, run, onState, goItems, reload }: { meta: Meta; run: Loo
           {run.state !== "locked" && <Badge variant="outline" color="gray">{run.state}</Badge>}
         </Group>} />
       {run.councils.length === 0 && run.state === "locked" && <Text size="sm" c="dimmed" p="md">No council yet. Opening one makes a thread in the officer channel{run.rosters > 1 ? ` — one per roster (${run.rosters})` : ""}.</Text>}
+      {/* End before the start, with no council open: the server's refusal, and Start now beside it while it is offered */}
+      {run.end_note && <Group gap="xs" px="md" pb="md" wrap="wrap"><Text size="sm" c="dimmed">{run.end_note}</Text>{run.may_start && <Button size="xs" variant="default" onClick={startNow}>{meta.run_labels.start}</Button>}</Group>}
       <Stack gap={0}>
         {run.councils.map((c) => <CouncilBlock key={c.id} meta={meta} run={run} c={c} onState={onState} goItems={goItems} many={run.councils.length > 1} />)}
       </Stack>
       {dialog}
+      {boxDialog}
     </Card>
   );
 }

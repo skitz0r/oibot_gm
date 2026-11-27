@@ -36,7 +36,7 @@ from fastapi.responses import JSONResponse, Response
 from .. import appeals
 from .. import ops as ops_mod
 from ..raid_views import run_title
-from ..raidcycle import is_test_run
+from ..raidcycle import end_refusal, is_test_run, start_now_refusal
 from ..loot.session import DISENCHANT, LootBusy, LootChanged
 from ..loot_ops import LOG_MAX, award_is_members, log_row, log_rows
 from ..loot_ops import log_day as day
@@ -186,7 +186,10 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
     def run_json(reg, rs, ev, sessions) -> dict:
         return {"key": ev.key, "title": run_title(reg, ev), "when": reg.local12(ev.start), "state": ev.state, "instance": ev.instance,
                 "test": is_test_run(reg, ev), "rosters": len(ev.all_rosters),
-                "councils": [state_json(reg, rs, ev, s) for s in sessions], "end_consequence": bot.end_consequence(reg, rs, ev)}
+                "councils": [state_json(reg, rs, ev, s) for s in sessions], "end_consequence": bot.end_consequence(reg, rs, ev),
+                # before the start with no council: End's refusal, with Start now beside it (issue 14)
+                "end_note": None if sessions or ev.state != "locked" else end_refusal(ev),
+                "may_start": ev.state == "locked" and start_now_refusal(reg, rs, ev) is None}
 
     def companion_json(reg) -> list[dict]:
         from ..discord_feed import feed_presence
@@ -403,6 +406,10 @@ def install_loot_api(app: FastAPI, bot, *, who, body, publish, find_live, resolv
         if ev.state != "locked" and not sessions:  # the verb's rule, shown at the preview too (Discord: "No locked event to end.")
             return JSONResponse({"error": "No locked event to end." if ev.state not in ("done", "cancelled") else f"That event is already {ev.state}.",
                                  "box": bot.end_box(v.reg, rs, ev)}, status_code=400)
+        if not sessions and (why := end_refusal(ev)):  # before the start, as every End (a council open still ends)
+            from ..consequences import refusal_box_for
+
+            return JSONResponse({"error": why, "box": refusal_box_for(why)}, status_code=400)
         if d.get("preview"):
             return {"preview": bot.end_consequence(v.reg, rs, ev), "box": bot.end_box(v.reg, rs, ev)}
         if d.get("seen"):

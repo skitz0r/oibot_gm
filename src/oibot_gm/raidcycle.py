@@ -1901,7 +1901,7 @@ def _run_name(reg: Registry, t: dict, old: datetime, new: datetime) -> str:
 
 
 def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: datetime | None = None, timing: dict | None = None,
-               by: str, save: bool = True) -> Moved:
+               by: str, save: bool = True, keep_confirm: bool = False) -> Moved:
     """THE move of a run (any raid of it answers for its first): every raid's `starts_at` moves with the first's — each
     keeps its offset, in real time (after_minutes) —, each run dict's weekday-and-time line and its name follow; `timing`
     ({setting: value}, EVENT_TIMING) is the run's own on the first raid's dict, later raids' cut-offs the first's plus
@@ -1909,7 +1909,8 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
     it was opened for. A confirm-by moves by the same amount, or to within the hour when that is already past (never
     past the start); fill asks keep their expiry; away rows are worked out again for the new day (recompute_absences);
     one log line. Every raid and the dicts are saved in ONE store batch. Never touches config.schedules. The caller
-    checks reschedule_refusal first. `save=False` = the preview: a copy, nothing written."""
+    checks reschedule_refusal first. `save=False` = the preview: a copy, nothing written. `keep_confirm` (Start now,
+    issue 14): every confirm-by stays as it is — an unanswered confirmation keeps the deadline it had, no seat is freed."""
     import copy
 
     first = first_part(rs, ev)
@@ -1958,7 +1959,7 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
                     t["weights"] = {**old_w[p.key], **w_delta}
                     if "sat_out" in w_delta:
                         t["rotation_sat_out"] = w_delta["sat_out"]
-        if p.confirm_by and at != was:
+        if p.confirm_by and at != was and not keep_confirm:
             p.confirm_by = late_confirm_by(datetime.fromisoformat(p.confirm_by) + (at - was), at, now_).isoformat()
     cleared, written = recompute_absences(reg, first) if delta else ([], [])
     lock_moved = not delta and "cutoff_hard_hours" in values  # the night stays, the lock moves: who answered is told too
@@ -1989,6 +1990,44 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
         for p in sorted(parts, key=lambda e: e is first):  # the first raid last: its save copies its answers onto the later raids
             rs.save(p, line)
     return moved
+
+
+# ---------------------------------------------------------------- Start now (issue 14, Task 6)
+
+START_NOW_OPEN = "This event is still open for signup, so lock it before starting it now."
+START_NOW_DONE = "This event has ended, so it can't start again."
+START_NOW_CANCELLED = "A cancelled event can't start."
+START_NOW_STARTED = "This event has already started, so there is nothing to start."
+
+
+def start_now_refusal(reg: Registry, rs: "RaidStore | None", ev: "RaidEvent", at: datetime | None = None) -> str | None:
+    """Why the event `ev` belongs to can't start now, or None: its first raid must be locked and not yet started. One
+    sentence each. `rs` None (a Discord card renderer, which holds no store): `ev` answers for itself, a later raid's
+    event start read from its own offset."""
+    first = first_part(rs, ev) if rs is not None else ev
+    if first.state == "open":
+        return START_NOW_OPEN
+    if first.state == "done":
+        return START_NOW_DONE
+    if first.state == "cancelled":
+        return START_NOW_CANCELLED
+    start = first.start
+    if rs is None and is_follow(ev):
+        start = ev.start - timedelta(minutes=int(ev.starts or 0))
+    if (at or datetime.now(start.tzinfo)) >= start:
+        return START_NOW_STARTED
+    return None
+
+
+def start_now(reg: Registry, rs: "RaidStore", ev: "RaidEvent", by: str, *, save: bool = True) -> Moved:
+    """Start the event `ev` belongs to now (issue 14): its first raid's start becomes this minute (now, the seconds
+    dropped) and every later raid moves by the same amount — through reschedule's writes (parts, run dicts, away rows,
+    the one log line, one store batch), with `keep_confirm`: every confirm-by stays, so an unanswered confirmation is
+    neither expired nor its seat freed by the move (the owner's ruling). After it, everything that reads the start treats
+    the event as started: end_refusal allows End, reschedule_refusal answers MOVE_STARTED, unlock_refusal
+    UNLOCK_STARTED. The caller checks start_now_refusal first. `save=False` = the preview."""
+    when = reg.now_local().replace(second=0, microsecond=0)
+    return reschedule(reg, rs, ev, start=when, by=by, save=save, keep_confirm=True)
 
 
 # ---------------------------------------------------------------- the lineup of an open run (phase 3, Task 6)
@@ -6292,8 +6331,11 @@ def end_refusal(ev: RaidEvent, at: datetime | None = None) -> str | None:
         return (f"This event is already {RUN_STATE_WORDS[ev.state]}." if ev.state in ("done", "cancelled") else
                 "End is for a locked event, and this sheet is still open.")
     if (at or datetime.now(ev.start.tzinfo)) < ev.start:
-        return "The event hasn't started yet. Before the start, use Cancel instead."
+        return END_NOT_STARTED
     return None
+
+
+END_NOT_STARTED = "The event hasn't started yet. Before the start, use Cancel instead."  # every surface offers Start now beside it
 
 
 # ---------------------------------------------------------------- character changes ripple into runs (design §3.3, D24)

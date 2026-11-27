@@ -81,6 +81,11 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        notices; unlock(…, fills=False) leaves the fill asks to the caller's plan_lock. UNLOCK_SENDING (unlock_refusal's
                        `sending`). pause_scope(rs, ev, paused) → (parts, flip) = THE reach of pause / resume (set_autofill_paused and
                        plain text's run_pause review).
+                       Start now (issue 14, Task 6): start_now_refusal(reg, rs, ev, at=None) (START_NOW_OPEN/DONE/CANCELLED/STARTED; the first
+                       raid decides; rs None = the card renderer, `ev` answers for itself) and start_now(reg, rs, ev, by, save=True) → Moved:
+                       the start becomes this minute through reschedule(…, keep_confirm=True) — every confirm-by stays (the owner's ruling:
+                       no unanswered confirmation expires, no seat is freed); END_NOT_STARTED = end_refusal's "hasn't started" sentence,
+                       the one every surface puts Start now beside.
                        open_when/which_run/open_preview (THE open-time resolver, DST-safe); spec_switches / regulars_not_rostered / fill_state_text /
                        asks_on_site / log_rows (RaidEvent.log_at stamped by RaidStore.save) for ev_json; upcoming_rows (each active schedule's next three runs whatever the horizon, can_open + open_row_refusal's why) / short_why (a run card's short clause) — §5.56; FillAsk.channel dm|web (a failed DM = web)
                        Identity (§5.67 phase 3): a run's key is new_run_key(reg, rs, raid) = '<abbr>-<6 of KEY_ALPHABET>' (no 0/1/i/l/o/r), the run
@@ -236,6 +241,10 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        health card when the event had one, refresh_sheet / refresh_cards, one thread line, one audit line, no DM.
                        Every surface calls it after the box (Task 5): POST /api/run/{key}/unlock, raid_buttons.unlock_decide (the lock
                        card's Unlock, /raid unlock), configops run_unlock, MCP unlock_run.
+                       start_now(reg, rs, ev, by, by_id=None, *, via) = THE Start now verb: every raid's board_lock, rc.start_now, then
+                       _after_move (shared with reschedule_event: refresh_sheet, every live raid's cards, open Confirm / fill-ask cards via
+                       edit_live_card, the `moved` notice to Moved.told), one thread line, one audit line, no DM. Callers: POST
+                       /api/run/{key}/start, raid_buttons.start_decide, configops run_start, MCP start_now.
                        after_placement_answer on an OPEN event (an ask kept by an unlock): a Can't sets the answer out (source declined), off the board.
                        unlock_run refuses while the lock still posts (_lock_posting: the flip's cards, asks, notices and lock line; or
                        lock_parts chaining), withdraws fill asks under plan_lock after the flip, and redraws every Confirm card kept open
@@ -340,9 +349,10 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        boss_lines = the lock card's "☠ Bosses 3 / 6" + "All bosses down — End the event?" (night_actions_row's End reads "End the event")
   raid_buttons.py      RUN_WORDS = THE label of every run verb (RunButton.LABELS is built from it; /api/meta.run_labels — design §5.56 phase 2);
                        persistent DynamicItem buttons: SignupButton (Join/Bench/No thanks/Can't make it + character picker), FillButton, PlaceButton,
-                       RunButton (officer Lock/Fill/Loot/Cancel on the cards; the lock card's second row Remind/Pause/Unlock/End — Unlock
-                       greyed once the event's first raid has started; the closed card's Reopen; lock_decide / cancel_decide / remind_decide /
-                       unlock_decide (cq.unlock_box: Unlock · Back, or the refusal; then unlock_run) / end_decide = THE lock, cancel, remind, unlock and end screens: the server's
+                       RunButton (officer Lock/Fill/Loot/Cancel on the cards; the lock card's second row Remind/Pause/Start now/Unlock/End — Start
+                       now greyed unless rc.start_now_refusal(reg, None, ev) is None, Unlock greyed once the event's first raid has started; the closed card's Reopen; lock_decide / cancel_decide / remind_decide /
+                       unlock_decide (cq.unlock_box: Unlock · Back, or the refusal; then unlock_run) / start_decide (cq.start_now_box: Start now · Back,
+                       or the refusal; then start_now — end_decide's "hasn't started" refusal keeps a Start now button that opens it) / end_decide = THE lock, cancel, remind, unlock, start and end screens: the server's
                        box through Wizard.decide_box — cq.lock_box (a complete board: Lock · Preview lock; with the fill choice two verbs, RUN_WORDS
                        lock_as_is / lock_fill: Lock as it stands · Lock and auto-fill · Preview lock, Lock and auto-fill opening its own
                        screen with the fill box, an empty board's refusal with Lock and auto-fill + Back; the preview = the shown choice's roster as decide_box's embed),
@@ -362,9 +372,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        raid the game lacks ("… opens no events: … Change its raids on the Schedules page, or remove it there."); a later raid gets no
                        health card or lock of its own while a raid before it is open; an occurrence whose minute a live ONE-OFF holds
                        (rc.one_off_at) is skipped with one ops warn naming both (_warn_night_taken) — another schedule's run there never blocks it
-  raid_commands.py     register_raid_commands: /raid open|sheet|health|lock|unlock|loot|distribute|end|set|cancel|reschedule|edit|lineup|list|out|fill
+  raid_commands.py     register_raid_commands: /raid open|sheet|health|lock|unlock|start|loot|distribute|end|set|cancel|reschedule|edit|lineup|list|out|fill
                        (reschedule / edit → flows_event, no arguments; unlock → flows_raid's raid_unlock: the locked-event picker, first raids only,
-                       then unlock_decide)
+                       then unlock_decide; start → flows_raid's raid_start, the same picker, then start_decide)
   web/api_me.py        install_me_api (called from api.py): the inbox routes — asks/notices on GET /api/me (api.py), POST /api/me/run/{key}/answer|out,
                        /api/me/fill/{key}, /api/me/ask/{id}, /api/me/notices/read (a member's own answers through the RaidMixin verbs, by_id = me);
                        officers: GET /api/admin/inbox|actions, POST /api/admin/action (rev → 409; `spec`; §5.67 phase 4: `preview` → {box} =
