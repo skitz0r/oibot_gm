@@ -91,7 +91,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        no unanswered confirmation expires, no seat is freed); END_NOT_STARTED = end_refusal's "hasn't started" sentence,
                        the one every surface puts Start now beside; end_refusal reads the FIRST raid's start (an event has started when
                        its first raid has: a later raid's start less ev.starts). NOT_STARTED_YET = Loot › Tonight's line. STARTED_NOTICE =
-                       Start now's `moved` notice. end_run closes every Confirm ask still open on the raid (close_asks_at_end: `expired`,
+                       Start now's `moved` notice. end_run closes every Confirm ask still open on the raid (close_asks_at_end over rc.open_ask: `expired`,
                        no seat freed, no notice → the DM cards; callers edit them to ENDED_ASK via RaidMixin.end_ask_cards); Reopen
                        leaves them closed.
                        open_when/which_run/open_preview (THE open-time resolver, DST-safe); spec_switches / regulars_not_rostered / fill_state_text /
@@ -358,7 +358,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
   raid_buttons.py      RUN_WORDS = THE label of every run verb (RunButton.LABELS is built from it; /api/meta.run_labels — design §5.56 phase 2);
                        persistent DynamicItem buttons: SignupButton (Join/Bench/No thanks/Can't make it + character picker), FillButton, PlaceButton,
                        RunButton (officer Lock/Fill/Loot/Cancel on the cards; the lock card's second row Remind/Pause/Start now/Unlock/End — Start
-                       now greyed unless rc.start_now_refusal(reg, None, ev) is None, Unlock greyed once the event's first raid has started or while boss_progress finds a loot council on that raid; the closed card's Reopen; lock_decide / cancel_decide / remind_decide /
+                       now greyed unless rc.start_now_refusal(reg, None, ev) is None, Start now and Unlock greyed exactly when rc.start_now_refusal / rc.unlock_refusal refuse the event (night_actions_row(reg, ev, rs): a later raid's card reads its first raid), Unlock also while boss_progress finds a loot council on that raid; the closed card's Reopen; lock_decide / cancel_decide / remind_decide /
                        unlock_decide (cq.unlock_box: Unlock · Back, or the refusal; then unlock_run) / start_decide (cq.start_now_box: Start now · Back,
                        or the refusal; then start_now — end_decide's "hasn't started" refusal keeps a Start now button that opens it) / end_decide = THE lock, cancel, remind, unlock, start and end screens: the server's
                        box through Wizard.decide_box — cq.lock_box (a complete board: Lock · Preview lock; with the fill choice two verbs, RUN_WORDS

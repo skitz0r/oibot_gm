@@ -46,7 +46,7 @@ def register_raid_commands(tree: app_commands.CommandTree, guilds: Guilds, ops: 
         if reg:
             await FLOWS["raid_health"](interaction, reg)
 
-    @raid.command(name="lock", description="Officer: lock a sheet now — roster from the signups, confirmation DMs to everyone rostered")
+    @raid.command(name="lock", description="Officer: lock an event now — the board as it stands, or auto-fill the empty slots (you choose)")
     async def raid_lock(interaction: discord.Interaction):
         reg, interaction = await officer(interaction)
         if reg:

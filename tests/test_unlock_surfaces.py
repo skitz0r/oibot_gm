@@ -392,3 +392,46 @@ def test_a_reviewed_start_now_carries_its_box_too(reg, rs):
     with pytest.raises(RegistryError, match="changed this event"):
         run(bot.start_now(reg, rs, ev, "Officer", seen="0" * 12))
     assert rs.events[ev.key].start == ev.start
+
+
+# ---------------------------------------------------------------- final round: a later raid's card, the clock's warnings
+
+def test_a_later_raids_card_greys_start_now_and_unlock_when_the_first_raid_has_ended(reg, rs):
+    from oibot_gm.raid_views import night_actions_row
+
+    bot = NightBot(reg, rs)
+    lead, fev, ms = _pair_with_lead_board(reg, rs)
+    fev.layout = [[m.display_name for m in ms[5:8]]]
+    rs.save(fev, "board (test)")
+    run(bot.lock_run(reg, rs, rs.events[lead.key], by="Jon", fill=False))
+    lead, fev = rs.events[lead.key], rs.events[fev.key]
+
+    def greyed(row):
+        return {b.item.custom_id.rsplit(":", 1)[-1]: b.item.disabled for b in row.children}
+
+    g = greyed(night_actions_row(reg, fev, rs))
+    assert g["start"] is False and g["unlock"] is False, "before anything starts both can be pressed"
+    rc.end_run(reg, rs, lead, "t")
+    assert rc.start_now_refusal(reg, rs, fev) is not None and rc.unlock_refusal(reg, rs, fev) is not None
+    g = greyed(night_actions_row(reg, fev, rs))
+    assert g["start"] is True and g["unlock"] is True, "the press would be refused: greyed, read for the event"
+
+
+def test_the_clocks_failing_lock_warns_the_ops_feed_once_per_failure(reg, rs):
+    from test_lock_box_choice import ten
+
+    bot = NightBot(reg, rs)
+    ev, _ms = ten(reg, rs, placed=0)  # people joined, nobody on the board: the lock as it stands fails
+
+    def warns():
+        return [t for lvl, t in bot.ops.lines if "lock failed" in t]
+    for _ in range(3):  # the clock retries every 15 minutes (an officer may still place someone)
+        run(bot.lock_run(reg, rs, rs.events[ev.key], fill=False))
+    ev = rs.events[ev.key]
+    assert ev.state == "open" and ev.lock_error == rc.LOCK_EMPTY_BOARD
+    assert len(warns()) == 1, warns()
+    assert sum("failed" in u for u in bot.updates) == 1, "and one thread line"
+    ev.lock_error = rc.SOLVER_WORDS["infeasible"]  # the last failure was another one: this one is new again
+    rs.save(ev, "another failure before (test)")
+    run(bot.lock_run(reg, rs, rs.events[ev.key], fill=False))
+    assert len(warns()) == 2, warns()

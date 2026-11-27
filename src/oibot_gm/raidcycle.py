@@ -5500,13 +5500,13 @@ def close_asks_at_end(reg: Registry, ev: RaidEvent) -> list[tuple[int, int]]:
     (channel id, message id) for the caller to edit to their final state (ENDED_ASK)."""
     cards = []
     for m in reg.members.values():
-        open_ = [a for a in m.placement_asks if a["roster"] == ev.team and a.get("answer") is None]
-        for a in open_:
-            a["answer"], a["answered_at"], a["answered_by"] = "expired", now(), "end"
-            if a.get("dm"):
-                cards.append((a["dm"][0], a["dm"][1]))
-        if open_:
-            reg.save(m, f"{m.display_name}'s confirmation for {ev.team} closed: the raid ended")
+        a = open_ask(m, ev)  # THE open-ask reader: their latest ask on this event, unanswered
+        if a is None:
+            continue
+        a["answer"], a["answered_at"], a["answered_by"] = "expired", now(), "end"
+        if a.get("dm"):
+            cards.append((a["dm"][0], a["dm"][1]))
+        reg.save(m, f"{m.display_name}'s confirmation for {ev.team} closed: the raid ended")
     return cards
 
 

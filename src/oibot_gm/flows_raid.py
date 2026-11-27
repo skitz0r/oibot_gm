@@ -580,7 +580,7 @@ async def open_raid_health(interaction: discord.Interaction, reg: Registry, **_s
         if sheet_state(ev) == "open":
             layout = health_layout(reg, rs, ev, run_team(reg, ev), i.client.ico, officer=officer)
         else:
-            layout = health_locked_brief(reg, ev, i.client.ico, officer=officer)
+            layout = health_locked_brief(reg, ev, i.client.ico, officer=officer, rs=rs)
         if is_command(i):
             await i.response.send_message(view=layout, ephemeral=eph)
             return

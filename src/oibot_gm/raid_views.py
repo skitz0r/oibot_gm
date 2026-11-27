@@ -476,14 +476,16 @@ def run_actions_row(reg: Registry, ev: rc.RaidEvent, locked: bool):
     return ui.ActionRow(*items)
 
 
-def night_actions_row(reg: Registry, ev: rc.RaidEvent):
+def night_actions_row(reg: Registry, ev: rc.RaidEvent, rs=None):
     """The lock card's second row — the raid-night levers (design B2/B4/B7): Remind the unanswered (greyed when
     rc.remind_refusal says it can't go now, e.g. within the hour), Pause / Resume automatic asks (D18), Start now (while
     rc.start_now_refusal is None — `ev` answers for itself, the card holds no store; the decide screen prints
     consequences.start_now_box), Unlock (before the event's first raid starts and while no loot council is open on this raid —
     boss_progress, the same session files rc.loot_open_on reads; the decide screen prints consequences.unlock_box or its
     refusal), End the run (after the event's start — its first raid's, rc.end_refusal; LootMixin.end_run). One order always; what does not apply is
-    disabled in place. Discord's five buttons a row: this row is full."""
+    disabled in place. Discord's five buttons a row: this row is full. `rs` (the callers hold it): Start now and Unlock are
+    greyed exactly when rc.start_now_refusal / rc.unlock_refusal refuse the EVENT the press acts on — a later raid's card
+    reads its first raid (ended, cancelled, started); without it `ev` answers for itself."""
     ui = discord.ui
     started = rc.end_refusal(ev) is None  # the event has started when its FIRST raid has (issue 14)
     remind_no = rc.remind_refusal(reg, ev) if rc.run_confirms(reg, ev) else rc.NO_CONFIRMATIONS
@@ -492,8 +494,9 @@ def night_actions_row(reg: Registry, ev: rc.RaidEvent):
     first_start = ev.start - timedelta(minutes=int(ev.starts or 0)) if rc.is_follow(ev) else ev.start  # the event starts with its first raid
     return ui.ActionRow(RunButton(reg.key, ev.key, "remind", disabled=bool(remind_no)),
                         RunButton(reg.key, ev.key, "pause", label=RUN_WORDS["resume"] if ev.autofill_paused else None),
-                        RunButton(reg.key, ev.key, "start", disabled=rc.start_now_refusal(reg, None, ev) is not None),  # issue 14
-                        RunButton(reg.key, ev.key, "unlock", disabled=datetime.now(ev.start.tzinfo) >= first_start or prog is not None),  # issue 14: before the FIRST raid's start, no council open (decide: rc.unlock_refusal)
+                        RunButton(reg.key, ev.key, "start", disabled=rc.start_now_refusal(reg, rs, ev) is not None),  # issue 14
+                        RunButton(reg.key, ev.key, "unlock", disabled=prog is not None or (rc.unlock_refusal(reg, rs, ev) is not None if rs is not None
+                                                                                            else datetime.now(ev.start.tzinfo) >= first_start)),  # issue 14
                         RunButton(reg.key, ev.key, "end", disabled=not (started or down)))
 
 
@@ -716,7 +719,7 @@ def lock_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, i: int, rs=Non
                     + (f" · reminded {reg.local12(ev.reminded_at, '%I:%M %p')}" if ev.reminded_at else ""))
     parts += [ui.Separator(), ui.TextDisplay("\n".join(tail)), run_actions_row(reg, ev, locked=True)]
     if i == 0 and ev.state == "locked":
-        parts.append(night_actions_row(reg, ev))
+        parts.append(night_actions_row(reg, ev, rs))
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(*parts, accent_colour=TEAL))
     return view
@@ -864,7 +867,7 @@ def closed_layout(reg: Registry, ev: rc.RaidEvent, ico) -> discord.ui.LayoutView
     return view
 
 
-def health_locked_brief(reg: Registry, ev: rc.RaidEvent, ico, officer: bool) -> discord.ui.LayoutView:
+def health_locked_brief(reg: Registry, ev: rc.RaidEvent, ico, officer: bool, rs=None) -> discord.ui.LayoutView:
     """/raid health on a LOCKED run ("where are we", any time — design B4): rostered against the seats, what is short
     (role icon + number), the confirmations tally and the fill state in words; officers also get who is waiting and
     the lock card's buttons. Members see the counts only (never names of who hasn't confirmed)."""
@@ -883,7 +886,7 @@ def health_locked_brief(reg: Registry, ev: rc.RaidEvent, ico, officer: bool) -> 
         lines.append(f"-# {rc.fill_state_text(reg, ev)}")
     parts = [_header(reg, ev, f"🔒 Roster health · {raid_name(reg, ev)}", lines)]
     if officer:
-        parts += [run_actions_row(reg, ev, locked=True), night_actions_row(reg, ev)]
+        parts += [run_actions_row(reg, ev, locked=True), night_actions_row(reg, ev, rs)]
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(*parts, accent_colour=0xC0392B if short else TEAL))
     return view

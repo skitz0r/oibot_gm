@@ -990,10 +990,10 @@ class RaidMixin:
                 rs.save(ev, "lock failed")
                 # names in the sentence (a conflict names people) and `by` are member text: escaped on the Discord lines
                 esc = lambda t: discord.utils.escape_mentions(discord.utils.escape_markdown(str(t)))  # noqa: E731
-                if first:
+                if first:  # the SAME failure retried (the clock every 15 minutes) is said once: thread line and ops warning
                     await self.post_run_update(reg, ev, f"⚠️ The lock by {esc(by)} failed. {esc(why)} The sheet stays open.")
                     await self.refresh_sheet(reg, ev)  # the sheet's footer says so too: the signup channel's truth matches the thread's
-                await self.ops.emit(reg.config, "warn", f"{run_title(reg, ev)}: lock failed — {esc(why)}")
+                    await self.ops.emit(reg.config, "warn", f"{run_title(reg, ev)}: lock failed — {esc(why)}")
                 return f"{run_title(reg, ev)}: lock failed — {why}"
             if ev.state != "open":  # cancelled while the roster was being built
                 raise RegistryError(f"{run_title(reg, ev)} was {ev.state} before the roster was ready, so it was not locked.")

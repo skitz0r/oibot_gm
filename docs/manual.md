@@ -47,7 +47,7 @@ understands; it answers in the words below.
   (*Opened by an officer*). It has no regulars; by default it is first come and locks 2 hours before, and it asks
   nobody to confirm.
 - **Minimum** — the fewest of a role (tank, healer, melee, ranged), a class or a spec an event's raid takes: one number,
-  with an optional reason, and no upper limit (*"at least 3 healers"*). The lock fills every minimum first and never
+  with an optional reason, and no upper limit (*"at least 3 healers"*). A lock that fills meets every minimum first and never
   stops on one: an event that joiners can't fill to a minimum still gets its roster, and the event shows what it is short. A
   tank or healer past the minimum gets a seat only when nobody else can take it. Until the guild sets its own, a raid's
   tank and healer minimums come from the game, scaled to the roster's size and rounded up. A smaller roster (a 10-player
@@ -138,7 +138,7 @@ understands; it answers in the words below.
   or healer minimum. Auto-fill, a whole board written at once and a swap never do, and a place you held as a joiner is
   decided again at the lock once you answer Bench. When a place frees up later, you are among the first asked.
 - **The board** — an event's groups on the Events page, the one name for them (never "builder" or "bank"): before the lock
-  it is the layout the lock will use (officers drag names into groups; the lock places everyone else), after the lock it
+  it is the layout the lock will use (officers drag names into groups; a lock that fills places everyone else), after the lock it
   *is* the roster. On the Events page it shows what officers placed; they shape it by dragging names (or a name's
   **⋮ › Move to…**), let the bot place the rest the way the lock would with **Auto-fill groups**, take their own moves
   back with **Undo my moves**, empty it with **More › Clear the board**, and pick how a split is made in **Edit event**
@@ -903,7 +903,7 @@ schedule sets its own. Three kinds:
 Each schedule also says how many **rosters** an event expects (1–4). With 2, the sheet advertises 2 × the raid's size
 (20 seats for a 10-player raid), the health check and the fill engine measure against two rosters, and the lock builds
 two. The board on the Events page shows every roster the event expects before the lock (a 10-player ×2 event has 20
-places, *Roster 1* and *Roster 2*), and *Rosters* reads *2 of 10*. The lock builds the second roster as soon
+places, *Roster 1* and *Roster 2*), and *Rosters* reads *2 of 10*. A lock that fills builds the second roster as soon
 as more people joined than one roster holds, even when the tanks or healers who joined only cover one: the missing
 seats stay open and are filled like any short seat. Everyone who joined for the short role gets a place before one of
 its seats is left empty. Someone pinned out or kept on the bench never counts as cover, so a short role doesn't
@@ -1178,7 +1178,7 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    **Unpin** takes it back; dragging them into a group takes it back too, and **Undo my moves** puts it back). A placed
    person whose answer leaves Join and Bench (No thanks, Can't make it, an absence, leaving the server, a retired
    character) or who changes the character or spec they come as comes off the board at once too — Auto-fill or the
-   lock places them again if they still play; a placed name moving between Join and Bench stays on the board, but a placed joiner who answers Bench is decided
+   a lock that fills places them again if they still play; a placed name moving between Join and Bench stays on the board, but a placed joiner who answers Bench is decided
    again at the lock, like a Bench place Auto-fill made; if they join again, a place an officer dragged them to is theirs again. **Auto-fill groups**, under the *Not placed* heading,
    places everyone still there the way the lock would right now (and the Bench answers the lock would roster: only where
    a seat would stay empty or a tank or healer is short) — the lock's own placement, with every name you placed
@@ -1197,8 +1197,9 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    again, so someone who joins after the Auto-fill comes first. The same goes for a Bench answer a whole board put there
    (*Use this* on a proposal, plain text's board, MCP's set_layout). Only your own drag (or **⋮ › Move to…**) of that
    Bench answer fixes their place; a swap that only pushes a Bench answer to another group doesn't. A whole board
-   written later keeps a Bench answer you dragged as yours while it leaves them in the same group. If you never press it, the lock fills the open seats from *Not placed*, as it
-   always has. **More › Clear the board…** empties every group of the event (your placements and Auto-fill's alike,
+   written later keeps a Bench answer you dragged as yours while it leaves them in the same group. If you never press it, a lock that fills (the clock's with
+   Auto-fill on Auto Lock On, or a person's with Auto-fill empty roster slots ticked) fills the open seats from *Not placed*; a person's lock
+   otherwise rosters only the board. **More › Clear the board…** empties every group of the event (your placements and Auto-fill's alike,
    Bench answers too; pins stay) after the bot's box (*The 14 people on the board go back to Not placed.* — *… go back to
    Not placed or Bench, by their answer.* when Bench answers are among them · *Nobody is told.* · *Auto-fill groups can place
    everyone again.*). A locked event's board is the roster: no drag, and **⋮ ›
@@ -1318,8 +1319,8 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    for a different one, and *Use this layout on the board* puts it on the board; **Place the rest** lets
    the bot place whoever is still not placed around what you placed (nothing is sent; the button spins while it works,
    and if someone changed the board since you looked it is refused and the board reloads); **Clear** empties the board after a
-   confirmation. Whatever is on the board when the sheet locks is the roster, with the bot filling any
-   empty seats. An answer or pin that changes while the lock is building the roster (someone presses *No thanks*,
+   confirmation. Whatever is on the board when the sheet locks is the roster; the bot fills the empty seats only in a
+   lock that fills (§4 *Lock*). An answer or pin that changes while the lock is building the roster (someone presses *No thanks*,
    you keep someone on the bench) makes the lock build it again from the sheet as it now is, so nobody is rostered
    from an answer they already took back; if the sheet keeps changing, the lock fails, the sheet stays open and
    you lock again in a moment.
@@ -1328,8 +1329,8 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    for that raid, written into its groups; on a later raid of the evening it reads who the raids before it will roster,
    as the lock does). Each raid has its own board and its own button. A drag keeps that person where you put them when
    the lock comes; dropping on someone swaps the two, and dropping on *Not placed* only takes them out of their group —
-   the lock can still seat them. A Bench answer is listed apart under *Bench* and can be dragged into a group too. The
-   lock fills the open seats from *Not placed*, then from *Bench*. **Undo my moves** takes back only your
+   a lock that fills can still seat them. A Bench answer is listed apart under *Bench* and can be dragged into a group too. A
+   lock that fills takes the open seats from *Not placed*, then from *Bench*. **Undo my moves** takes back only your
    own moves; another officer's and Auto-fill's stay. Its confirm counts them (*Your 2 moves on this board are dropped.
    Those people go back to Not placed.* — *to Bench* for a Bench answer, *to Not placed or Bench, by their answer* for
    both), and if the board changed while it was open you see the new count first. A
@@ -1378,14 +1379,18 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    cancelled event isn't opened again. Pick another time."; the open screen and the site say so before you press
    anything). A test event opened in the same minute as one
    you just cleared starts a minute later.
-4. **Lock** — `lock_hours_before` [24 h] before the slot (or *Lock now* / `/raid lock`): everyone officers
-   placed on the board keeps their place, and the lock places those still under *Not placed* in the open seats, then
-   the bench. The order is everyone who joined, then the Bench answers in the event's own order (by priority, or by
+4. **Lock** — `lock_hours_before` [24 h] before the slot by the clock when **Auto Lock** is On, or whenever an officer
+   presses *Lock now* / `/raid lock`. Which lock fills empty slots: **a lock a person presses rosters the board as it
+   stands** unless they choose **Auto-fill empty roster slots** (below); **the clock's lock** fills them when **Auto-fill
+   on Auto Lock** is On and rosters the board as it stands when it is Off; with Auto Lock Off the clock never locks.
+   **A lock that fills:** everyone officers placed on the board keeps their place, and the lock places those still
+   under *Not placed* in the open seats, then the bench. The order is everyone who joined, then the Bench answers in the event's own order (by priority, or by
    when they answered on a first-to-join event): a Bench answer takes a seat only where it would otherwise stay empty,
    or where the event is short a tank or healer that nobody who joined can cover. A Bench answer an officer placed by
    hand or pinned keeps that place, even ahead of someone who joined. The number of rosters comes from those who joined;
    the bench never adds one, unless an officer placed a Bench answer in a later roster's group. A Bench answer the lock
-   rosters gets the Confirm ask like anyone rostered. Lock now asks first.
+   rosters gets the Confirm ask like anyone rostered (someone who already confirmed, or whose ask is still open, is not
+   asked again). Lock now asks first.
    **A lock an officer presses** (Lock now, the sheet card's Lock, the lock card and `/raid lock`, plain text, MCP) never
    fills silently: whenever any roster of the event has open slots — even when everyone who answered is placed — the
    box offers one choice, **Auto-fill empty roster slots**, unticked. Unticked, the lock rosters exactly the names on
@@ -1690,7 +1695,7 @@ start is allowed, and the confirm says when it opens. Only that event changes �
 confirm says so on a schedule's event when it has room. The first raid's answers are never touched, and every raid of the new lineup takes
 them, a new raid included (*"All 18 answers stand."*). A raid that stays keeps its board, its pins
 and the plans to leave before it, in its new place. A raid going down to fewer rosters loses the board places (and their
-pins) on the rosters that go: those people stay joined and the lock places them again, and the confirm always says so
+pins) on the rosters that go: those people stay joined and go back to Not placed, and the confirm always says so
 (*"Moves made on the removed roster are dropped."*). A raid taken out is cancelled with what it held, always counted in
 the confirm (*"Barrow Deeps is taken out with its 3 board places, 1 pin and 1 plan to leave early."*); an open ask on
 it closes and its card says so. A raid taken out answers as itself afterwards: cancelling it again says it is already
@@ -1810,7 +1815,7 @@ roster/splits…*, and *Clear* set apart. Officer cards in Discord use the same 
 Fill seats… · Loot · Cancel event… (the *Suggested* block has its own row: **Ask** · **Suggest…**), and the lock card adds
 a second row: **Remind the unanswered** · **Pause Automated Fill Requests** · **Start now** · **Unlock** · **End the event**. **One confirm screen, the same
 words everywhere.** Before a lock, a cancel, clearing the test bench, deciding an application or approving / dismissing
-a news proposal, the bot shows one sentence computed from the event as it stands — for a lock: *"Everyone on the board keeps
+a news proposal, the bot shows one sentence computed from the event as it stands — for a lock with Auto-fill empty roster slots ticked: *"Everyone on the board keeps
 their place, and the lock fills the open slots from Not placed. 16 of the 18 rostered get the Confirm or Can't make it DM and 2 see it on the site. They have until Tue 9 Dec
 6:30 PM to answer."*; on a one-off: *"On a one-off event Join is the commitment, so nobody is asked to confirm."* — then the verb's own button (*Lock*, *Cancel event*, *Send reminder*, *End the event*, *Approve*…), **<verb> with a
 note** where a note makes sense, and **Back**. In Discord, Lock, Cancel event, Send reminder and End the event print the very
