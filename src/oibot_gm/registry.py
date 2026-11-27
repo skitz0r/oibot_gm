@@ -7047,12 +7047,15 @@ class Registry:
         out = [dict(n) for n in reversed(self._fresh_notices(m))]
         return [n for n in out if not n.get("read_at")] if unread else out
 
-    def remove_notices(self, kind: str, run: str) -> int:
-        """Take every `kind` notice about run `run` off every member's inbox, read or not (an unlock takes back the lock's
-        Not rostered notices: nobody reads "in line for a freed seat" on an open event). One quiet save per member
-        touched; the caller's store.batch makes it one commit. → how many notices went."""
+    def remove_notices(self, kind: str, run: str, *, only: set[int] | None = None) -> int:
+        """Take every `kind` notice about run `run` off every member's inbox (`only`: these members'), read or not (an
+        unlock takes back the lock's Not rostered notices — nobody reads "in line for a freed seat" on an open event — and
+        the seat released notice of whoever it puts back to Join). One quiet save per member touched; the caller's
+        store.batch makes it one commit. → how many notices went."""
         gone = 0
         for m in list(self.members.values()):
+            if only is not None and m.discord_id not in only:
+                continue
             keep = [n for n in m.notices if not (n.get("kind") == kind and n.get("run") == run)]
             if len(keep) != len(m.notices):
                 gone += len(m.notices) - len(keep)

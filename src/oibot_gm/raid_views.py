@@ -749,6 +749,24 @@ def confirm_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, sg, i: int,
     return view
 
 
+CONFIRM_OPEN = ("An officer unlocked the event to change the roster, so it is open for signup again. "
+                "Your answer still counts, and this question stays open until the next lock.")
+
+
+def confirm_open_layout(reg: Registry, ev: rc.RaidEvent, ico, sg, uid: int) -> discord.ui.LayoutView:
+    """A Confirm / Can't DM kept open by an unlock (issue 14), edited in place: the roster is open again, their answer
+    still counts, nothing runs out while it is open — no group and no deadline (neither exists now). The same buttons
+    answer the same ask; the next lock redraws it with its seat (RaidMixin.reconcile_asks)."""
+    ui = discord.ui
+    rd = reg.raid_def(ev.instance)
+    head = _header(reg, ev, f"The roster is open again · {rd.get('name', ev.instance)}",
+                   [f"{ico('spec', f'{sg.cls}:{sg.spec}')} **{sg.character}**", CONFIRM_OPEN])
+    view = ui.LayoutView(timeout=None)
+    view.add_item(ui.Container(head, ui.ActionRow(PlaceButton(reg.key, ev.team, uid, "yes"), PlaceButton(reg.key, ev.team, uid, "no")),
+                               accent_colour=TEAL))
+    return view
+
+
 def fill_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, ask) -> discord.ui.LayoutView:
     """Fill DM: what opened, the seat offered (character + spec), the group they'd join, Confirm / Can't make it."""
     ui = discord.ui

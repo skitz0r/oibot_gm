@@ -922,6 +922,82 @@ def lock_choice_cases(reg, rs, add):
         m.dm_opt_out = dms[m.discord_id]
 
 
+def relock_cases(reg, rs, add):
+    """Issue 14, Task 4 fix round 1: the lock box on an event unlocked once (rc.confirm_plan: who THIS lock asks, read by
+    the lock's fan-out too) — everyone confirmed (nobody new is asked), a newcomer and a confirmed name left off (the ask
+    that closes is said), two left off holding open asks, a newcomer with DMs off, a lineup, each beside its auto-fill box.
+    A first lock reads as lock_choice_cases pins it."""
+    ms = [reg.members[REAL + i] for i in range(len(PEOPLE))]
+    dms = {m.discord_id: m.dm_opt_out for m in ms}
+    for m in ms:
+        m.dm_opt_out = False
+    names = [m.display_name for m in ms]
+    sid = _weekly(reg, RID, ["Tue 19:30", "Thu 19:30", "Sat 19:30"], sid="relock")
+    now = reg.now_local()
+    nights = iter([t for _s, t in rc.occurrences(reg, now, 24 * 21) if _s["id"] == sid and t - now >= timedelta(hours=30)])
+
+    def unlocked(rostered: int, answer="yes"):
+        ev = rc.open_run(reg, rs, RID, next(nights), by="t", schedule=sid)
+        join(reg, rs, ev, ms[:12])
+        lock_with_board(reg, rs, ev, names[:rostered])
+        for m in ms[:rostered]:
+            m.placement_asks.append({"roster": ev.team, "character": m.main.label, "asked_at": rc.now(), "answer": answer,
+                                     "answered_at": rc.now() if answer else None, "by": "lock", "channel": "dm"})
+        rc.unlock(reg, rs, ev, "t")
+        return rs.events[ev.key]
+
+    def both(case, ev, want=None):
+        b, f = cq.lock_box(reg, ev, rs), cq.lock_box(reg, ev, rs, fill=True)
+        assert want is None or b["sentences"] == want, (case, b["sentences"])
+        add("lock_box", f"after an unlock, {case}, as it stands", b)
+        add("lock_box", f"after an unlock, {case}, auto-fill ticked", f)
+
+    ev = unlocked(8)
+    both("everyone confirmed", ev, ["The roster has 2 open slots.", "Only the 8 on the board are rostered, and nobody new is asked to confirm.", cq.LOCK_PAUSE])
+    ev = unlocked(8)
+    ev.layout = [[n for n in g if n != names[0]] for g in ev.layout]
+    ev.layout[-1].append(names[9])
+    rs.save(ev, "board (test)")
+    both("a newcomer, a confirmed name left off", rs.events[ev.key],
+         ["The roster has 2 open slots.", f"Only the 8 on the board are rostered, and 1 newly rostered gets {cq.CONFIRM_DM}.",
+          f"{names[0]} is left off the roster, so their Confirm ask closes."])
+    ev = unlocked(8, answer=None)
+    ev.layout = [[n for n in g if n not in names[:2]] for g in ev.layout]
+    ev.layout[-1] += names[9:11]
+    rs.save(ev, "board (test)")
+    both("two newcomers, two left off holding asks", rs.events[ev.key],
+         ["The roster has 2 open slots.", f"Only the 8 on the board are rostered, and 2 newly rostered get {cq.CONFIRM_DM}.",
+          "The 2 people left off the roster have their Confirm ask closed."])
+    ms[9].dm_opt_out = True
+    ev = unlocked(8)
+    ev.layout[-1].append(names[9])
+    rs.save(ev, "board (test)")
+    both("a newcomer with DMs off", rs.events[ev.key],
+         ["The roster has 1 open slot.", "Only the 9 on the board are rostered, and 1 newly rostered is asked to confirm.", cq.LOCK_PAUSE])
+    ms[9].dm_opt_out = False
+    lead = rc.open_run(reg, rs, "hyjal_summit_forever", (now + timedelta(days=16)).replace(hour=18, minute=30, second=0, microsecond=0),
+                       by="t", schedule=rc.ADHOC_SCHEDULE, follow={"raid": RID, "rosters": 2})  # lock_choice_cases opened Hyjal
+    rc.reschedule(reg, rs, lead, timing={"confirm": True}, by="t")
+    join(reg, rs, rs.events[lead.key], ms)
+    lead = rs.events[lead.key]
+    fev = rc.follow_of(rs, lead)
+    assert fev is not None, (lead.instance, lead.followed_by)
+    lock_with_board(reg, rs, lead, names[:6])
+    lock_with_board(reg, rs, fev, names[:5])
+    for m in ms[:6]:
+        m.placement_asks.append({"roster": lead.team, "character": m.main.label, "asked_at": rc.now(), "answer": "yes",
+                                 "answered_at": rc.now(), "by": "lock", "channel": "dm"})
+    rc.unlock(reg, rs, lead, "t")
+    lead = rs.events[lead.key]
+    lead.layout[-1].append(names[7])
+    rs.save(lead, "board (test)")
+    both("a lineup, one newcomer on the first raid", rs.events[lead.key])
+    b = cq.lock_box(reg, rs.events[lead.key], rs)
+    assert "1 newly rostered for the first raid is asked to confirm." in b["sentences"][1], b
+    for m in ms:
+        m.dm_opt_out = dms[m.discord_id]
+
+
 def unlock_cases(reg, rs, add):
     """Issue 14, Task 5: the Unlock box (consequences.unlock_box) — nothing out, confirmation asks open (one, many), fill
     asks out (one, many, and with asks open too: the fill asks are said), a lineup (the whole event), and each refusal."""
@@ -1274,6 +1350,7 @@ def box_cases(reg, rs, runs, ms, dump):
     for kind, title in cq.REFUSAL_TITLES.items():
         add("refusal_box", kind, cq.refusal_box(title, rc.LINEUP_LOCKED))
     lock_choice_cases(reg, rs, add)  # last: its own schedule's nights would move the harness's recurring_run indices
+    relock_cases(reg, rs, add)  # its own schedule too; it locks and unlocks only its own events
     unlock_cases(reg, rs, add)  # after it: it locks the four-raid event
 
 

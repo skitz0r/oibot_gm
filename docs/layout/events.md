@@ -73,6 +73,14 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        standing_yes (latest ask on the event since created_at answered yes, not lapsed), lapse_yes (seat_gone stamps a yes whose
                        seat went), relock_drops; leftover_notices(…, also=) never writes a second Not rostered notice for a raid (has_notice).
                        lock_all_off = everyone who joined kept off (a person's lock refuses it).
+                       Fix round 1: confirm_plan(reg, ev, rostered ids) → ConfirmPlan(asked, confirmed, waiting, closed, .earlier) = THE "who
+                       this lock asks" — relock_drops, send_confirmations and the lock box (consequences) all read it. RaidEvent.played_as
+                       (name → spec, written only by unlock for a seat on an offspec; players_for applies it while open, prune_board drops
+                       it off the board, the lock clears it; board_as_it_stands marks it in spec_switches). unlock also sets
+                       health_posted (no reminder DM after an unlock), clears reminded_at/by, takes back the returned people's `released`
+                       notices; unlock(…, fills=False) leaves the fill asks to the caller's plan_lock. UNLOCK_SENDING (unlock_refusal's
+                       `sending`). pause_scope(rs, ev, paused) → (parts, flip) = THE reach of pause / resume (set_autofill_paused and
+                       plain text's run_pause review).
                        open_when/which_run/open_preview (THE open-time resolver, DST-safe); spec_switches / regulars_not_rostered / fill_state_text /
                        asks_on_site / log_rows (RaidEvent.log_at stamped by RaidStore.save) for ev_json; upcoming_rows (each active schedule's next three runs whatever the horizon, can_open + open_row_refusal's why) / short_why (a run card's short clause) — §5.56; FillAsk.channel dm|web (a failed DM = web)
                        Identity (§5.67 phase 3): a run's key is new_run_key(reg, rs, raid) = '<abbr>-<6 of KEY_ALPHABET>' (no 0/1/i/l/o/r), the run
@@ -229,6 +237,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        Every surface calls it after the box (Task 5): POST /api/run/{key}/unlock, raid_buttons.unlock_decide (the lock
                        card's Unlock, /raid unlock), configops run_unlock, MCP unlock_run.
                        after_placement_answer on an OPEN event (an ask kept by an unlock): a Can't sets the answer out (source declined), off the board.
+                       unlock_run refuses while the lock still posts (_lock_posting: the flip's cards, asks, notices and lock line; or
+                       lock_parts chaining), withdraws fill asks under plan_lock after the flip, and redraws every Confirm card kept open
+                       with raid_views.confirm_open_layout (CONFIRM_OPEN: open again, the answer counts; no group, no deadline).
                        raid_views.locks_line / dm_locks_line: the sheet's, the officers' card's and the open / reminder DMs' lock words — with
                        Auto Lock off PAGE_WORDS officer_locks, the Details Locks row's sentence.
                        lock_preview solves with rc.run_strategy and the lock's own budget (rc.SOLVE_TIME_LIMIT_S), so it shows the roster Lock builds;

@@ -12,7 +12,8 @@ from datetime import datetime, timedelta
 import pytest
 
 from conftest import join, open_test_run
-from test_bench_last import DPS, base_eight, people, schedule_event
+from test_auto_lock import _later
+from test_bench_last import DPS, TANK, base_eight, people, schedule_event
 from test_lock_as_it_stands import _pair_with_lead_board
 from test_raid_night import NightBot, card_texts, run
 
@@ -28,9 +29,9 @@ def groups_of(ev) -> list[list[str]]:
     return [list(g) for r in ev.all_rosters for g in r.groups]
 
 
-def locked_event(reg, rs, *, placed: int = 8, joined_extra: int = 2):
-    """A schedule's event: 8 + `joined_extra` joined, `placed` of them on the board, locked as it stands by Jon (the
-    confirmations go out to everyone rostered)."""
+def locked_event(reg, rs, *, placed: int = 8, joined_extra: int = 2, fill: bool = False):
+    """A schedule's event: 8 + `joined_extra` joined, `placed` of them on the board, locked by Jon (as it stands, or
+    filled with `fill`; the confirmations go out to everyone rostered)."""
     bot = NightBot(reg, rs)
     ev = schedule_event(reg, rs)
     ms = base_eight(reg) + people(reg, joined_extra, DPS)
@@ -38,7 +39,7 @@ def locked_event(reg, rs, *, placed: int = 8, joined_extra: int = 2):
     ns = [m.display_name for m in ms]
     ev.layout = [ns[:min(placed, 5)], ns[5:placed]]
     rs.save(ev, "board (test)")
-    lock(bot, reg, rs, rs.events[ev.key], fill=False)
+    lock(bot, reg, rs, rs.events[ev.key], fill=fill)
     ev = rs.events[ev.key]
     assert ev.state == "locked" and rc.run_confirms(reg, ev)
     return bot, ev, ms
@@ -124,6 +125,7 @@ def test_the_scheduler_does_not_lock_an_unlocked_event_again(reg, rs, monkeypatc
     asks = {m.discord_id: dict(ask_of(reg, ev, m)) for m in ms[:5]}
     later = reg.now_local() + timedelta(hours=2)  # past the old confirm deadline, before the start
     monkeypatch.setattr(reg, "now_local", lambda: later)
+    _later(monkeypatch, later)  # the clock expiry reads (rc's datetime.now), not only the scheduler's
     run(bot.scheduler_tick_guild(reg))
     ev = rs.events[ev.key]
     assert ev.state == "open" and not ev.rosters, "no lock by the clock a minute later"
@@ -250,20 +252,29 @@ def test_unlock_refusals_one_sentence_each(reg, rs):
     assert rc.unlock_refusal(reg, rs, ev) == rc.UNLOCK_DONE
     opened.state = "cancelled"
     assert rc.unlock_refusal(reg, rs, opened) == rc.UNLOCK_CANCELLED
-    for s in (rc.UNLOCK_OPEN, rc.UNLOCK_DONE, rc.UNLOCK_CANCELLED, rc.UNLOCK_STARTED, rc.UNLOCK_LOOT):
+    for s in (rc.UNLOCK_OPEN, rc.UNLOCK_DONE, rc.UNLOCK_CANCELLED, rc.UNLOCK_STARTED, rc.UNLOCK_LOOT, rc.UNLOCK_SENDING):
         assert s.endswith(".") and s.count(".") == 1 and len(s.split()) <= 20
 
 
 # ---------------------------------------------------------------- an event locked before this change
 
 def test_an_event_locked_before_this_change_unlocks_the_same_way(reg, rs):
-    bot, ev, _ms = locked_event(reg, rs)
+    """What an old file really lacks: the lock line's id, the lock's fill choice, the seats at the flip, the played-as
+    specs (the keys are absent from the run file), and the stamped Auto Lock settings on its run dict."""
+    bot, ev, _ms = locked_event(reg, rs, fill=True)
     roster = groups_of(ev)
-    ev.lock_line, ev.lock_fill, ev.placed_by, ev.lock_seats = None, None, {}, None
-    rs.save(ev, "as an old file (test)")
-    run(bot.unlock_run(reg, rs, rs.events[ev.key], "Jon"))
+    raw = ev.model_dump(mode="json")
+    for k in ("lock_line", "lock_fill", "lock_seats", "played_as"):
+        raw.pop(k, None)
+    rs.events[ev.key] = old = rc.RaidEvent.model_validate(raw)
+    team = reg.config.team(old.team)
+    for k in ("auto_lock", "auto_lock_fill"):
+        team.pop(k, None)
+    assert old.lock_line is None and old.lock_fill is None and rc.auto_lock(reg, old), "read as an old file reads"
+    run(bot.unlock_run(reg, rs, old, "Jon"))
     ev = rs.events[ev.key]
     assert ev.state == "open" and [g for g in rc.board_layout(reg, ev) if g] == [g for g in roster if g]
+    assert not rc.auto_lock(reg, ev), "Auto Lock off, though the run dict never had the key"
     lock(bot, reg, rs, ev, fill=False)
     assert groups_of(rs.events[ev.key]) == roster
 
@@ -333,3 +344,154 @@ def test_a_persons_lock_on_a_board_emptied_since_the_box_is_refused_not_failed(r
     assert ev.state == "open" and ev.lock_error is None and not bot.updates, "no failed lock, no footer, no thread line"
     lock(bot, reg, rs, ev, fill=False)  # the scheduler keeps the failure path
     assert rs.events[ev.key].lock_error == rc.LOCK_EMPTY_BOARD
+
+
+# ---------------------------------------------------------------- fix round 1: specs, the box, the reminder, cards
+
+def seats_of(ev) -> list[list[tuple]]:
+    """Every roster's groups as (name, character, spec, role), group for group."""
+    out = []
+    for r in ev.all_rosters:
+        by = {p.signup_name: p for p in r.selected}
+        out += [[(n, by[n].character, by[n].spec, by[n].role) for n in g] for g in r.groups]
+    return out
+
+
+def test_an_offspec_seat_keeps_its_spec_through_an_unlock_and_a_relock_as_it_stands(reg, rs):
+    """The reviewer's P5: two tanks and eight Retribution / Holy paladins, locked with auto-fill — the solve rosters two
+    of them as Holy healers. After the unlock the board shows them as Holy; a relock as it stands rosters them so."""
+    bot = NightBot(reg, rs)
+    ev = schedule_event(reg, rs)
+    ms = people(reg, 2, TANK) + people(reg, 8, ("Paladin", "Retribution"), off="Holy")
+    join(reg, rs, ev, ms)
+    lock(bot, reg, rs, rs.events[ev.key], fill=True)
+    ev = rs.events[ev.key]
+    before = seats_of(ev)
+    healers = [x for g in before for x in g if x[3] == "healer"]
+    assert healers and all(x[2] == "Holy" for x in healers), before
+    rc.unlock(reg, rs, ev, "Jon")
+    ev = rs.events[ev.key]
+    shown = {p.signup_name: p for r in rc.board_rosters(reg, ev, rc.board_layout(reg, ev), rc.run_size(reg, ev)) for p in r.selected}
+    assert all(shown[n].spec == "Holy" and shown[n].role == "healer" for n, *_ in healers), "the board shows them as rostered"
+    lock(bot, reg, rs, ev, fill=False)
+    after = rs.events[ev.key]
+    assert seats_of(after) == before, "names, groups, characters and specs"
+    assert set(after.all_rosters[0].spec_switches) >= {n for n, *_ in healers}, "the lock card still says they play an offspec"
+    rc.unlock(reg, rs, after, "Jon")  # and again: the second unlock reads the same specs back
+    lock(bot, reg, rs, rs.events[ev.key], fill=False)
+    assert seats_of(rs.events[ev.key]) == before
+
+
+def test_two_rosters_filled_then_unlocked_relock_as_they_stood(reg, rs):
+    bot = NightBot(reg, rs)
+    ev = schedule_event(reg, rs)
+    ms = base_eight(reg) + base_eight(reg) + people(reg, 2, DPS)
+    join(reg, rs, ev, ms)
+    ev = rs.events[ev.key]
+    k = rc.groups_per_roster(reg, rc.run_size(reg, ev))
+    ev.layout = [[ms[0].display_name]] + [[] for _ in range(k - 1)] + [[ms[1].display_name]]  # someone in roster 2: two built
+    rs.save(ev, "board (test)")
+    lock(bot, reg, rs, rs.events[ev.key], fill=True)
+    ev = rs.events[ev.key]
+    before = seats_of(ev)
+    assert len(ev.all_rosters) == 2
+    rc.unlock(reg, rs, ev, "Jon")
+    lock(bot, reg, rs, rs.events[ev.key], fill=False)
+    assert seats_of(rs.events[ev.key]) == before
+
+
+def test_a_lineup_filled_then_unlocked_relocks_as_it_stood(reg, rs):
+    bot = NightBot(reg, rs)
+    lead, fev, ms = _pair_with_lead_board(reg, rs)
+    lock(bot, reg, rs, lead, fill=True)
+    lead, fev = rs.events[lead.key], rs.events[fev.key]
+    assert lead.state == fev.state == "locked"
+    a, b = seats_of(lead), seats_of(fev)
+    rc.unlock(reg, rs, lead, "Jon")
+    lock(bot, reg, rs, rs.events[lead.key], fill=False)
+    assert seats_of(rs.events[lead.key]) == a and seats_of(rs.events[fev.key]) == b
+
+
+def test_the_lock_box_after_an_unlock_counts_only_who_this_lock_asks(reg, rs):
+    """The reviewer's P7: confirmed people are not asked again, so the box says nobody new is asked; a newcomer is
+    counted; someone left off holding a yes has their ask close — said in the box."""
+    from oibot_gm import consequences as cq
+
+    bot, ev, ms = locked_event(reg, rs, placed=8, joined_extra=4)  # 8 rostered, 4 waiting: the board keeps open slots
+    for m in ms[:8]:
+        run(bot.answer_placement_for(reg, m.discord_id, ev.team, True, m.display_name, by_id=m.discord_id))
+    rc.unlock(reg, rs, rs.events[ev.key], "Jon")
+    ev = rs.events[ev.key]
+    b = cq.lock_box(reg, ev, rs)
+    assert b["sentences"][1] == "Only the 8 on the board are rostered, and nobody new is asked to confirm.", b
+    gone, new = ms[0], ms[9]
+    ev.layout = [[n for n in g if n != gone.display_name] for g in ev.layout]
+    ev.layout[-1].append(new.display_name)
+    rs.save(ev, "board (test)")
+    ev = rs.events[ev.key]
+    b = cq.lock_box(reg, ev, rs)
+    assert b["sentences"][1] == f"Only the 8 on the board are rostered, and 1 newly rostered gets {cq.CONFIRM_DM}.", b
+    assert b["sentences"][2] == f"{gone.display_name} is left off the roster, so their Confirm ask closes.", b
+    f = cq.lock_box(reg, ev, rs, fill=True)
+    assert f"Everyone rostered who wasn't asked before gets {cq.CONFIRM_DM}." in f["sentences"], f
+    dms = sum(len(v) for v in bot.dms.values())
+    lock(bot, reg, rs, ev, fill=False)
+    assert sum(len(v) for v in bot.dms.values()) == dms + 1, "the box's count is the lock's: one DM, to the newcomer"
+    assert ask_of(reg, rs.events[ev.key], gone).get("lapsed_at")
+
+
+def test_no_signup_reminder_dm_comes_from_an_unlock(reg, rs, monkeypatch):
+    """Locked before its reminder time, unlocked after it: the scheduler's next minute nudges nobody."""
+    bot = NightBot(reg, rs)
+    ev = open_test_run(reg, rs, days=1, soft=20, hard=10, confirm=5)  # starts in 27 h: the reminder is 7 h away
+    ms = reg.test_members()[:6]
+    join(reg, rs, ev, ms[:4])
+    ev = rs.events[ev.key]
+    ev.layout = [[m.display_name for m in ms[:4]]]
+    rs.save(ev, "board (test)")
+    lock(bot, reg, rs, rs.events[ev.key], fill=False)
+    assert not rs.events[ev.key].health_posted
+    rc.unlock(reg, rs, rs.events[ev.key], "Jon")
+    nudged = []
+    real = bot.post_health
+
+    async def spy(reg_, rs_, ev_, ch, nudge, early=False):
+        nudged.append(nudge)
+        return await real(reg_, rs_, ev_, ch, nudge, early)
+    monkeypatch.setattr(bot, "post_health", spy)
+    later = reg.now_local() + timedelta(hours=8)  # past the reminder time, before the old lock time
+    monkeypatch.setattr(reg, "now_local", lambda: later)
+    dms = sum(len(v) for v in bot.dms.values())
+    run(bot.scheduler_tick_guild(reg))
+    assert True not in nudged and sum(len(v) for v in bot.dms.values()) == dms, "nobody DMed"
+    assert rs.events[ev.key].state == "open"
+
+
+def test_unlock_run_redraws_the_open_confirm_cards_clears_remind_and_takes_back_released_notices(reg, rs):
+    bot, ev, ms = locked_event(reg, rs)
+    silent, waiting = ms[0], ms[1]
+    rc.free_seat(reg, rs, ev, silent.discord_id, "no-confirm")
+    assert any(n["kind"] == "released" and n["run"] == ev.key for n in reg.members[silent.discord_id].notices)
+    ev = rs.events[ev.key]
+    ev.reminded_at, ev.reminded_by = rc.now(), "Jon"
+    rs.save(ev, "reminded (test)")
+    card = bot.cards[ask_of(reg, ev, waiting)["dm"][1]]
+    dms = sum(len(v) for v in bot.dms.values())
+    run(bot.unlock_run(reg, rs, rs.events[ev.key], "Jon"))
+    ev = rs.events[ev.key]
+    assert any("open for signup again" in t and "still counts" in t for t in card_texts(card)), "edited in place"
+    assert sum(len(v) for v in bot.dms.values()) == dms, "never a new DM"
+    assert ev.reminded_at is None and ev.reminded_by is None
+    assert not any(n["kind"] == "released" and n["run"] == ev.key for n in reg.members[silent.discord_id].notices)
+    assert ev.signups[str(silent.discord_id)].status == "in"
+
+
+def test_an_unlock_while_the_lock_is_still_sending_is_refused(reg, rs):
+    bot, ev, _ms = locked_event(reg, rs)
+    bot._lock_posting().add((reg.key, ev.key))
+    with pytest.raises(RegistryError, match="still sending"):
+        run(bot.unlock_run(reg, rs, ev, "Jon"))
+    assert rs.events[ev.key].state == "locked"
+    bot._lock_posting().discard((reg.key, ev.key))
+    run(bot.unlock_run(reg, rs, rs.events[ev.key], "Jon"))
+    assert rs.events[ev.key].state == "open"

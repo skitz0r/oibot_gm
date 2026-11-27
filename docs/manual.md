@@ -1462,7 +1462,9 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    **Unlock** puts a locked event back into open signup with its rosters still on the board, so it can be changed and
    locked again. It works for any event, test or not, while it is locked and before its start; it is refused, one sentence
    each, once the event has started (*"This event has already started, so it can't be unlocked."*), while a loot council
-   is open on it, and for an event that is still open, ended or cancelled. Every raid of the event unlocks together.
+   is open on it, for an event that is still open, ended or cancelled, and while the lock is still posting its cards
+   and DMs (*"The lock is still sending its cards and DMs, so the event can't be unlocked yet."*). Every raid of the event
+   unlocks together.
    - **Where.** **Unlock** in the event's **More** menu on the Events page (once, for the whole event) and beside **End the
      event** on the sheet card; **Unlock** on the Discord lock card's second row (greyed once the event has started) and
      `/raid unlock` (it asks which event when several are locked); plain text *"unlock tonight's event"*, *"reopen the
@@ -1477,29 +1479,39 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
      fresh box is shown instead of unlocking.
    - **The board is the locked roster.** Every rostered name stays in the group the lock, a later drag or a fill put it in,
      and counts as placed by hand: the next lock keeps it there, and nobody's **Undo my moves** takes it off. Joiners who
-     weren't rostered are in *Not placed*, Bench answers in *Bench*. Locking again as it stands with nothing changed
-     rosters exactly the same people in the same groups.
+     weren't rostered are in *Not placed*, Bench answers in *Bench*. Someone the lock rostered on their offspec (a
+     Retribution paladin rostered as Holy) stays on the board as that spec. Locking again as it stands with nothing changed
+     rosters exactly the same people in the same groups, as the same characters and specs.
    - **Who comes back.** Someone whose seat went after the lock without them saying so — their confirmation ran out, or an
      officer dragged them off the roster — is a joiner again, in *Not placed*. Someone who pressed *Can't make it*,
      called out, is marked away, or whom an officer set to *No thanks* stays out. On a later raid of a lineup, someone an
      officer took off that raid alone stays out of it (the bot can't tell that apart from leaving early).
    - **Confirmations are kept.** An answer already given stays. An unanswered Confirm / Can't make it ask stays open and
      can still be answered: *Confirm* is recorded, *Can't make it* sets the answer to *No thanks* and takes the name off
-     the board. While the event is open no confirmation expires, no seat is freed for silence and **Remind the
-     unanswered** can't be pressed.
+     the board. Each card still open is edited in place (never a new DM) to say the roster is open again, their answer
+     still counts, and the question stays open until the next lock. While the event is open no confirmation expires, no
+     seat is freed for silence and **Remind the unanswered** can't be pressed; the next lock's Remind starts fresh.
    - **Fill asks are withdrawn.** Each one still out is closed and its DM card edited to say the officer unlocked the
      event to change the roster.
    - **Auto Lock goes off** for this event, so the clock does not lock it again; an officer locks it, or switches Auto
-     Lock back on in **Edit event**. Automated Fill Requests paused at the lock are no longer paused.
+     Lock back on in **Edit event**. Automated Fill Requests paused at the lock are no longer paused. The sheet's reminder
+     counts as sent: an unlock never brings a reminder DM, even past the reminder time.
    - The lock cards in the officer channel and the *"🔒 … is locked"* line in the signup channel are deleted (an event
      locked before the bot kept that line's id keeps the line); the health card comes back if the event had one. The
-     lock's *Not rostered* notices are taken off the Me page. Nobody gets a DM. One line in the event's thread and one
+     lock's *Not rostered* notices are taken off the Me page, and so is the *seat released* notice of anyone put back to
+     Join. Nobody gets a DM. One line in the event's thread and one
      audit line say who unlocked it.
    - **The next lock** works like any lock, from the board. Someone rostered again who already confirmed is not asked
      again; someone rostered again whose ask is still open keeps it, and its card shows their group now; someone newly
      rostered is asked. Someone who held an ask or a yes and is not rostered now has the ask closed, their card edited
      (*"… locked again without you on the roster, so this question is closed."*), and gets the *Not rostered* notice —
-     never two of them for one raid.
+     never two of them for one raid. The lock box counts the same people: *"Only the 8 on the board are rostered, and
+     nobody new is asked to confirm."*, *"…, and 1 newly rostered gets the Confirm or Can't make it DM."*; when someone
+     holding an ask or a yes is left off, its last sentence says so (*"Bramble is left off the roster, so their Confirm ask
+     closes."*, *"The 2 people left off the roster have their Confirm ask closed."*) in place of the pause or the deadline.
+     Ticked, it says *"Everyone rostered who wasn't asked before gets the Confirm or Can't make it DM."*, or counts them
+     when the board is the whole roster (*"The 2 newly rostered get …"*, *"Nobody new is asked to confirm."*). A first
+     lock reads as before.
 5. **Confirmation deadline** — `confirm_hours_before` [6 h] before the slot, anyone who hasn't answered
    counts as out; their seat is released and their confirmation card is edited to say so (never a new DM). Only someone who
    was actually asked can time out: a seat whose confirmation never went out (an interrupted lock) is never freed for

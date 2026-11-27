@@ -46,7 +46,12 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        sentence with verb None and the choice still there; fill=True = _lock_ticked: where the lock places nobody
                        (every raid full, or nobody answered) slots + who is told + LOCK_ASKS (asks on) or the deadline, else the slots
                        sentence (only when every raid has someone on every roster it expects) + _lock; no open slot = _lock, no choice. _lock_told /
-                       _lock_deadline (rc.late_confirm_by, as the lock) are shared by both; the head states a RULE true whatever the solve decides, never a predicted
+                       _lock_deadline (rc.late_confirm_by, as the lock) are shared by both. After an unlock (issue 14 Task 4 fix round 1)
+                       who is told reads _confirm_plan = rc.confirm_plan, the lock fan-out's own reader: _newly_told counts only the newly
+                       rostered ("nobody new is asked to confirm"; a lineup's "for the first raid"), _lock_told's rule / count, and
+                       _closes ("<name> is left off the roster, so their Confirm ask closes.") takes S3 in place of the pause / deadline;
+                       a first lock (no earlier asks) reads as before. A lineup's first-lock S2 names the first raid's board (only it
+                       confirms); _with_left's count says "kept on the roster … left off". The head states a RULE true whatever the solve decides, never a predicted
                        number (Task 6 fix): _LockFacts per open raid from rc.lock_forces + rc.lock_seat_count (full = every seat of every
                        roster the lock builds placed, or nobody left to place, no auto-placed Bench name, and every kept-on name on the
                        board; a kept-on Bench answer off the board makes the head name the bench) → key: "The board becomes the

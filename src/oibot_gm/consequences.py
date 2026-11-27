@@ -325,7 +325,8 @@ def _lock(reg: Registry, ev: rc.RaidEvent, rs=None) -> list[str]:
         return lines
     cands = [s.discord_id for s in facts.joined + facts.bench]
     lines.append(_lock_told(reg, ev, facts.placed if facts.full else None, cands))
-    lines.append(_lock_deadline(reg, ev))
+    closes = _closes(reg, _confirm_plan(reg, ev, facts.placed)) if facts.full else None  # after an unlock, a certain roster
+    lines.append(closes or _lock_deadline(reg, ev))
     return lines
 
 
@@ -342,8 +343,23 @@ def _lock_deadline(reg: Registry, ev: rc.RaidEvent) -> str:
 def _lock_told(reg: Registry, ev: rc.RaidEvent, names: list[str] | None, cands: list) -> str:
     """Who is asked to confirm and how. `names`: the rostered when they are certain (the board is the roster), so the
     count and who has DMs off are said; None: who the lock takes is the solve's — no number, and DMs off said as a way
-    the ask arrives (`cands`: the Discord ids it may take)."""
+    the ask arrives (`cands`: the Discord ids it may take). After an unlock (rc.confirm_plan: the event already holds
+    asks) only the newly rostered are asked: counted when the names are certain, else said as the rule."""
     test = rc.is_test_run(reg, ev)
+    plan = _confirm_plan(reg, ev, names)
+    if plan.earlier:
+        if names is None:
+            if test:
+                return "Everyone rostered who wasn't asked before is asked, and the puppets' DMs come to the tester."
+            if _dms_off(reg, cands):
+                return "Everyone rostered who wasn't asked before is asked to confirm, as a DM or on the site."
+            return f"Everyone rostered who wasn't asked before gets {CONFIRM_DM}."
+        k = len(plan.asked)
+        if not k:
+            return "Nobody new is asked to confirm."
+        if test or _dms_off(reg, plan.asked):
+            return ("The one person newly rostered is" if k == 1 else f"The {k} newly rostered are") + " asked to confirm."
+        return ("The one person newly rostered gets" if k == 1 else f"The {k} newly rostered get") + f" {CONFIRM_DM}."
     if names is not None:
         n = len(names)
         ids = [sg.discord_id for x in names if (sg := rc.signup_by_name(ev, x)) is not None]
@@ -443,22 +459,74 @@ def _with_left(slots: str, left: list[str]) -> str:
     s = f"{slots[:-1]}, and {rc.join_words(shown)} {'is' if len(left) == 1 else 'are'} not rostered."
     if _words(s) <= 20:
         return s
-    return f"{slots[:-1]}, and {_n(len(left), 'person', 'people')} pinned on {'is' if len(left) == 1 else 'are'} not rostered."
+    return f"{slots[:-1]}, and {_n(len(left), 'person', 'people')} kept on the roster {'is' if len(left) == 1 else 'are'} left off."
 
 
-def _rostered_told(reg: Registry, ev: rc.RaidEvent, many: bool, names: list[str], cands: list) -> str:
-    """A lock as it stands: who is rostered (only the board, so the number is certain) and who is told, in one sentence."""
+def _uids(ev: rc.RaidEvent, names: list[str]) -> list[int]:
+    return [sg.discord_id for x in names if (sg := rc.signup_by_name(ev, x)) is not None]
+
+
+def _confirm_plan(reg: Registry, ev: rc.RaidEvent, names: list[str] | None) -> rc.ConfirmPlan:
+    """rc.confirm_plan — the reader the lock's fan-out asks with — for the names the lock rosters (None: the solve
+    decides; only whether the event already holds asks is read then)."""
+    return rc.confirm_plan(reg, ev, _uids(ev, names) if names is not None else [])
+
+
+def _closes(reg: Registry, plan: rc.ConfirmPlan) -> str | None:
+    """A lock after an unlock that leaves off someone holding a Confirm ask or a yes: their ask closes (their card is
+    edited and they get the Not rostered notice). None when nobody is left off."""
+    if not plan.closed:
+        return None
+    if len(plan.closed) == 1:
+        m = reg.members.get(plan.closed[0])
+        who = m.display_name if m is not None else "One person"
+        return f"{who} is left off the roster, so their Confirm ask closes."
+    return f"The {len(plan.closed)} people left off the roster have their Confirm ask closed."
+
+
+def _newly_told(reg: Registry, ev: rc.RaidEvent, base: str, plan: rc.ConfirmPlan, *, first_raid: bool = False) -> str:
+    """A lock after an unlock (plan.earlier): `base` (who is rostered) and who is asked — only the newly rostered;
+    whoever confirmed or still holds an ask is not asked again. `first_raid`: a lineup, whose first raid alone asks."""
+    k = len(plan.asked)
+    if not k:
+        return f"{base}, and nobody new is asked to confirm."
+    if first_raid:
+        return f"{base}, and {k} newly rostered for the first raid {'is' if k == 1 else 'are'} asked to confirm."
+    plain = _dms_off(reg, plan.asked) or rc.is_test_run(reg, ev)
+    s = f"{base}, and {k} newly rostered {'gets' if k == 1 else 'get'} {CONFIRM_DM}."
+    if plain or _words(s) > 20:
+        s = f"{base}, and {k} newly rostered {'is' if k == 1 else 'are'} asked to confirm."
+    return s
+
+
+def _rostered_told(reg: Registry, ev: rc.RaidEvent, many: bool, names: list[str], cands: list, plan: rc.ConfirmPlan | None = None) -> str:
+    """A lock as it stands: who is rostered (only the board, so the number is certain) and who is told, in one sentence.
+    A lineup's first raid alone asks to confirm (lock_parts sends none). After an unlock (`plan.earlier`) only the
+    newly rostered are counted as asked (_newly_told)."""
     n = len(names)
     if not many and not n:
         return "Nobody is on the board, so the roster locks empty."
-    base = ("Only the people on each raid's board are rostered" if many else
-            "Only the one person on the board is rostered" if n == 1 else f"Only the {n} people on the board are rostered")
+    earlier = plan is not None and plan.earlier and rc.run_confirms(reg, ev)
+    if many:
+        base = "Only the people on each raid's board are rostered"
+    elif earlier:
+        base = "Only the one person on the board is rostered" if n == 1 else f"Only the {n} on the board are rostered"
+    else:
+        base = "Only the one person on the board is rostered" if n == 1 else f"Only the {n} people on the board are rostered"
     if not rc.run_confirms(reg, ev):
         return f"{base}, and nobody is asked to confirm."
+    short = "Only those on each raid's board are rostered"  # a lineup's base when the first raid's ask follows (≤ 20 words)
+    if earlier:
+        return _newly_told(reg, ev, short if many else base, plan, first_raid=many)
     if rc.is_test_run(reg, ev):
         return f"{base}, and the puppets' DMs come to the tester."
     if many:
-        return f"{base}, and some see their ask on the site." if _dms_off(reg, cands) else f"{base} and get {CONFIRM_DM}."
+        if _dms_off(reg, cands):
+            return f"{base}, and some see their ask on the site."
+        if not n:
+            return f"{short}, and nobody on the first raid's board is asked to confirm."
+        return (f"{short}, and 1 person on the first raid's board is asked to confirm." if n == 1
+                else f"{short}, and the {n} on the first raid's board are asked to confirm.")
     off = _dms_off(reg, [sg.discord_id for x in names if (sg := rc.signup_by_name(ev, x)) is not None])
     if not off:
         return f"{base} and {'gets' if n == 1 else 'get'} {CONFIRM_DM}."
@@ -475,8 +543,11 @@ def _lock_as_it_stands(reg: Registry, ev: rc.RaidEvent, rs, parts: list[rc.RaidE
     names = _on_board(reg, ev)
     left = list(dict.fromkeys(n for p in parts for n in rc.lock_left_out(reg, rs, p)))
     cands = [s.discord_id for s in ev.signups.values() if s.status in ("in", "sub")]
-    lines = [_with_left(slots, left), _rostered_told(reg, ev, many, names, cands)]
-    if _asks_on(reg, ev):
+    plan = _confirm_plan(reg, ev, names)  # who this lock asks: the first raid's board (the raid the lock confirms on)
+    lines = [_with_left(slots, left), _rostered_told(reg, ev, many, names, cands, plan)]
+    if rc.run_confirms(reg, ev) and (closes := _closes(reg, plan)):
+        lines.append(closes)  # after an unlock: an ask that closes surprises more than the pause or the deadline
+    elif _asks_on(reg, ev):
         lines.append(LOCK_PAUSE)
     elif rc.run_confirms(reg, ev) and (names or many):
         lines.append(_lock_deadline(reg, ev))
@@ -497,7 +568,8 @@ def _lock_ticked(reg: Registry, ev: rc.RaidEvent, rs, parts: list[rc.RaidEvent],
             told = "Nobody is asked to confirm."
         else:
             told = _lock_told(reg, ev, f.placed, [s.discord_id for s in f.joined + f.bench])
-        last = LOCK_ASKS if _asks_on(reg, ev) else (_lock_deadline(reg, ev) if rc.run_confirms(reg, ev) and f.placed else None)
+        closes = _closes(reg, _confirm_plan(reg, ev, f.placed)) if rc.run_confirms(reg, ev) else None  # after an unlock
+        last = closes or (LOCK_ASKS if _asks_on(reg, ev) else (_lock_deadline(reg, ev) if rc.run_confirms(reg, ev) and f.placed else None))
         return [slots, told] + ([last] if last else [])
     whole = all(len(rc.lock_open_slots(reg, rs, p)) == rc.run_rosters(reg, p) and _on_board(reg, p) for p in parts)
     return ([slots] if whole else []) + _lock(reg, ev, rs)

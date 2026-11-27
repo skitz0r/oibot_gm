@@ -3046,9 +3046,8 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         if ev.state not in ("open", "locked"):
             raise RegistryError(f"{label} is {ev.state}")
         # the whole event, as RaidMixin.set_autofill_paused applies it: every raid still live, named once
-        parts = [p for p in rc.event_parts(rs, ev) if p.state not in ("done", "cancelled")] or [ev]
+        parts, flip = rc.pause_scope(rs, ev, paused)
         whom = f"every raid of {run_words(reg, rc.first_part(rs, ev))}" if len(parts) > 1 else label
-        flip = [p for p in parts if bool(p.autofill_paused) != paused]
         if not flip:
             return f"{whom}: Automated Fill Requests are already {'paused' if paused else 'on'} — nothing changes"
         if paused:
@@ -3115,7 +3114,7 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         b = lock_box(reg, ev, rs, fill=asked)  # the box's own sentences: the same facts the site and Discord print
         if b.get("choice"):
             return f"lock {label} now {'and auto-fill the empty roster slots' if fill else 'as the board stands'}. " + " ".join(b["sentences"])
-        return f"lock {label} now: roster built from {len(ev.by_status('in'))} joined ({rc.pin_summary(ev)}), cards in the roster channel, confirmation DMs to everyone rostered"
+        return f"lock {label} now. " + " ".join(b["sentences"])  # no open slot: the box's facts (a one-off asks nobody to confirm)
     if op.op == "run_cancel":
         from .consequences import consequence
 
