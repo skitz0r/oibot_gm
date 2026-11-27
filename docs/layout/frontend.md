@@ -22,8 +22,9 @@ frontend/              React + Mantine app (Vite). components/board/* (SheetCard
                        a time in 15-minute steps; also the Raids page's First opens and the Test bench's Reschedule), components/lineup/LineupBuilder.tsx (THE lineup builder: up to lineup_max raids, rosters 1–4, starts
                        in 15-minute steps; StepNodes and the connectors) + LineupPicture.tsx (read-only), components/events/* (EventBoard = the raid
                        switch, Rosters / Placed / Short and BoardView variant="event" over the server's picture — working dimmed, failed with its
-                       sentence, Undo my moves greyed with the server's reason; before the lock the bank has a second section under Not
-                       placed, run_words.bank.bench + count over board.bench (the Bench answers no group holds; not drawn when empty, no
+                       sentence, Undo my moves greyed with the server's reason, the footer = the part's server `footer`; open AND locked
+                       (2026-11-27: the lock closes the sheet to members, not to officers) the bank has a second section under Not
+                       placed / Not rostered, run_words.bank.bench + count over board.bench (the Bench answers no group holds; not drawn when empty, no
                        sentence), lines drag like Not placed's and a drop on either section un-places; a move's board is drawn from POST /move's own answer at once
                        (onBoard → `answered`, kept until a view whose GET was SENT later arrives: EventPane's `sentAt`), the rest of the page
                        follows the live `run:` reload — no page fetch of its own after a move, the moved name dimmed in place while it is
@@ -45,7 +46,7 @@ frontend/              React + Mantine app (Vite). components/board/* (SheetCard
                        End while its sheet's may_start) — Remind, End, Unlock and Start now print the server's
                        box (remind_box, end_box, unlock_box / start_now_box via POST /api/run/{key}/unlock | start) and press with `seen`; SheetCard's Unlock beside End
                        and its Start now beside a greyed End (e.may_start) do the same through useConfirmBox; loot/Tonight's RunCard prints the run's end_note
-                       (End's refusal before the start, no council open) with Start now beside it (run.may_start, start_now_box); a locked board's Move to / swap / take off (BoardView) asks POST /move's preview box and presses with `seen`
+                       (End's refusal before the start, no council open) with Start now beside it (run.may_start, start_now_box); a locked board's drag, Move to / swap / take off (BoardView: drags = !readOnly) asks POST /move's preview box and presses with `seen`
                        (a 409 draws the fresh box and board); New event / New schedule count edits that differ from their seed (the leave guard); RescheduleBox.tsx (useRescheduleBox: the picker inside box 3, Locks only while open); LockBox.tsx (useLockBox(meta, onDone) = THE lock box of
                        the Events page's Lock now AND the SheetCard's Lock / Preview lock — SheetCard's own LockModal is gone: the server's box
                        (POST /lock preview `fill`) with box.choice as a checkbox, unticked, re-asked through replace on change; Preview lock =

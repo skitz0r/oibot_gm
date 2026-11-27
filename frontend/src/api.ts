@@ -153,7 +153,7 @@ export interface PageWords {
   bank_empty: Record<"nobody" | "placed" | "rostered", string>;
   /** Auto-fill groups (event_board.AutoFill): the button, its working line and its outcomes */
   autofill_button: string; autofill_working: string; autofill_done: string; autofill_changed: string; autofill_stopped: string;
-  autofill_busy: string; autofill_locked: string; autofill_nobody: string; autofill_stopped_preview: string; autofill_same: string;
+  autofill_busy: string; autofill_nobody: string; autofill_stopped_preview: string; autofill_same: string;
   /** a schedule's Repeats choice (the site's segmented control, Discord's select) and the lineup pages' section title */
   kinds: Record<"weekly" | "lockout" | "pickup", string>; what_this_makes: string;
   by_an_officer: string; no_times: string; no_reminder: string; for_seats: string; short_every_week: string;
@@ -277,12 +277,16 @@ export interface PartView {
   key: string; raid: string; raid_name: string; label: string; rosters_words: string;
   /** Placed before the lock ("18 of 18 joined"); a locked or finished raid sends `rostered_words` ("15 of 20 seats") instead */
   placed_words: string | null; rostered_words: string | null;
-  /** why Undo my moves is greyed (the officer moved nobody here), the server's sentence; null with an undo box or once locked */
+  /** why Undo my moves is greyed (the officer moved nobody here, or has no change of their own on a locked roster), the
+   *  server's sentence; null with an undo box or once finished */
   undo_why: string | null;
+  /** the sentence under the board (what Auto-fill groups does on this raid now); null on a finished raid */
+  footer: string | null;
   short: Record<string, number>; sheet: Sheet | null;
   /** open = the officers' board before the lock (nothing solved); locked = the roster as it stands (also a finished raid) */
   board_state: "open" | "locked";
-  /** Auto-fill groups beside Not placed (open raids; null once locked): working while it runs (the server's words), else the
+  /** Auto-fill groups beside Not placed (open or locked raids — on a locked one it fills only the open seats; null once
+   *  finished): working while it runs (the server's words), else the
    *  sentence of an auto-fill that wrote nothing (`failed`), shown while the board is the one it was about */
   autofill: { working: boolean; words: string | null; failed: boolean } | null;
   mine: string[]; undo_box: Box | null;

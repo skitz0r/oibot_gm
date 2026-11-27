@@ -28,9 +28,10 @@ export function ShortRoles({ meta, roles }: { meta: Meta; roles: Record<string, 
  *  `variant="event"`. Before the lock it is the OFFICERS' board (the owner's tweaks C): who they placed, everyone else in
  *  Not placed — nothing is solved until **Auto-fill groups** (beside Not placed) is pressed: POST /api/run/{key}/autofill
  *  answers at once, the button then shows the server's working words until the board updates (`run:` reload), and an
- *  auto-fill that wrote nothing leaves its server sentence under it. The footer sentence and Undo my moves (the server's
- *  box, its count) while the sheet is open. A locked event shows its roster; a finished one the board as it was locked,
- *  read only. The page places nobody: every move goes to the server and the board is drawn from the move's own answer
+ *  auto-fill that wrote nothing leaves its server sentence under it. The footer sentence (the server's `footer`) and Undo
+ *  my moves (the server's box) while the raid is open or locked — after the lock Auto-fill groups fills only the open
+ *  seats and Undo is the officer's last change (2026-11-27). A finished event shows the board as it was locked, read
+ *  only. The page places nobody: every move goes to the server and the board is drawn from the move's own answer
  *  at once (issue #12: one round trip, not the move then a whole-event read). The rest of the page (Placed, Signups,
  *  Role switches) follows on the live `run:` reload the write sets off — the page fetches nothing of its own after a
  *  move, so a drop costs one event read, not two. `sentAt` = when the GET behind `view` was SENT (performance.now): the
@@ -47,10 +48,9 @@ export function EventBoard({ meta, view, onReload, sentAt = 0 }: { meta: Meta; v
   if (!part || !part.sheet) return null;
   const words = meta.page_words;
   const finished = view.state === "done" || view.state === "cancelled";
-  const open = part.board_state !== "locked";
   const short = Object.keys(part.short || {}).length > 0;
   const url = `/api/run/${encodeURIComponent(part.key)}/layout`;
-  const af = open && !finished ? part.autofill : null;
+  const af = !finished ? part.autofill : null;  // the server sends it for an open or a locked raid
   const own = answered && answered.key === part.key && answered.at > sentAt ? answered : null;
   const sheet: Sheet = own ? { ...part.sheet, board: own.board, ...(own.needs ? { needs: own.needs } : {}), ...(own.rev ? { rev: own.rev } : {}) } : part.sheet;
 
@@ -106,9 +106,9 @@ export function EventBoard({ meta, view, onReload, sentAt = 0 }: { meta: Meta; v
             {af.words && <Text size="xs" c={af.failed ? "red.4" : "dimmed"} role="status">{af.words}</Text>}
           </Stack>
         ) : undefined} />
-      {open && !finished && (
+      {!finished && part.footer && (
         <Group justify="space-between" wrap="wrap" gap="sm" mt="md">
-          <Text size="sm" c="dimmed">{words.board_footer}</Text>
+          <Text size="sm" c="dimmed">{part.footer}</Text>
           {part.undo_box ? <Button variant="default" size="sm" onClick={undo}>Undo my moves</Button> : part.undo_why && (
             <Tooltip label={part.undo_why} multiline w={260}>
               <span tabIndex={0} aria-label={part.undo_why}><Button variant="default" size="sm" disabled style={{ pointerEvents: "none" }}>Undo my moves</Button></span>

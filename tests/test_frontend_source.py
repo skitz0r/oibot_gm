@@ -1277,7 +1277,7 @@ def test_the_events_page_asks_with_the_servers_box_and_lives():
 def test_the_event_board_replaces_suggest_and_preview_lock():
     board = _code_only((SRC / "components" / "events" / "EventBoard.tsx").read_text())
     view = _code_only((SRC / "components" / "board" / "BoardView.tsx").read_text())
-    assert 'variant="event"' in board and "undo_box" in board and "board_footer" in board and "Suggest" not in board and "lock/preview" not in board
+    assert 'variant="event"' in board and "undo_box" in board and "part.footer" in board and "Suggest" not in board and "lock/preview" not in board
     assert 'variant === "event"' in view and "open seat" in view and "live.dragging" in view and "useConfirmBox" in view
 
 
@@ -1785,13 +1785,15 @@ def test_the_event_board_draws_a_bench_section_from_the_servers_words():
 
 
 def test_a_bench_names_move_to_says_bench():
-    """The cleanup after issue #13: before the lock a placed Bench answer's ⋮ Move to… names its way back with the
-    server's Bench word (run_words.bank.bench), since the name lands in the Bench section, not Not placed. Who is a Bench
-    answer comes from the sheet's own signups (status "sub"); a joiner, and any name once locked, keep the bank's word."""
+    """The cleanup after issue #13: a placed Bench answer's ⋮ Move to… names its way back with the server's Bench word
+    (run_words.bank.bench), since the name lands in the Bench section, not Not placed / Not rostered — before the lock and
+    after it (2026-11-27: the locked board keeps its Bench section). Who is a Bench answer comes from the sheet's own
+    signups (status "sub"); a joiner keeps the bank's word."""
     view = _code_only((SRC / "components" / "board" / "BoardView.tsx").read_text())
     moves = view[view.index("const movesFor"):view.index("const swapWith")]
     assert 'answers[name] === "sub"' in view and "words.bank.bench" in moves, moves
-    assert "event && !locked" in moves, "a locked board has no Bench section: its bank word stays"
+    assert 'event && answers[name] === "sub"' in moves, "the Events board's Bench section, open or locked"
+    assert "const bench = event ? " in view and "const drags = !readOnly" in view, "a locked event keeps its Bench section and its drags"
 
 
 def test_an_open_event_board_never_draws_open_seats():

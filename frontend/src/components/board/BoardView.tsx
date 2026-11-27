@@ -36,15 +36,16 @@ type Verb = "move" | "roster" | "swap" | "substitute" | "release";
  *  are drawn as dashed slots, role icon + "open seat". A drop or Move to… sends ONE move and the page draws what the
  *  server answers (the answer's board, through `onBoard`), never a place of its own; while it is written the moved name
  *  is dimmed in place — no "saving" line, nothing shifts (issue #12) — and a refusal leaves it where it was with the
- *  server's sentence. Before the lock a move goes at once; a locked event takes no drag, and its
- *  Move to… asks through the server-worded box (useConfirmBox); a finished event is read only. Without `variant` (the
+ *  server's sentence. Before the lock a move goes at once; on a locked event (2026-11-27: the lock closes the sheet to
+ *  members, not to officers) a drag and Move to… both ask through the server-worded box (useConfirmBox) and go through
+ *  the quiet path — the Bench section and Auto-fill groups stay; a finished event is read only. Without `variant` (the
  *  Test bench) as before. */
 export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAction }: { e: Sheet; meta: Meta; onBoard: OnBoard; onHide?: () => void; onReload?: () => Promise<void> | void; variant?: "event"; bankAction?: React.ReactNode }) {
   const board = e.board!;
   const locked = e.state !== "open";
   const event = variant === "event";
   const readOnly = event && e.state !== "open" && e.state !== "locked";  // a finished event: the board as it was locked
-  const drags = !event || !locked;  // the Events page drags only before the lock
+  const drags = !readOnly;  // the lock closes the sheet to members, not to officers: a locked event's drag asks with the server's box
   const [askBox, boxDialog] = useConfirmBox(event ? ["run:"] : []);
   const conf = Object.fromEntries((e.confirmations || []).map((c) => [c.display_name, c.answer]));
   const drag = useRef<Drag | null>(null);
@@ -60,8 +61,8 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAct
   const pickSort = (v: string) => { setBankSort(v as BankSort); try { localStorage.setItem("oibot.bankSort", v); } catch { /* per-viewer convenience only */ } };
   const bank = sortBank(board.bank, bankSort, meta.roles);
   const { left, rest } = splitBank(board, bank);  // leftovers: joiners the full roster(s) left out
-  // the Events board before the lock: the Bench answers no group holds, a second section under Not placed (none = not drawn)
-  const bench = event && !locked ? sortBank(board.bench || [], bankSort, meta.roles) : [];
+  // the Events board: the Bench answers no group holds, a second section under Not placed / Not rostered (none = not drawn)
+  const bench = event ? sortBank(board.bench || [], bankSort, meta.roles) : [];
   const reason = e.split?.reason || null;
   const caps = meta.group_caps || {};
   const placed = board.rosters.reduce((n, r) => n + r.groups.reduce((m, g) => m + g.length, 0), 0);
@@ -190,8 +191,8 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAct
       out.push({ key: `${ri}:${gi}`, label: groupName(ri, gi), disabled: full, hint: `${g.length}/${board.group_size}`, onPick: () => place(name, from, { r: ri, g: gi, i: g.length }, "menu") });
       if (event && full) g.forEach((o, oi) => out.push(swapWith(name, from, o.display_name, ri, gi, oi)));  // a phone can't drag onto someone
     }));
-    // a Bench answer taken off a group lands in the Bench section before the lock, so its entry says Bench
-    const back = event && !locked && answers[name] === "sub" ? words.bank.bench : bankWord;
+    // a Bench answer taken off a group lands in the Bench section, so its entry says Bench
+    const back = event && answers[name] === "sub" ? words.bank.bench : bankWord;
     if (from) out.push({ key: "bank", label: back, onPick: () => place(name, from, null, "menu") });
     return out;
   };
@@ -253,7 +254,7 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAct
             <Eyebrow plain>{bankWord} · {board.bank.length}</Eyebrow>
             <SegmentedControl size="xs" value={bankSort} onChange={pickSort} data={[{ value: "signup", label: "signup" }, { value: "spec", label: "spec" }, { value: "role", label: "role" }]} />
           </Group>
-          {event && !locked && bankAction}
+          {event && bankAction}
           <Stack gap={4} mt={6} p={8} style={{ minHeight: 120, border: `1px dashed ${over === "bank" ? "var(--mantine-color-teal-4)" : "var(--mantine-color-slate-5)"}`, borderRadius: 8, background: "var(--mantine-color-slate-7)" }} {...zone("bank", () => drop("bank"))}>
             {board.bank.length === 0 && !event && <Text size="xs" c="dimmed">{!placed ? "Nobody has joined yet — the sheet is in Discord." : locked ? "Everyone who joined is rostered. A name dragged here frees their seat." : "Everyone who joined is placed. A name dragged here goes back to not placed — still joined, the lock seats them."}</Text>}
             {board.bank.length === 0 && event && <Text size="xs" c="dimmed">{meta.page_words.bank_empty[!placed ? "nobody" : locked ? "rostered" : "placed"]}</Text>}
