@@ -16,7 +16,11 @@ existing topics `run:` (any run saved), `member` and `config` (a schedule edited
   (`key`: the page goes there) or is no longer on its schedule (`key` null).
 - POST /api/run/{key}/switch → one Role switches row (rc.event_switches): before the lock RaidMixin.set_answer (Join
   as that spec, on the first raid: the whole evening; a notice), after it RaidMixin.send_plan of that one seat on its
-  raid (the ask). `preview` → {box}; `seen` → 409 with the fresh box; a changed plan → 409 with the fresh switches."""
+  raid (the ask). `preview` → {box}; `seen` → 409 with the fresh box; a changed plan → 409 with the fresh switches.
+  Before the lock `scope` "raid" | "event" (the box's choice, issue 15): "raid" is RaidMixin.set_raid_switch on the
+  row's raid alone.
+- POST /api/run/{key}/play-as → the board ⋮ menu's switch for raid `key` alone (consequences.raid_switch_box;
+  RaidMixin.set_raid_switch)."""
 from __future__ import annotations
 
 import asyncio
@@ -39,6 +43,7 @@ SWITCH_OVER = "This event is over, so nobody can switch roles on it."
 PICK_A_ROW = "Pick someone from the list of role switches."
 SWITCH_GONE = "That switch is no longer on the list. The list now shows what is short."
 NOBODY_ASKED = "Nobody could be asked, so nothing was sent."
+PICK_A_SPEC = "Pick a spec from the member's menu on the board."
 
 
 def _refused(why) -> JSONResponse:
@@ -180,13 +185,24 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
             row = next((r for r in now["rows"] if (r["uid"], r["character"], r["spec"]) == (str(m.discord_id), character, spec)), None)
             if row is None:  # the raid stopped being short, or someone else covers it now
                 return gone(now)
-            fresh = row["box"]
+            # the box's scope choice (issue 15): "raid" = the row's raid alone, "event" = the answer for every raid; a
+            # press without one is the row's own default (the box it showed)
+            scope = str(d.get("scope") or row.get("scope") or "event")
+            on = rs.events.get(row["part"]) or first
+            try:
+                fresh = row["box"] if scope == (row.get("scope") or "event") else (await asyncio.to_thread(
+                    lambda: rc.switch_box_for(reg, rs, on, m, character, spec, viewer=v.uid, scope=scope)))[0]
+            except RegistryError as e:
+                return _refused(e)
             if d.get("preview"):
                 return {"box": fresh}
             if d.get("seen") and str(d["seen"]) != fresh["fp"]:
                 return JSONResponse({"error": CONFIRM_WORDS["changed"], "box": fresh}, status_code=409)
             try:
-                line = await bot.set_answer(reg, rs, first, m, "in", character, v.name, by_id=v.uid, spec=spec, via=v.via)
+                if (fresh.get("scope") or {}).get("value") == "raid":
+                    line = await bot.set_raid_switch(reg, rs, on, m, character, spec, v.name, by_id=v.uid, via=v.via)
+                else:
+                    line = await bot.set_answer(reg, rs, first, m, "in", character, v.name, by_id=v.uid, spec=spec, via=v.via)
             except (RegistryError, ValueError) as e:
                 return _refused(e)
             return {"message": rc.site_words(reg, line), "switches": await fresh_switches()}  # local12 words, never a Discord stamp
@@ -218,3 +234,39 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
             await ops_mod.audited(bot.ops, reg, v.name, f"asked {m.display_name} to play {spec} on {rv.run_title(reg, part)}", via=v.via, by_id=v.uid)
         names = ", ".join(a.display_name for a in sent)
         return {"message": f"Asked {names}." if sent else NOBODY_ASKED, "switches": await fresh_switches()}
+
+    @app.post("/api/run/{key}/play-as")
+    async def raid_play_as(request: Request, key: str):
+        """The board ⋮ menu's "Play as Holy in this raid" / "Play as Shadow again in this raid" (issue 15): a role switch
+        for raid `key` alone {uid, character, spec, preview?, seen?} — rc.raid_switch_options lists them on GET
+        /api/admin/actions. `preview` → {box} (consequences.raid_switch_box); `seen` = its fp → 409 with the fresh box
+        when it changed; a refusal (one raid, locked, no answer, a spec the character doesn't play) → 400 with its box.
+        The write is RaidMixin.set_raid_switch: the run's log and the ops feed name who made it, the member gets one
+        notice. Answers {message}."""
+        v, d = await body(request, officer=True)
+        reg, rs = v.reg, bot.raids.store(v.reg)
+        part = rs.events.get(key)
+        if part is None or part.dropped:
+            return JSONResponse({"error": NO_EVENT}, status_code=404)
+        try:
+            m = reg.members.get(int(d.get("uid")))
+        except (TypeError, ValueError):
+            m = None
+        character, spec = str(d.get("character") or "").strip(), str(d.get("spec") or "").strip()
+        if m is None or not character or not spec:
+            return _refused(PICK_A_SPEC)
+        first = rc.first_part(rs, part)
+        rev = rc.event_rev(reg, rs, first) + rc.member_state_rev(part, m)
+        try:
+            fresh = await asyncio.to_thread(lambda: cq.raid_switch_box(reg, rs, part, m, character, spec, own=m.discord_id == v.uid, rev=rev))
+        except RegistryError as e:
+            return _refused(e)
+        if d.get("preview"):
+            return {"box": fresh}
+        if d.get("seen") and str(d["seen"]) != fresh["fp"]:
+            return JSONResponse({"error": CONFIRM_WORDS["changed"], "box": fresh}, status_code=409)
+        try:
+            line = await bot.set_raid_switch(reg, rs, part, m, character, spec, v.name, by_id=v.uid, via=v.via)
+        except (RegistryError, ValueError) as e:
+            return _refused(e)
+        return {"message": rc.site_words(reg, line)}

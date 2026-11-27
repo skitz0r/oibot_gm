@@ -524,7 +524,7 @@ def edit_lineup(run: str, lineup: list[dict], preview: bool = False, rev: str | 
 
 @mcp.tool()
 def set_answer(run: str, member: str, status: str, character: str | None = None, note: str | None = None, callout: bool = True,
-               spec: str | None = None, guild: Guild = None) -> str:
+               spec: str | None = None, raid: str | None = None, guild: Guild = None) -> str:
     """Answer a sheet for someone: status in (Join) / sub (Bench) / out (No thanks); `character` swaps which character
     they play. After lock, `in` seats them and asks them to confirm, `out` frees the seat and starts filling it.
     `out` with `callout` true (the default) is "Can't make it": a callout like /raid out (hours before, late after the
@@ -533,7 +533,10 @@ def set_answer(run: str, member: str, status: str, character: str | None = None,
     callouts, the run's updates thread), the public sheet never does. `spec` (status in / sub) is a role switch: the
     spec the character plays — its spec, offspec or an extra role's ("Nyx doesn't play Holy." otherwise); before the
     lock it is the answer for the whole evening (the Events page's Switch; get_run's spec_switches / the event's
-    switches list who could). The member gets a notice on their Me page (never a DM); their open DM card is edited."""
+    switches list who could). The member gets a notice on their Me page (never a DM); their open DM card is edited.
+    `raid` (with `spec`, before the lock, an event of several raids): the switch is for that ONE raid of the event — its
+    id, name or key (get_run's lineup) — and their answer stays for the other raids; the spec of their answer there
+    switches them back. Omitted = the whole event."""
     if status not in STATUSES:
         raise ToolError(f"status must be one of {', '.join(STATUSES)} (in = Join, sub = Bench, out = No thanks)")
     if note and (status != "out" or not callout):
@@ -543,6 +546,10 @@ def set_answer(run: str, member: str, status: str, character: str | None = None,
         if status == "out":
             raise ToolError("a spec goes with Join or Bench (status in or sub): the spec they play")
         body["spec"] = spec
+    if raid:
+        if not spec:
+            raise ToolError("a raid goes with a spec: the spec they play in that raid alone")
+        body["raid"] = raid
     if note:
         body["note"] = note
     if status == "out" and callout:

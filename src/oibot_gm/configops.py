@@ -172,7 +172,9 @@ Runs (officer; target = the event key like bd-k7m2qx from the live-events list, 
     "none" = the first raid alone> — before lock only: adds, removes or reorders the raids that follow the first one the same
     night (each starts when the one before it ends); the first raid never changes. Its schedule keeps its own lineup.
   run_answer: target, member, value=join|bench|no thanks, character=<optional: which of their characters>, field=<optional, with
-    join or bench: the spec they play, e.g. Holy — their spec, offspec or an extra role's>, reason=<optional, with
+    join or bench: the spec they play, e.g. Holy — their spec, offspec or an extra role's>, text=<optional, with a spec: the
+    ONE raid of the event it is for, by its name or id ("Nyx plays Holy for Barrow Deeps only", "in the 10-mans" = the
+    event's raid of that size); empty = the whole event ("for the whole event", or no raid named)>, reason=<optional, with
     no thanks: why, a note only the officers see> — an officer sets someone's answer, or someone answers for themselves
     (after lock: join seats them and asks them to confirm, no thanks frees their seat and the fill engine looks for cover).
   run_lock: target, value=fill when they ask the lock to fill the empty roster slots ("lock and fill …", "lock and auto-fill …");
@@ -279,7 +281,7 @@ class ConfigOp(BaseModel):
     end: Optional[str] = None
     reason: Optional[str] = Field(default=None, description="a note: run_cancel why, run_answer no thanks why (officers only), comp_target reason, application/proposal note, recruit hint; loot award/reason/correct/retire: the reason (required); wishlist: a note")
     doc: Optional[str] = Field(default=None, description="policy_append: loot|comp; policy: loot|comp|persona")
-    text: Optional[str] = Field(default=None, description="policy_append: the rule line; policy: the whole new text (replace) or the line to remove; character add: main|alt; recruit question_add: required|optional; loot tick: the boss; loot retire: restore; wishlist: ms|os; tier: reweight; run_open: the later raids '<raid id> x<N>, <raid id>'")
+    text: Optional[str] = Field(default=None, description="policy_append: the rule line; policy: the whole new text (replace) or the line to remove; character add: main|alt; recruit question_add: required|optional; loot tick: the boss; loot retire: restore; wishlist: ms|os; tier: reweight; run_open: the later raids '<raid id> x<N>, <raid id>'; run_answer: the one raid of the event a spec is for (empty = the whole event)")
 
 
 class ConfigRequest(BaseModel):
@@ -524,6 +526,7 @@ INVITE_NOT_CREATED = "Invite not created:"  # R-06: the one refusal prefix of a 
 CHANNEL_PATHS = ("signup_channel", "ops_channel", "applications_channel", "roster_channel", "registration_channel", "analytics_channel", "absences_channel", "news_channel", "loot_channel")
 
 
+RAID_SWITCH_NEEDS_SPEC = "A switch for one raid needs the spec they play there."
 RUN_OPS = {"run_open", "run_answer", "run_lock", "run_cancel", "run_fill", "run_strategy", "run_autofill", "run_board", "run_move", "run_propose", "run_sheet", "confirm_for",
            "run_remind", "run_pause", "run_withdraw", "run_reopen", "run_unlock", "run_start", "run_reschedule", "run_lineup"}
 # a run's start, timing and lineup (phase 3): Apply passes the run's rc.event_rev seen at preview (a changed run is refused)
@@ -3113,6 +3116,10 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         note = (op.reason or "").strip()
         if want == "out" and note:  # a callout with its reason (RaidMixin.call_out): the note is for the officers only
             effect += f" — a callout; note for the officers: “{note}”"
+        if (op.text or "").strip() and want != "out":  # a switch for ONE raid of the event (issue 15)
+            part = rc.event_raid(reg, rs, ev, op.text)
+            plays = f"{op.character}, {spec}" if op.character and cur is not None and op.character != cur.character else spec
+            return f"{label}: {m.display_name} plays {plays or '?'} for {rc._raid_name(reg, part.instance)} alone — their answer stays for the other raids ({now})"
         return f"{label}: {m.display_name} → {rc.LABELS[want]}{char} ({now}){effect}"
     if op.op == "confirm_for":
         m = _need_member(reg, op.member)
@@ -3901,7 +3908,15 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
             return await bot.call_out(reg, rs, ev, m, note or None, by, by_id=by_id)
         try:
             spec = (op.field or "").strip() if want != "out" else ""
-            line = await bot.set_answer(reg, rs, ev, m, want, op.character or None, by, by_id=by_id, **({"spec": spec, "via": via or "discord"} if spec else {}))
+            if (op.text or "").strip() and want != "out":  # a switch for ONE raid of the event (issue 15): RaidMixin.set_raid_switch
+                if not spec:
+                    raise RegistryError(RAID_SWITCH_NEEDS_SPEC)
+                part = rc.event_raid(reg, rs, ev, op.text)
+                sg = part.signups.get(str(m.discord_id))
+                character = op.character or (sg.character if sg else "")
+                line = await bot.set_raid_switch(reg, rs, part, m, character, spec, by, by_id=by_id, via=via or "discord")
+            else:
+                line = await bot.set_answer(reg, rs, ev, m, want, op.character or None, by, by_id=by_id, **({"spec": spec, "via": via or "discord"} if spec else {}))
         except ValueError as e:
             raise RegistryError(str(e))
         return str(line).replace("**", "").removeprefix("✅ ")
@@ -4797,6 +4812,7 @@ WARN_OPS: dict[str, Callable[[Registry, ConfigOp], bool]] = {
     "recruit": lambda reg, op: (op.field or "").strip().lower() == "open" and (op.value or "").strip().lower() in ("false", "no", "off", "closed"),
     "plain": _warn_plain_or_memory,  # plain text on the ops channel or in DMs, a channel's memory turned Off, an officers' channel shared
     "run_lock": _always, "run_cancel": _always, "proposal": _always,
+    "run_answer": lambda reg, op: bool((op.field or "").strip()),  # a role switch (whole event or one raid, issue 15): reviewed
     "run_unlock": _always,  # issue 14: the roster goes back on the board and Auto Lock goes off
     "run_start": _always,  # issue 14: the start becomes this minute, never moved back
     "run_reschedule": _always, "run_lineup": _always,  # everyone who answered sees a notice; a removed raid takes its board

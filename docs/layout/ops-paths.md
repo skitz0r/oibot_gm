@@ -56,7 +56,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        routine box's sentences never make the TIERED Save reviewed alone); Described.fingerprint covers the box's title, sentences and
                        diff; _diff_lines = "label: old → new" in the pages' words (PAGE_WORDS schedule_fields / raid_fields through
                        _schedule_value_words / _raid_field_words / _amount); minimum_unchanged_box ("Nothing to save", no verb) for a comp change of
-                       only no-op clears; a comp minimum of 0 previews as what applies (Registry.minimum_words); `run_answer`'s field = the spec
+                       only no-op clears; a comp minimum of 0 previews as what applies (Registry.minimum_words); `run_answer`'s text = the ONE raid a
+                       spec is for (issue 15: rc.event_raid → RaidMixin.set_raid_switch; RAID_SWITCH_NEEDS_SPEC; a run_answer with a spec is in
+                       WARN_OPS: always reviewed); `run_answer`'s field = the spec
                        Professions (the owner, 2026-11-16): NOT written from plain text — the schema tells the parser so ("Not settable here") and
                        _character_rows refuses the four old fields (PROFESSION_FIELDS) with PROFESSIONS_NOT_HERE; the editors are /me professions and the
                        Me page, a linked character follows the armory. The listening gate (discord_bot.LISTEN_QUESTION / LISTEN_CRITERIA) treats "I have /
@@ -86,7 +88,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        (raid_all:<rid>; without them the reset is unchecked, like every setup tool); list_regulars rows keyed by schedule id;
                        open_run(…, lineup=) (the later raids); reschedule_run(run, when, timing, preview, rev) and edit_lineup(run, lineup, preview,
                        rev) → POST /api/run/{key}/reschedule | /lineup (preview first and send its `rev` back; no actor — the bearer is the owner,
-                       as lock_run / cancel_run). Phase 4: set_answer(spec=) (a role switch; SPEC_SEATED once seated on a locked roster),
+                       as lock_run / cancel_run). Phase 4: set_answer(spec=, raid=) (a role switch; `raid` = that raid of the event alone, issue 15,
+                       through POST /api/run/{key}/set's `raid`; SPEC_SEATED once seated on a locked roster),
                        fill_seats(seats=) (one ask, as the Events page's Switch); set_strategy is refused after the lock (STRATEGY_LOCKED); no tool
                        sends `seen` (MCP writes go ahead as before the boxes)
 ```

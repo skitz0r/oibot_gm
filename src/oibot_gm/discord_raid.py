@@ -526,6 +526,27 @@ class RaidMixin:
                                 + (f", playing {s.spec}" if spec and s and status != "out" else ""), by)
         return line
 
+    async def set_raid_switch(self, reg, rs, part, m, character: str, spec: str, by: str, by_id: int | None = None, *,
+                              via: str = "discord") -> str:
+        """A role switch for ONE raid of an event (issue 15) — every surface's verb (the board ⋮ menu, the Role
+        switches box with "this raid", /raid set's "For which raid?", plain text, MCP `set_answer` with `raid`):
+        rc.set_raid_switch writes it (or the way back to their answer) on `part` alone, with a log line naming `by`.
+        The member gets ONE notice naming the raid and the spec (never a DM; none on the officer's own line), the ops
+        feed gets the audited line, and the officer card follows. The public sheet keeps their answer. Returns a line."""
+        mine = by_id is not None and int(by_id) == int(m.discord_id)
+        done = rc.set_raid_switch(reg, rs, part, m, character, spec, by)
+        sg = part.signups.get(str(m.discord_id))
+        raid = rc._raid_name(reg, part.instance)
+        plays = rc._plays_words(character, spec, sg.character if sg else character)
+        what = f"switched you back to {plays}" if done == "cleared" else f"switched you to {plays}"
+        if not mine:
+            rc.on_behalf_notice(reg, part, m.discord_id, what, by)
+        await ops_mod.audited(self.ops, reg, by, f"switched {m.display_name} to {plays} for {raid} alone on {run_title(reg, part)}", via=via, by_id=by_id)
+        if "health" in part.cards:
+            await self.refresh_cards(reg, part)
+        who = "You play" if mine else f"{m.display_name} plays"
+        return f"✅ {who} {plays}" + (" again" if done == "cleared" else "") + f" for {raid}"
+
     async def refresh_sheet(self, reg, ev) -> None:
         team = rc.run_team(reg, ev)
         if ev.channel_id and ev.message_id:

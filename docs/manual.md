@@ -1802,11 +1802,40 @@ need a cover (**Suggest…** / **Fill seats…** shows them), or nobody free can
 you opened it, the press is refused and the fresh list shows. The same line is in that member's **⋮** under Signups
 (*Switch: Holy*), so you can switch them from their own name without opening the list. The spec must be one the character plays (its spec, its
 offspec or an extra role's); anything else is refused (*"Nyx doesn't play Fire."*). In Discord, `/raid set` → *Join*
-(or *Bench*) → **Plays which spec?** does it. Plain text ("set Nyx to Join as Holy"), **Answer for someone** and MCP
+(or *Bench*, or *Play another spec* for someone who joined) → **Plays which spec?** does it. Plain text ("set Nyx to Join as Holy"), **Answer for someone** and MCP
 `set_answer` with `spec` do the same before the lock; once the event is locked,
 someone who holds a seat is never switched to another role that way (*"Nyx holds a seat on the locked roster, so use Switch under the
 event's Role switches to ask them to play Holy."*) — `fill_seats` with `seats` sends one seat's ask instead. Every
 switch is in the event's log and the ops feed with who made it.
+
+**A switch for one raid of the event.** On an event of several raids (a 20-man, then two 10-mans) an officer can
+switch someone for ONE raid before the lock: a Shadow priest heals the 10-mans as Holy and stays Shadow in the
+20-man. Their answer stays as it is for the other raids, and the switch counts wherever that raid's roster lands
+them — its board, what it is short of, Auto-fill groups, Preview lock and the lock itself, both with the fill and as
+the board stands. With the fill the switch is fixed: the lock may leave them out of that raid, never put them in
+another spec there. They need a Join or Bench answer, not a place on the board. Where:
+- the raid's board: the member's **⋮** offers each other spec their character plays (*Play as Holy in this raid*) and,
+  once switched, the way back (*Play as Shadow again in this raid*);
+- **Role switches**: on an event of several raids the **Switch** box has a **For which raid?** choice inside it
+  (*Barrow Deeps* · *The whole event*). It opens on the raid when the line helps that raid alone, and on the whole
+  event when it helps every raid they play. The Signups row's *Switch: Holy* still means the whole event;
+- Discord: `/raid set` → *Play another spec* (or *Join as…*) → **Plays which spec?** → **For which raid?** (*The whole
+  event* or a raid by name);
+- plain text: "Nyx plays Holy for Barrow Deeps only" or "set Nyx to Holy in the 10-mans" switches that raid alone;
+  "…for the whole event", or no raid named, is the whole-event switch. A role switch is always reviewed first;
+- MCP: `set_answer` with `spec` and `raid` (its name or id; left out = the whole event).
+
+The box says what changes for that raid and what stays (*"Nyx plays Holy for Barrow Deeps and stays Shadow for Hyjal
+Summit."*), who is told (*"They get a notice, and nobody gets a DM."*) and that you can switch them back until the
+lock; on your own line it speaks to you. The member gets one notice on their Me page naming the raid and the spec,
+and their Me page row for that raid (and the members' event page) says *You play Holy for Barrow Deeps.*; the public
+signup sheet keeps showing their answer. Their own word wins: if they later answer with another character, or their
+answer becomes what the switch says, the switch is dropped with one line in the event's log; a Bench keeps it, a No
+thanks drops it. A later switch for the whole event replaces it, and its box says so (*"This replaces their switch
+for Barrow Deeps."*). A switch to another character uses that character's lockout for that raid. After the lock a
+switch is an ask for that raid, as above; after an **Unlock** the switch is back on the board with the event (if the
+locked seat was changed after the lock, the seat wins and the switch is dropped). A single-raid event has no such
+choice: a switch there is the whole event.
 
 **Your inbox (Me page, `/me view`).** Asks — what you must act on — come first, one card each: what it is (*Confirm
 your seat*, *A seat is open*, *Could you switch?*, *Could you come?*), the event, the spec icon you'd play (its tooltip

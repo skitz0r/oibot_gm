@@ -1568,11 +1568,12 @@ def clear_board_box(reg: Registry, rs, ev: rc.RaidEvent) -> dict:
 
 
 def switch_box(reg: Registry, ev: rc.RaidEvent, m, character: str | None, spec: str, raids, *, locked: bool = False, swap: bool = True,
-               own: bool = False, rev: str = "") -> dict:
+               own: bool = False, rev: str = "", replaces=()) -> dict:
     """Boxes 6 and 7: a role switch. Before the lock it changes the answer (a notice); after it, it sends an ask (a DM
     with Yes and No, or on the Me page with DMs off) and the seat changes only on a yes. `swap=False` (after the lock):
     the ask is for someone without a seat on the roster, who takes one only on a yes. `own` (before the lock): the
-    officer's own answer — said to them, nobody told."""
+    officer's own answer — said to them, nobody told. `replaces` (before the lock): the raids where a switch for that
+    raid alone stands (rc.raid_switches_of) — the whole-event switch replaces it, and the last sentence says so."""
     name = m.display_name
     where = rc.join_words([_raid(reg, r) for r in raids]) or _raid(reg, ev.instance)
     if locked:
@@ -1592,12 +1593,54 @@ def switch_box(reg: Registry, ev: rc.RaidEvent, m, character: str | None, spec: 
             head = f"You play {spec} for {where}, not {old_spec}."
         else:
             head = f"You play {plays} for {where}."
-        return box(f"Switch to {spec}?", [head, "You can switch back until the lock."], "Switch", rev=rev)
+        tail = f"This replaces your switch for {rc.join_words([_raid(reg, r) for r in replaces])}." if replaces else "You can switch back until the lock."
+        return box(f"Switch to {spec}?", [head, tail], "Switch", rev=rev)
     if character and old_char and character != old_char:
         head = f"{name} plays {character}, {spec} for {where}."
     else:
         head = f"{name} plays {spec} for {where}, not {old_spec}." if old_spec and old_spec != spec else f"{name} plays {spec} for {where}."
-    return box(f"Switch {name} to {spec}?", [head, "They get a notice.", "You can switch them back until the lock."], "Switch", rev=rev)
+    tail = f"This replaces their switch for {rc.join_words([_raid(reg, r) for r in replaces])}." if replaces else "You can switch them back until the lock."
+    return box(f"Switch {name} to {spec}?", [head, "They get a notice.", tail], "Switch", rev=rev)
+
+
+def raid_switch_box(reg: Registry, rs, part: rc.RaidEvent, m, character: str, spec: str, *, own: bool = False, rev: str = "") -> dict:
+    """A role switch for ONE raid of an event (issue 15; rc.set_raid_switch): what they play there and what they stay
+    for the other raids, who is told (a notice, never a DM), what can be undone. The character and spec of their answer
+    is the way back ("plays Shadow again"). `own`: the officer's own line, said to them, nobody told. RegistryError with
+    the write's refusal (rc.raid_switch_refusal, rc.RAID_SWITCH_SAME) so every surface prints that refusal box."""
+    why = rc.raid_switch_refusal(reg, rs, part, m, character, spec)
+    if why:
+        raise RegistryError(why)
+    sg = part.signups[str(m.discord_id)]
+    raid = _raid(reg, part.instance)
+    now = rc.plays_in(reg, part, sg)
+    if (now.character, now.spec) == (character, spec):
+        raise RegistryError(rc.RAID_SWITCH_SAME.format(name=m.display_name, plays=rc._plays_words(character, spec, sg.character), raid=raid))
+    name = "You" if own else m.display_name
+    if (character, spec) == (sg.character, sg.spec):
+        head = f"{name} play{'' if own else 's'} {spec} again for {raid}, as {'you' if own else 'they'} answered."
+        undo = "You can switch again until the lock." if own else "You can switch them again until the lock."
+        title = f"Switch back to {spec} for {raid}?" if own else f"Switch {m.display_name} back to {spec} for {raid}?"
+        return box(title, [head] + ([] if own else [RAID_SWITCH_TOLD]) + [undo], "Switch", rev=rev)
+    other = character != sg.character
+    plays = f"{character}, {spec}" if other else spec
+    stays = f"{sg.character}, {sg.spec}" if other else sg.spec
+    # the other raids they play as they answered (another raid's own switch is that raid's)
+    rest = [_raid(reg, p.instance) for p in rc.event_parts(rs, rc.first_part(rs, part))
+            if p.key != part.key and p.state == "open" and (x := p.signups.get(str(m.discord_id))) is not None
+            and x.status in ("in", "sub") and x.display_name not in p.switched]
+    verb, stay = ("play", "stay") if own else ("plays", "stays")
+    head = f"{name} {verb} {plays} for {raid}."
+    if rest:
+        head = f"{name} {verb} {plays} for {raid} and {stay} {stays} for {rc.join_words(rest)}."
+        if len(head.split()) > 20:
+            head = f"{name} {verb} {plays} for {raid} and {stay} {stays} for the other raids."
+    title = f"Switch to {spec} for {raid}?" if own else f"Switch {m.display_name} to {spec} for {raid}?"
+    undo = "You can switch back until the lock." if own else "You can switch them back until the lock."
+    return box(title, [head] + ([] if own else [RAID_SWITCH_TOLD]) + [undo], "Switch", rev=rev)
+
+
+RAID_SWITCH_TOLD = "They get a notice, and nobody gets a DM."
 
 
 # what an officer records for someone (rc.member_actions' keys) → (title, verb); the three answers are box 8's own words
@@ -1613,7 +1656,7 @@ ANSWER_KEYS = ("join", "bench", "no_thanks")
 
 
 def member_action_box(reg: Registry, ev: rc.RaidEvent, m, key: str, character: str | None = None, spec: str | None = None, *,
-                      by_id: int | None = None, rev: str = "") -> dict:
+                      by_id: int | None = None, rev: str = "", rs=None) -> dict:
     """THE box of one thing an officer records for someone (rc.member_actions: /raid set, the site's row ⋮ menu and
     Answer for someone, POST /api/admin/action's preview / seen): inbox.action_lines' sentences under a title naming the
     person and the action's verb (MEMBER_ACTION_WORDS; the answers keep box 8's "Answer for someone" / "Record answer").
@@ -1634,7 +1677,10 @@ def member_action_box(reg: Registry, ev: rc.RaidEvent, m, key: str, character: s
         refused = rc.seated_switch_refusal(reg, ev, m, c, spec)
         if refused:
             raise RegistryError(refused)
-    lines = action_lines(reg, ev, m, key, character, spec=spec, by_id=by_id)
+    # a whole-event switch replaces their switches for one raid (issue 15): the box says so (`rs` needed to see them)
+    replaces = ([p.instance for p in rc.raid_switches_of(rs, rc.first_part(rs, ev), m)]
+                if rs is not None and spec and key == "join" and ev.state == "open" else [])
+    lines = action_lines(reg, ev, m, key, character, spec=spec, by_id=by_id, replaces=replaces)
     if key in ANSWER_KEYS:
         return box("Answer for someone", lines, "Record answer", rev=rev)
     title, verb = MEMBER_ACTION_WORDS[key]

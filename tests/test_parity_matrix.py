@@ -439,8 +439,11 @@ def test_auction_prices_have_web_routes_mcp_tools_and_written_gaps(mcp_tools, we
 # Plain text reaches it through `run_answer` (its `field` = the spec); MCP through set_answer(spec=) before the lock and
 # fill_seats(seats=) after it. Discord's is the SetWizard's spec select ("Plays which spec?", phase 5 Task 7: Join / Bench
 # as another spec before the lock; after it a seated member's switch is the SPEC_SEATED refusal — an ask on the Events page).
+# A switch for ONE raid of an event (issue 15): the board ⋮ menu (play-as) and the Role switches box's scope choice on
+# the site, MCP set_answer(raid=), plain text's run_answer `text` (the raid), Discord's "For which raid?" in /raid set.
 RUN_SWITCH: dict[str, dict] = {
     "run_switch": {"web": "POST /api/run/{key}/switch", "mcp": ["set_answer", "fill_seats"], "discord": "flow:raid_set"},
+    "raid_switch": {"web": "POST /api/run/{key}/play-as", "mcp": ["set_answer"], "discord": "flow:raid_set"},
 }
 
 
@@ -453,6 +456,8 @@ def test_role_switches_have_the_web_route_mcp_tools_and_the_discord_flow(mcp_too
         assert discord_path_exists(row["discord"], slash_paths), f"run switch {action}/discord: {row['discord']!r}"
     assert "spec" in inspect.signature(ms.set_answer).parameters and "seats" in inspect.signature(ms.fill_seats).parameters
     assert "run_answer: the spec they play" in configops.ConfigOp.model_fields["field"].description
+    assert "raid" in inspect.signature(ms.set_answer).parameters
+    assert "run_answer: the one raid of the event a spec is for" in configops.ConfigOp.model_fields["text"].description
 
 
 def test_no_parity_is_pending():

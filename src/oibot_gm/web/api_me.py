@@ -82,6 +82,8 @@ def me_sheet_row(reg, rs, ev, m, uid: int) -> dict:
             "badge": rc.answer_word(ev, s.status if s else None, (seat[0] + 1) if seat else None), "state_word": rc.RUN_STATE_WORDS.get(ev.state, ev.state),
             "regular": bool(m) and any(mm.discord_id == m.discord_id for mm, _c in rc.run_regulars(reg, ev)) and not rc.is_test_run(reg, ev),
             "confirms": rc.run_confirms(reg, ev), "then": rc.follow_words_of(reg, ev) or None, "lead_raid": rc.lead_name_of(reg, ev) or None,
+            # what they play in THIS raid when an officer switched them for it alone (issue 15; rc.plays_words): a sentence
+            "plays": rc.plays_words(reg, ev, s),
             **sheet_row_extras(reg, ev, m, rs)}
 
 
@@ -215,8 +217,11 @@ def install_me_api(app: FastAPI, bot, *, who, body, find_live, resolve_member) -
                     if a.get("needs") == "character" else {})}
                 for a in rc.member_actions(v.reg, ev, m)] if rc.on_bench_side(v.reg, ev, m) else []
         s = ev.signups.get(str(m.discord_id))
+        # the board ⋮ menu's switches for THIS raid alone (issue 15): each other spec their answer's character plays and
+        # the way back, words from the server (rc.raid_switch_options); [] on a raid of one, a locked one or no answer
+        plays = rc.raid_switch_options(v.reg, rs, ev, m) if rc.on_bench_side(v.reg, ev, m) else []
         return {"uid": str(m.discord_id), "display_name": m.display_name, "run": ev.key, "actions": acts, "rev": rc.member_state_rev(ev, m),
-                "now": f"{rc.LABELS.get(s.status, s.status)} as {s.character}" if s else "no answer yet"}
+                "now": f"{rc.LABELS.get(s.status, s.status)} as {s.character}" if s else "no answer yet", "raid_switches": plays}
 
     @app.post("/api/admin/action")
     async def admin_action(request: Request):
@@ -233,7 +238,7 @@ def install_me_api(app: FastAPI, bot, *, who, body, find_live, resolve_member) -
         if d.get("preview") or d.get("seen"):
             spec = str(d.get("spec") or "").strip() or None
             try:  # the box refuses what the write would (no longer applies, a spec it doesn't play, a seated switch)
-                fresh = cq.member_action_box(v.reg, ev, m, key, d.get("character") or None, spec, by_id=v.uid, rev=rc.member_state_rev(ev, m))
+                fresh = cq.member_action_box(v.reg, ev, m, key, d.get("character") or None, spec, by_id=v.uid, rev=rc.member_state_rev(ev, m), rs=rs)
             except (RegistryError, ValueError) as e:
                 return JSONResponse({"error": str(e), "box": cq.refusal_box_for(str(e))}, status_code=400)
             if d.get("preview"):

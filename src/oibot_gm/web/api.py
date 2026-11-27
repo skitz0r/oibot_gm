@@ -47,6 +47,7 @@ from ..raid_buttons import RUN_WORDS  # noqa: E402 — the run verbs' labels, th
 from ..registry import COMP_NOTE_MAX, DEFAULT_RAID_SIZE, RESERVED_SCHEDULE_IDS, SCHEDULE_TIMING, row_lineup  # noqa: E402
 
 ASK_MAX = 1500  # help.answer reads this much of a question
+RAID_NEEDS_SPEC = "A switch for one raid needs the spec they play there, with Join or Bench."  # /api/run/{key}/set with `raid`
 ASK_DOWN = "The bot can't read sentences right now — use the controls on this page."  # dual interfaces §2.7, LLM down
 
 M = TypeVar("M", bound=BaseModel)
@@ -1640,7 +1641,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     @app.post("/api/run/{key}/set")
     async def run_set(request: Request, key: str):
         """Officer sets someone's answer (Join / Bench / No thanks) or swaps their character — the board's verb, so
-        Join after lock seats them and asks them to confirm, No thanks after lock frees the seat and fills it."""
+        Join after lock seats them and asks them to confirm, No thanks after lock frees the seat and fills it. `raid`
+        (with `spec`, status in / sub; issue 15): a switch for that raid of the event alone (rc.event_raid names it:
+        key, raid id or name) through RaidMixin.set_raid_switch — their answer stays for the other raids."""
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         m = resolve_member(v.reg, member_ref(d))
@@ -1653,6 +1656,14 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         try:  # set_answer / call_out refresh the sheet and cards and write the ops line themselves; the reply is Discord-flavoured
             if note or (status == "out" and d.get("callout")):  # a callout (/raid out's verb): with a reason (officers only), or MCP's No thanks
                 line = await bot.call_out(v.reg, rs, ev, m, note, v.name, by_id=v.uid)
+            elif d.get("raid"):  # a role switch for ONE raid of the event (issue 15; MCP set_answer's `raid`)
+                spec = str(d.get("spec") or "").strip()
+                if status == "out" or not spec:
+                    return JSONResponse({"error": RAID_NEEDS_SPEC}, status_code=400)
+                part = rc.event_raid(v.reg, rs, ev, str(d["raid"]))
+                sg = part.signups.get(str(m.discord_id))
+                character = d.get("character") or (sg.character if sg else None) or (m.main.label if m.main else "")
+                line = await bot.set_raid_switch(v.reg, rs, part, m, character, spec, v.name, by_id=v.uid, via=v.via)
             else:
                 spec = str(d.get("spec") or "").strip() if status != "out" else ""  # a role switch (MCP set_answer's spec)
                 line = await maybe_await(bot.set_answer(v.reg, rs, ev, m, status, d.get("character") or None, v.name, by_id=v.uid,

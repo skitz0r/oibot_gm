@@ -919,6 +919,7 @@ SET_WHAT = {"join": "Join", "bench": "Bench", "no_thanks": "No thanks", "callout
 SET_GONE_EVENT = "This event is over, so nothing was changed."
 SET_GONE_MEMBER = "That member isn't registered any more, so nothing was changed."
 STATUS_WHAT = {"in": "join", "sub": "bench", "out": "no_thanks"}  # the old `status` seed (Join / Bench / No thanks)
+WHOLE_EVENT = "event"  # "For which raid?"'s whole-event value (a raid's value is its key)
 
 
 class SetWizard(OfficerWizard):
@@ -935,7 +936,7 @@ class SetWizard(OfficerWizard):
     def __init__(self, reg: Registry, rs, owner_id: int, member_id: int, what: str | None = None):
         super().__init__(reg, owner_id, title="Set for someone")
         self.rs = rs
-        self.draft = {"member": member_id, "what": what, "key": None, "action": None, "character": None, "spec": None}
+        self.draft = {"member": member_id, "what": what, "key": None, "action": None, "character": None, "spec": None, "picked": None, "raid": None}
 
     def member(self) -> Member | None:
         return self.reg.members.get(self.draft["member"])
@@ -1046,7 +1047,7 @@ class SetWizard(OfficerWizard):
         from . import raidcycle as rc
         from . import wizard_opts as wo
 
-        self.draft["spec"] = None
+        self.draft["spec"], self.draft["picked"], self.draft["raid"] = None, None, None
         c = self.plays()
         if self.draft["action"] not in ("join", "bench") or c is None:
             await self.confirm(interaction)
@@ -1071,6 +1072,42 @@ class SetWizard(OfficerWizard):
         # the character's own spec with no switch on the sheet is no switch; re-picking a switch keeps it (set_signup
         # writes a fresh signup from the character's own spec on an open run)
         self.draft["spec"] = None if c is not None and values[0] == c.spec and self.current_spec(c) == c.spec else values[0]
+        self.draft["picked"] = values[0]
+        await self.raid_step(interaction)
+
+    def raid_parts(self) -> list:
+        """The raids a Join with a spec may be switched for alone (issue 15): an event of several raids before the lock,
+        a member with a Join or Bench answer, each open raid they play (rc.raid_switch_refusal) — [] = no choice."""
+        from . import raidcycle as rc
+
+        m, ev = self.member(), self.run()
+        if m is None or ev is None or self.draft["action"] != "join" or ev.state != "open" or not rc.multi_raid(self.rs, ev):
+            return []
+        parts = [p for p in rc.event_parts(self.rs, rc.first_part(self.rs, ev)) if rc.raid_switch_refusal(self.reg, self.rs, p, m) is None]
+        if len(parts) < 2:
+            return []
+        want = (self.plays_label(), self.draft.get("picked"))  # a raid where they already play it offers nothing to switch
+        def now(p) -> tuple:
+            x = rc.plays_in(self.reg, p, p.signups[str(m.discord_id)])
+            return x.character, x.spec
+        return [p for p in parts if now(p) != want]
+
+    async def raid_step(self, interaction: discord.Interaction) -> None:
+        """"For which raid?" (issue 15): on an event of several raids, the whole event (the answer: today's switch) or one
+        raid by name (a switch for that raid alone) — a select, nothing typed (the Wizard rule). No choice → the box."""
+        from . import raidcycle as rc
+
+        self.draft["raid"] = None
+        parts = self.raid_parts()
+        if not parts:
+            await self.confirm(interaction)
+            return
+        opts = [Opt(WHOLE_EVENT, rc.SCOPE_EVENT, None)] + [Opt(p.key, rc._raid_name(self.reg, p.instance), None) for p in parts]
+        await self.show(interaction, f"Does **{self.member().display_name}** play {self.draft['picked']} for the whole event or for one raid?",
+                        self.select(rc.SCOPE_LABEL, opts[:MAX_OPTIONS], self.raid_picked), self.button("Cancel", self.cancel))
+
+    async def raid_picked(self, interaction: discord.Interaction, values: list[str]) -> None:
+        self.draft["raid"] = None if values[0] == WHOLE_EVENT else values[0]
         await self.confirm(interaction)
 
     def box(self) -> dict:
@@ -1083,8 +1120,20 @@ class SetWizard(OfficerWizard):
             raise RegistryError(SET_GONE_MEMBER)
         if ev is None or ev.state not in ("open", "locked"):
             raise RegistryError(SET_GONE_EVENT)
+        part = self.raid_part()
+        if part is not None:  # a switch for one raid alone (issue 15): its own box, the same as the board's ⋮ menu
+            return cq.raid_switch_box(self.reg, self.rs, part, m, self.plays_label(), self.draft["picked"], own=m.discord_id == self.owner_id,
+                                      rev=rc.event_rev(self.reg, self.rs, ev) + rc.member_state_rev(part, m))
         return cq.member_action_box(self.reg, ev, m, self.draft["action"], self.draft["character"], self.draft.get("spec"),
-                                    by_id=self.owner_id, rev=rc.member_state_rev(ev, m))
+                                    by_id=self.owner_id, rev=rc.member_state_rev(ev, m), rs=self.rs)
+
+    def raid_part(self):
+        """The raid picked under "For which raid?" (None = the whole event, or no choice was offered)."""
+        return self.rs.events.get(self.draft["raid"]) if self.draft.get("raid") else None
+
+    def plays_label(self) -> str:
+        c = self.plays()
+        return c.label if c is not None else ""
 
     async def confirm(self, interaction: discord.Interaction) -> None:
         from . import consequences as cq
@@ -1105,6 +1154,16 @@ class SetWizard(OfficerWizard):
         m, ev = self.member(), self.run()  # re-read: never trust the screen
         if ev is None or m is None or ev.state not in ("open", "locked"):
             await self.finish(interaction, SET_GONE_MEMBER if m is None else SET_GONE_EVENT)
+            return
+        part = self.raid_part()
+        if part is not None:
+            try:
+                line = await interaction.client.set_raid_switch(self.reg, self.rs, part, m, self.plays_label(), self.draft["picked"],
+                                                                interaction.user.display_name, by_id=interaction.user.id)
+            except (RegistryError, ValueError) as e:
+                await self.finish(interaction, f"❌ {e}")
+                return
+            await self.finish(interaction, line)
             return
         try:
             line = await inbox.do_member_action(interaction.client, self.reg, self.rs, ev, m, self.draft["action"], character=self.draft["character"],

@@ -416,7 +416,7 @@ def test_entry_names_reach_the_answers_log(reg, rs, monkeypatch):
 
 # ---------------------------------------------------------------- a change missing a detail (Task 8 fix, the ruling)
 
-OFF_PROMPT_SHA = "5f5aa459b84f6591b8c62d776a0a393455ab2496cbdc8da810898cc4ac983975"  # SYSTEM.format(schema=…); run_cancel's quiet line is on the sheet's thread; Task 11 added the spec op's from-spec and its never-ask-which-character line; its fix round, the kind=ignore sentence; issue 14, auto_lock / auto_lock_fill on schedule_set and run_reschedule; Task 3, run_lock value=fill ("lock and fill …"); Task 5, run_unlock and run_reopen told apart; Task 6, run_start apart from run_open and the loot council
+OFF_PROMPT_SHA = "7ba631c278570b27cadc95f713d196d4aae4fe1a02066996138520c6eecaba79"  # SYSTEM.format(schema=…); run_cancel's quiet line is on the sheet's thread; Task 11 added the spec op's from-spec and its never-ask-which-character line; its fix round, the kind=ignore sentence; issue 14, auto_lock / auto_lock_fill on schedule_set and run_reschedule; Task 3, run_lock value=fill ("lock and fill …"); Task 5, run_unlock and run_reopen told apart; Task 6, run_start apart from run_open and the loot council; issue 15, run_answer text = the one raid a spec is for
 
 
 class PromptSpy:

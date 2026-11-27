@@ -225,6 +225,26 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        through seated_switch_refusal(reg, ev, m, c, spec) = THE guard (member_action_box reads it too): an explicit spec of
                        ANOTHER ROLE than the seat on the locked roster (same role allowed; another character's own spec = the reseat);
                        no spec on the seated character keeps the signup's switched spec; a row whose box refuses is left out (every surface); pick_asks / send_batch(seats=); member_state_rev
+                       A switch for ONE raid (issue 15): RaidEvent.switched {board name → RaidSwitch(character, spec, base = the answer's
+                       character when made, by, at)} on that raid's own run file (keyed as the board keys names: move_on_runs re-keys it,
+                       relabel_runs renames its characters; sync_parts never touches it; kept through the lock). plays_in(reg, ev, signup) =
+                       THE "what does this person play in THIS raid" (open raids only: the switch = a FIXED spec, offspec None; else played_as
+                       = that spec with their own as offspec; locked = the seat is the truth) and playing(reg, ev, status) its list —
+                       players_for (so the board, board_rosters, Preview lock, Auto-fill, both locks, lock_forces, health card players),
+                       gaps / needs / would_short, health_data, role_plan's `cur` (a switched name is `fixed`: never suggested again there),
+                       another_run_hint's Bench, parts_short(reg, ev, rs) (a later raid's own answers when open), raid_views.confirm_open_layout
+                       and plays_words (the Me row) read it; solve_inputs covers it. The sheet keeps the answer. set_raid_switch(reg, rs, part,
+                       m, character, spec, by) → "set" | "cleared" (the answer's own = the way back; pops a played_as mark: one truth) behind
+                       raid_switch_refusal (RAID_SWITCH_ONE / LOCKED / NO_ANSWER, spec_role's) and RAID_SWITCH_SAME; raid_switch_options = the
+                       board ⋮ items (PLAY_AS / PLAY_AS_AGAIN); prune_switches (every open save: answer gone, another character than `base`,
+                       or the answer IS the switch → dropped, one log line); drop_raid_switches (set_signup with an officer's spec: the
+                       whole-event switch replaces them) / raid_switches_of (its box says so); multi_raid; event_raid(reg, rs, ev, ref) =
+                       a raid of the event by key, id or name (RAID_NOT_IN_EVENT); specs_of(reg, c) = THE specs a character plays
+                       (event_view.plays_of reads it); switch_scopes + switch_box_for(scope=) + SCOPE_LABEL / SCOPE_EVENT = the Role switches
+                       box's choice (a row's `scope`: "raid" when it helps fewer raids than they play). member_actions offers a joined
+                       member's join as "Play another spec (or character)" before the lock when their character plays another spec. Unlock
+                       reconciles: a switch the locked seat agrees with stays (no played_as beside it); a seat changed after the lock wins
+                       and the switch is dropped
                        The final fix wave (§5.67 phase 4): earlier_counts(reg, rs, ev) = a later raid's `earlier` while a raid before it is OPEN
                        (Preview lock on a later raid solves the earlier raids through event_board_preview; BLOCKING); open_schedule matches a
                        schedule's night at ANY distance (never a one-off beside the run the schedule opens later); open_refusal(reg, rs, instance,
@@ -237,6 +257,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
   discord_raid.py      RaidMixin on the client: send_member_dm (test puppets → the tester), set_answer / call_out (the one path for an answer; `by` = a
                        display name to read, `by_id` = the actor's Discord id decides "their own" — never a name compare; seats found by id, ev.seat_of(member)), lock_run → roster
                        cards + Confirm/Can't DMs, run_fill DMs, drop_seated, open/cancel runs, after_absence ripple; re-exports the raid_* names below.
+                       set_raid_switch(reg, rs, part, m, character, spec, by, by_id, *, via) = every surface's per-raid switch (issue 15):
+                       rc.set_raid_switch, ONE notice to the member (on_behalf_notice; none on the officer's own line, never a DM), the
+                       audited ops line, the officer card.
                        Phase 2 (§5.39): send_member_card + edit_ask_card (an outcome edits the ask's DM card — never an FYI DM; seat_released),
                        record_placement (check-and-set on the loop), lock_run resumable (lock_seats + confirmations_sent_at; recover_lock in the scheduler),
                        lock_preview, cancel_run(notify) under board_lock (no DMs), reopen_run, remind (the older card goes dead), set_autofill_paused, withdraw_sent_ask;
@@ -424,8 +447,10 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        POST it {lineup} (What this makes, nothing written — the Save is /api/run/{key}/lineup), GET /api/event/coming/{sid}/{occurrence}
                        (404 {error, key}), POST /api/run/{key}/switch {uid, character, spec, part, seat, option, rev, preview?, seen?} → one Role
                        switches row: before the lock RaidMixin.set_answer(spec=) on the first raid, after it send_plan(seats=[seat]) on its raid; a row
-                       no longer listed → 409 {error: SWITCH_GONE, switches}; answers {message (rc.site_words), switches}. The page reloads on run:,
-                       member and config
+                       no longer listed → 409 {error: SWITCH_GONE, switches}; answers {message (rc.site_words), switches}; before the lock `scope`
+                       raid | event (the box's choice; a press without one = the row's default) — raid = RaidMixin.set_raid_switch on the row's
+                       raid. POST /api/run/{key}/play-as {uid, character, spec, preview?, seen?} = the board ⋮ menu's switch for raid `key`
+                       alone (consequences.raid_switch_box; refusal → 400 box; PICK_A_SPEC). The page reloads on run:, member and config
   web/api_member_events.py  install_member_events_api(app, bot, *, who) (called from api.py; 2026-11-25 §2), ANY member of the selected guild
                        (an officer gets the same member view), in a thread: GET /api/me/events → member_event_view.member_event_list; GET
                        /api/me/event/{key} (any raid's key) → member_event_json + `answers` (api_me.me_sheet_row per live raid, the first

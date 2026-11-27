@@ -1354,6 +1354,25 @@ def box_cases(reg, rs, runs, ms, dump):
     add("switch_box", "after the lock, someone without a seat", cq.switch_box(reg, lk, m, None, "Holy", [RID], locked=True, swap=False))
     add("switch_box", "the officer's own answer", cq.switch_box(reg, ev, m, None, "Holy", [RID, hy], own=True))
     add("switch_box", "the officer's own, another character", cq.switch_box(reg, ev, m, "Kingsley", "Fire", [RID], own=True))
+    # a switch for ONE raid of an event (issue 15): the three-raid event, a Shadow priest with a Guardian alt
+    three = runs["three raids, first"]
+    reg.add_character(REAL + 60, "Nyx", "Nyxe", "Priest", "Shadow", "Holy", True)
+    reg.add_character(REAL + 60, "Nyx", "Nyxbear", "Druid", "Guardian", None, False)
+    nyx = reg.members[REAL + 60]
+    rc.set_signup(reg, rs, three, nyx, None, "in", source="test")
+    bd = rc.event_parts(rs, three)[1]
+    add("raid_switch_box", "one raid", cq.raid_switch_box(reg, rs, bd, nyx, "Nyxe", "Holy"))
+    add("raid_switch_box", "one raid, another character", cq.raid_switch_box(reg, rs, bd, nyx, "Nyxbear", "Guardian"))
+    add("raid_switch_box", "the officer's own line", cq.raid_switch_box(reg, rs, bd, nyx, "Nyxe", "Holy", own=True))
+    rc.set_raid_switch(reg, rs, bd, nyx, "Nyxe", "Holy", by="Officer")
+    bd = rs.events[bd.key]
+    add("raid_switch_box", "the way back", cq.raid_switch_box(reg, rs, bd, nyx, "Nyxe", "Shadow"))
+    add("raid_switch_box", "the way back, the officer's own", cq.raid_switch_box(reg, rs, bd, nyx, "Nyxe", "Shadow", own=True))
+    add("raid_switch_box", "another raid while one is switched", cq.raid_switch_box(reg, rs, rc.event_parts(rs, three)[2], nyx, "Nyxe", "Holy"))
+    add("switch_box", "the whole event replaces a raid's switch", cq.switch_box(reg, three, nyx, None, "Holy", [hy, RID], replaces=[RID]))
+    add("switch_box", "the officer's own, replacing a raid's switch", cq.switch_box(reg, three, nyx, None, "Holy", [hy, RID], own=True, replaces=[RID]))
+    add("member_action_box", "a Join with a spec replacing a raid's switch",
+        cq.member_action_box(reg, three, nyx, "join", "Nyxe", "Holy", by_id=OFFICER_ID, rs=rs))
     add("answer_box", "join before the lock", cq.answer_box(reg, quiet, ms[4], "join", ms[4].main.label, ms[4].main.spec, by_id=OFFICER_ID))
     add("answer_box", "join on their own record", cq.answer_box(reg, quiet, ms[4], "join", by_id=ms[4].discord_id))
     add("answer_box", "bench after the lock", cq.answer_box(reg, lk, ms[1], "bench", by_id=OFFICER_ID))

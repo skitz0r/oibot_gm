@@ -582,7 +582,7 @@ def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico, officer:
         body.append("**Short** " + "   ".join(f"{ico('role', r['role'])} {r['need'] - r['have']}" for r in short))
         hints = [x["hint"] for x in rc.cover_hints(short)] if officer else []  # names of who could cover: officers only; "not on the sheet" once
         body.extend("-# " + x for x in hints)  # a line each ("Could tank: … · …" has its own dots); `-#` only renders at the start of a line
-    for fname, fshort in rc.parts_short(reg, ev):  # each later raid's tanks and healers, counted on this sheet's Join answers
+    for fname, fshort in rc.parts_short(reg, ev, rs):  # each later raid's tanks and healers, counted on this sheet's Join answers
         body.append(f"Later raid **{fname}** short " + "   ".join(f"{ico('role', r)} {k}" for r, k in fshort.items()))
     missing = [b for b in h["buffs"] if not b["providers"]]
     if missing:
@@ -733,8 +733,10 @@ def confirm_layout(reg: Registry, ev: rc.RaidEvent, team: dict, ico, sg, i: int,
     rd = reg.raid_def(ev.instance)
     seat = next((p for p in r.selected if p.signup_name == sg.display_name), None)
     spec = seat.spec if seat else sg.spec  # the spec the roster has them on (the solver may have switched an offspec)
-    lines = [f"{ico('spec', f'{sg.cls}:{spec}')} **{sg.character}**" + (f" · Roster {i + 1}" if len(ev.all_rosters) > 1 else "") + f" · Group {gi + 1}"]
-    found = reg.find(sg.character)
+    # the character the seat plays: a per-raid switch to another character (rc.plays_in at the lock) is the seat's
+    cls, character = (seat.cls, seat.character or sg.character) if seat else (sg.cls, sg.character)
+    lines = [f"{ico('spec', f'{cls}:{spec}')} **{character}**" + (f" · Roster {i + 1}" if len(ev.all_rosters) > 1 else "") + f" · Group {gi + 1}"]
+    found = reg.find(character)
     own = found[1] if found else None  # the character as registered: its main spec and offspec
     if own is not None and spec != own.spec:  # an offspec the solver switched them to, or one they agreed to before lock
         lines.append(f"You're rostered as **{spec}**" + (", your offspec" if spec == own.offspec else "")
@@ -764,13 +766,13 @@ CONFIRM_OPEN = ("An officer unlocked the event to change the roster, so it is op
 def confirm_open_layout(reg: Registry, ev: rc.RaidEvent, ico, sg, uid: int) -> discord.ui.LayoutView:
     """A Confirm / Can't DM kept open by an unlock (issue 14), edited in place: the roster is open again, their answer
     still counts, nothing runs out while it is open — no group and no deadline (neither exists now). The same buttons
-    answer the same ask; the next lock redraws it with its seat (RaidMixin.reconcile_asks). The spec is the one they were
-    rostered on (an offspec seat's played_as), as the board shows it."""
+    answer the same ask; the next lock redraws it with its seat (RaidMixin.reconcile_asks). The character and spec are
+    what they play in this raid (rc.plays_in: a per-raid switch, an offspec seat's played_as), as the board shows it."""
     ui = discord.ui
     rd = reg.raid_def(ev.instance)
-    spec = ev.played_as.get(sg.display_name) or sg.spec
+    p = rc.plays_in(reg, ev, sg)
     head = _header(reg, ev, f"The roster is open again · {rd.get('name', ev.instance)}",
-                   [f"{ico('spec', f'{sg.cls}:{spec}')} **{sg.character}**", CONFIRM_OPEN])
+                   [f"{ico('spec', f'{p.cls}:{p.spec}')} **{p.character}**", CONFIRM_OPEN])
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(head, ui.ActionRow(PlaceButton(reg.key, ev.team, uid, "yes"), PlaceButton(reg.key, ev.team, uid, "no")),
                                accent_colour=TEAL))

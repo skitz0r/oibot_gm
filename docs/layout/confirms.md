@@ -66,8 +66,12 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        groups go (Not placed, or Bench for a Bench answer); lock_refusal = everyone kept off), reschedule_box (3; `edit=True` = Edit event's box, the owner's tweaks B:
                        "Change <event>?" + Save + event_edit_lines = 'label: old → new' in PAGE_WORDS schedule_fields / priority / split words,
                        event_value_words; TIMING_NAMES carries confirmation, seating, priority, split) + reschedule_pick_box, lineup_box (4) + lineup_diff_lines,
-                       cancel_box (5, red; built for rc.cancel_target, so a part-ended event's box names the raids still to play), switch_box (6–7: locked=, swap=, own=), answer_box (8, inbox.action_lines) = a thin call of
-                       member_action_box(reg, ev, m, key, character, spec, *, by_id, rev) = THE box of whatever an officer records for
+                       cancel_box (5, red; built for rc.cancel_target, so a part-ended event's box names the raids still to play), switch_box (6–7: locked=, swap=, own=,
+                       replaces= the raids whose own switch a whole-event switch replaces — its last sentence), raid_switch_box(reg, rs, part, m,
+                       character, spec, *, own, rev) = a switch for ONE raid (issue 15: what they play there and stay for the others,
+                       RAID_SWITCH_TOLD, the undo; the answer's own = the way back; refusals rc.raid_switch_refusal / RAID_SWITCH_SAME), answer_box (8, inbox.action_lines) = a thin call of
+                       member_action_box(reg, ev, m, key, character, spec, *, by_id, rev, rs=None — with `rs` a Join with a spec says which raid's
+                       own switch it replaces: action_lines(replaces=)) = THE box of whatever an officer records for
                        someone (/raid set's SetWizard, POST /api/admin/action's preview / seen, the row ⋮ menu): action_lines under
                        MEMBER_ACTION_WORDS' title naming them + verb (answers keep "Answer for someone" / "Record answer"), never red;
                        raises RegistryError for what the write refuses (no_longer_applies, a spec not played, rc.seated_switch_refusal);

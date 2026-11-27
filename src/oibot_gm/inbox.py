@@ -145,8 +145,9 @@ def action_consequence(reg: Registry, ev, m: Member, key: str, character: str | 
 
 
 def action_lines(reg: Registry, ev, m: Member, key: str, character: str | None = None, *, spec: str | None = None,
-                 by_id: int | None = None) -> list[str]:
-    """action_consequence's sentences as a list (the confirmation box, consequences.answer_box)."""
+                 by_id: int | None = None, replaces=()) -> list[str]:
+    """action_consequence's sentences as a list (the confirmation box, consequences.answer_box). `replaces` (a Join with
+    a spec before the lock): the raids whose own switch for them this whole-event switch replaces — the last sentence."""
     from .consequences import CONFIRM_DM
 
     name, run = m.display_name, rc.run_on(reg, ev)
@@ -174,9 +175,11 @@ def action_lines(reg: Registry, ev, m: Member, key: str, character: str | None =
             main = m.main.label if m.main else None
             if plays != char and (len(m.active()) > 1 or char != main):  # several characters, or not the main: which one is said
                 plays = f"{char}, {plays}"
+            gone = (f"This replaces {'your' if own else 'their'} switch for {rc.join_words([rc._raid_name(reg, r) for r in replaces])}."
+                    if replaces and spec else None)
             if own:
-                return [f"{name} is marked as joined, playing {plays}.", "You can change the answer until the lock."]
-            return [f"{name} is marked as joined, playing {plays}.", "They get a notice.", "They can change the answer themselves."]
+                return [f"{name} is marked as joined, playing {plays}.", gone or "You can change the answer until the lock."]
+            return [f"{name} is marked as joined, playing {plays}.", "They get a notice.", gone or "They can change the answer themselves."]
         if seated:
             seat = ev.seat_of(m)[1]
             c = next((c for c in m.active() if c.label == char), None)

@@ -171,15 +171,7 @@ def tz_words(reg: Registry) -> str:
 def plays_of(reg: Registry, c) -> list[str]:
     """The specs character `c` may answer as (its spec first, then its offspec and its flex roles' specs — rc.spec_role's
     rule, so a pick from this list is never refused for the spec)."""
-    out = []
-    for spec in [c.spec, *reg.profile.classes.get(c.cls, {})]:
-        if spec and spec not in out:
-            try:
-                rc.spec_role(reg, c, spec)
-            except RegistryError:
-                continue
-            out.append(spec)
-    return out
+    return rc.specs_of(reg, c)
 
 
 def character_rows(reg: Registry, m) -> list[dict]:
