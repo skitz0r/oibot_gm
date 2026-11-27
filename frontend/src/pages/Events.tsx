@@ -15,6 +15,7 @@ import { RoleSwitches } from "../components/events/RoleSwitches";
 import { EventBoard } from "../components/events/EventBoard";
 import { useAfterDrag } from "../components/board/shared";
 import { useRescheduleBox } from "../components/events/RescheduleBox";
+import { useLockBox } from "../components/events/LockBox";
 import { boxOf, EventHead } from "../components/events/shared";
 import { EventMore } from "../components/events/EventMore";
 import { guardNav } from "../components/LeaveGuard";
@@ -114,10 +115,11 @@ function EventPane({ evKey, meta, tick, onChanged }: { evKey: string; meta: Meta
 function LiveEvent({ ev, meta, onChanged, sentAt }: { ev: EventView; meta: Meta; onChanged: () => void; sentAt: number }) {
   const [ask, dialog] = useConfirmBox(["run:", "member"]);
   const [reschedule, rescheduleDialog] = useRescheduleBox(ev, onChanged);
+  const [lockBox, lockDialog] = useLockBox(meta, onChanged);  // the sheet card's lock box too: one component, with the choice
   const run = `/api/run/${encodeURIComponent(ev.key)}`;
 
   /** The box for `verb` asked again (its `preview`): the open box's live refresh. A refusal comes back as its box. */
-  const fresh = (verb: "lock" | "cancel") => async (): Promise<Box> => {
+  const fresh = (verb: "cancel") => async (): Promise<Box> => {
     try { return (await api.post<{ box: Box }>(`${run}/${verb}`, { preview: true })).box; } catch (e) { const b = boxOf(e); if (b) return b; throw e; }
   };
   /** One write with the fp of the box on screen: done → the server's line; a stale or refused box → that box. */
@@ -126,12 +128,8 @@ function LiveEvent({ ev, meta, onChanged, sentAt }: { ev: EventView; meta: Meta;
     catch (e) { const b = boxOf(e); if (b) return b; throw e; }
   };
 
-  async function lock() {
-    if (!ev.boxes.lock) return;
-    const said = { text: "" };
-    if (await ask({ box: ev.boxes.lock, refresh: fresh("lock"), act: press(`/api/run/${encodeURIComponent(ev.key)}/lock`, (fp) => ({ seen: fp }), said) })) {
-      ok(said.text); onChanged();
-    }
+  function lock() {
+    if (ev.boxes.lock) lockBox(ev.key, { box: ev.boxes.lock });
   }
   async function cancel() {
     if (!ev.boxes.cancel) return;
@@ -166,6 +164,7 @@ function LiveEvent({ ev, meta, onChanged, sentAt }: { ev: EventView; meta: Meta;
         action={ev.actions.cancel && ev.boxes.cancel ? <Button variant="subtle" color="gray" size="xs" onClick={cancel}>Cancel event</Button> : undefined} />
       {dialog}
       {rescheduleDialog}
+      {lockDialog}
     </section>
   );
 }

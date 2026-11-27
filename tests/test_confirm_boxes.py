@@ -100,19 +100,19 @@ def test_the_word_helpers(reg, rs):
 
 def test_lock_box_names_the_lineup_and_says_one_off_rules(reg, rs):
     ev = one_off(reg, rs)
-    b = cq.lock_box(reg, ev)
+    b = cq.lock_box(reg, ev, fill=True)
     assert b["title"] == f"Lock {reg.local12(ev.starts_at)}?" and b["verb"] == "Lock" and not b["danger"]
     assert b["sentences"] == ["The lock builds the roster for Hyjal Summit and both Barrow Deeps rosters from those who joined.",
                               "Nobody is asked to confirm.", "You can still move people after the lock."]
-    assert cq.lock_box(reg, rc.event_parts(rs, ev)[1])["title"] == b["title"], "a later raid's box names the event"
+    assert cq.lock_box(reg, rc.event_parts(rs, ev)[1], fill=True)["title"] == b["title"], "a later raid's box names the event"
 
 
 def test_lock_box_on_a_scheduled_event_says_who_confirms(reg, rs):
     sid = tuesday(reg)
     ev = rc.open_run(reg, rs, HYJAL, next_tuesday(reg, sid), schedule=sid)
-    assert cq.lock_box(reg, ev)["sentences"][1:] == ["Nobody has joined yet, so nobody is asked to confirm."]
+    assert cq.lock_box(reg, ev, fill=True)["sentences"][1:] == ["Nobody has joined yet, so nobody is asked to confirm."]
     join(reg, rs, ev, people(reg, 20))
-    s = cq.lock_box(reg, ev)["sentences"]
+    s = cq.lock_box(reg, ev, fill=True)["sentences"]
     assert s[0] == "The lock builds the roster for Hyjal Summit and both Barrow Deeps rosters from those who joined."
     assert s[1] == "Everyone rostered gets the Confirm or Can't make it DM." and s[2].startswith("They have until ")
 
@@ -126,20 +126,20 @@ def test_lock_box_says_what_the_board_becomes(reg, rs):
     join(reg, rs, ev, people(reg, 20))
     parts = [p for p in rc.event_parts(rs, ev) if p.state == "open"]
     assert len(parts) == 2
-    empty = cq.lock_box(reg, ev, rs)["sentences"][0]
+    empty = cq.lock_box(reg, ev, rs, fill=True)["sentences"][0]
     assert empty == "The lock builds the roster for Hyjal Summit and both Barrow Deeps rosters from those who joined."
     names = [x.display_name for x in ev.by_status("in")]
     ev.layout = [names[:2]]
-    part = cq.lock_box(reg, ev, rs)["sentences"]
+    part = cq.lock_box(reg, ev, rs, fill=True)["sentences"]
     assert part[0] == "Everyone on the board keeps their place, and the lock fills the open seats from Not placed."
     assert cq.consequence("lock", reg, ev, rs=rs)[0] == part[0], "the Discord screen and the site say the same"
     for p in parts:  # every raid's board holds everyone who joined: nobody is left under Not placed
         here = [x.display_name for x in p.by_status("in")]
         p.layout = [here[i:i + 5] for i in range(0, len(here), 5)]
-    full = cq.lock_box(reg, ev, rs)["sentences"]
+    full = cq.lock_box(reg, ev, rs, fill=True)["sentences"]
     assert full[0] == "The board becomes the roster for Hyjal Summit and both Barrow Deeps rosters."
     parts[1].layout = None  # one raid's board emptied again: the event is part-filled
-    assert cq.lock_box(reg, ev, rs)["sentences"][0] == part[0]
+    assert cq.lock_box(reg, ev, rs, fill=True)["sentences"][0] == part[0]
     for b in (empty, part[0], full[0]):
         assert len(b.split()) <= 20 and b.endswith(".")
 
@@ -249,18 +249,18 @@ def test_a_stale_box_is_refused_with_the_fresh_one(reg, rs, web_bot, monkeypatch
     monkeypatch.setattr(rc, "propose", seat_first())
     sid = weekly(reg, RID, "Tue 18:30")
     ev = rc.open_run(reg, rs, RID, next_tuesday(reg, sid), schedule=sid)
-    ms = people(reg, 6)
+    ms = people(reg, 6)  # nobody on the board: the lock that fills (issue 14: Auto-fill empty roster slots ticked)
     join(reg, rs, ev, ms[:4])
-    r = web_bot.c.post(f"/api/run/{ev.key}/lock", json={"preview": True}, headers=H())
+    r = web_bot.c.post(f"/api/run/{ev.key}/lock", json={"preview": True, "fill": True}, headers=H())
     assert r.status_code == 200, r.text
     a = r.json()["box"]
     join(reg, rs, ev, ms[4:5])
-    r = web_bot.c.post(f"/api/run/{ev.key}/lock", json={"seen": a["fp"]}, headers=H())
+    r = web_bot.c.post(f"/api/run/{ev.key}/lock", json={"seen": a["fp"], "fill": True}, headers=H())
     assert r.status_code == 409 and ev.state == "open", "nothing is locked on a box that changed"
     fresh = r.json()["box"]
-    assert r.json()["error"] == CONFIRM_WORDS["changed"] and fresh["fp"] != a["fp"] and fresh == cq.lock_box(reg, ev, rs)
+    assert r.json()["error"] == CONFIRM_WORDS["changed"] and fresh["fp"] != a["fp"] and fresh == cq.lock_box(reg, ev, rs, fill=True)
     assert fresh["sentences"] == a["sentences"], "no count: the fingerprint alone covers the new answer"
-    r = web_bot.c.post(f"/api/run/{ev.key}/lock", json={"seen": fresh["fp"]}, headers=H())
+    r = web_bot.c.post(f"/api/run/{ev.key}/lock", json={"seen": fresh["fp"], "fill": True}, headers=H())
     assert r.status_code == 200 and ev.state == "locked", r.text
 
 
@@ -549,16 +549,16 @@ def test_the_lock_box_never_counts_a_joiner_kept_off(reg, rs):
     ev = rc.open_run(reg, rs, HYJAL, next_tuesday(reg, sid), schedule=sid)
     ms = people(reg, 7)
     join(reg, rs, ev, ms)
-    assert cq.lock_box(reg, ev)["sentences"][1] == "Everyone rostered gets the Confirm or Can't make it DM.", "nobody placed: no count"
+    assert cq.lock_box(reg, ev, fill=True)["sentences"][1] == "Everyone rostered gets the Confirm or Can't make it DM.", "nobody placed: no count"
     ev.layout = [[m.display_name for m in ms[:5]], [m.display_name for m in ms[5:]]]
-    assert cq.lock_box(reg, ev)["sentences"][1].startswith("The 7 rostered get")
+    assert cq.lock_box(reg, ev, fill=True)["sentences"][1].startswith("The 7 rostered get")
     ev.layout = [[m.display_name for m in ms[1:6]], [ms[6].display_name]]
     ev.pins[str(ms[0].discord_id)] = "out"
-    assert cq.lock_box(reg, ev)["sentences"][1].startswith("The 6 rostered get")
+    assert cq.lock_box(reg, ev, fill=True)["sentences"][1].startswith("The 6 rostered get")
     ev.layout = None
     for m in ms:
         ev.pins[str(m.discord_id)] = "out"
-    b = cq.lock_box(reg, ev)
+    b = cq.lock_box(reg, ev, fill=True)
     assert b["verb"] is None and b["sentences"] == [rc.SOLVER_WORDS["all_off"]]
 
 

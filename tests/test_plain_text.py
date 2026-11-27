@@ -47,8 +47,8 @@ class FakeBot:
         s = rc.set_signup(reg, rs, ev, m, character, status, source="officer")
         return f"✅ {m.display_name}: **{s.character}** {rc.LABELS[status]}"
 
-    async def lock_run(self, reg, rs, ev, by):
-        self.calls.append(("lock_run", ev.key, by))
+    async def lock_run(self, reg, rs, ev, by, fill=True):
+        self.calls.append(("lock_run", ev.key, by) + (() if fill else ("as it stands",)))
         ev.state, ev.locked_at = "locked", rc.now()
         rs.save(ev, "locked (fake)")
         return f"{ev.key}: locked by {by}"
@@ -147,8 +147,11 @@ def test_describe_run_ops(reg, rs):
     join(reg, rs, ev, ms[:6])
     d = lambda **kw: configops.describe(reg, ConfigOp(**kw))  # noqa: E731
     title = f"Barrow Deeps {reg.local12(ev.start)}"  # a person reads the run's name and time, never its key (phase 3)
-    assert d(op="run_lock", target=ev.key).startswith(f"lock {title} ") and ev.key not in d(op="run_lock", target=ev.key) and "confirmation DMs" in d(op="run_lock", target=ev.key)
-    assert "6 joined" in d(op="run_lock", target=ev.key)
+    # "lock and fill …" (issue 14): nobody is on the board, so a plain "lock …" is refused at the review
+    fl = d(op="run_lock", target=ev.key, value="fill")
+    assert fl.startswith(f"lock {title} ") and ev.key not in fl and "confirmation DMs" in fl and "auto-fill" in fl
+    assert "6 joined" in fl
+    assert d(op="run_lock", target=ev.key).endswith(f": {rc.LOCK_EMPTY_BOARD}")
     assert d(op="run_answer", target=ev.team, member=ms[0].display_name, value="bench").endswith(f"{ms[0].display_name} → Bench (now Join as {ms[0].main.label})")
     assert "hasn't answered" in d(op="run_answer", target=ev.key, member=ms[9].display_name, value="join")
     assert "join | bench | no thanks" in d(op="run_answer", target=ev.key, member=ms[0].display_name, value="maybe")
@@ -219,7 +222,9 @@ def test_run_lock_and_cancel(reg, rs):
     bot = FakeBot(rs)
     with pytest.raises(RegistryError, match="needs the bot"):
         configops.apply(reg, ConfigOp(op="run_lock", target=ev.key), "officer", is_owner=False, raids=rs)
-    assert run(configops.apply_async(reg, ConfigOp(op="run_lock", target=ev.team), "Officer", False, bot=bot)) == f"{ev.key}: locked by Officer"
+    with pytest.raises(RegistryError, match=f"^{rc.LOCK_EMPTY_BOARD}$"):  # nobody on the board: refused before the lock
+        run(configops.apply_async(reg, ConfigOp(op="run_lock", target=ev.team), "Officer", False, bot=bot))
+    assert run(configops.apply_async(reg, ConfigOp(op="run_lock", target=ev.team, value="fill"), "Officer", False, bot=bot)) == f"{ev.key}: locked by Officer"
     assert bot.calls == [("lock_run", ev.key, "Officer")]
     with pytest.raises(RegistryError, match="already locked"):
         run(configops.apply_async(reg, ConfigOp(op="run_lock", target=ev.key), "Officer", False, bot=bot))

@@ -204,9 +204,11 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        lock_run(…, fill=True) / lock_parts(…, fill=) / lock_preview(…, fill=) (issue 14): fill=False = the board as it stands
                        (rc.board_as_it_stands; LOCK_EMPTY_BOARD is a failed lock: lock_error, the scheduler's 15-minute back-off); seats left open
                        with Automated Fill Requests on pause them on every raid of the event (autofill_paused, by = the locker, one log line
-                       each; set_autofill_paused itself stays per raid); every later raid locks
+                       each); set_autofill_paused (every surface's pause / resume) acts on every live raid of the event too; every later raid locks
                        with the first's choice; confirm_by = rc.late_confirm_by. The scheduler passes fill = auto_lock_fill (a later raid's retry:
-                       its first raid's lock_fill). Surfaces a person presses still call the default until they carry the choice.
+                       its first raid's lock_fill). Surfaces a person presses (POST /api/run/{key}/lock `fill`, lock_decide, configops
+                       run_lock, MCP lock_run `autofill`) pass consequences.lock_fill(…, their choice) — default False — and refuse
+                       rc.lock_empty_refusal themselves, so a person's lock never takes the failure path.
                        raid_views.locks_line / dm_locks_line: the sheet's, the officers' card's and the open / reminder DMs' lock words — with
                        Auto Lock off PAGE_WORDS officer_locks, the Details Locks row's sentence.
                        lock_preview solves with rc.run_strategy and the lock's own budget (rc.SOLVE_TIME_LIMIT_S), so it shows the roster Lock builds;
@@ -309,7 +311,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        persistent DynamicItem buttons: SignupButton (Join/Bench/No thanks/Can't make it + character picker), FillButton, PlaceButton,
                        RunButton (officer Lock/Fill/Loot/Cancel on the cards; the lock card's second row Remind/Pause/End; the closed card's
                        Reopen; lock_decide / cancel_decide / remind_decide / end_decide = THE lock, cancel, remind and end screens: the server's
-                       box through Wizard.decide_box — cq.lock_box (Lock · Preview lock: the same box with the roster as decide_box's embed),
+                       box through Wizard.decide_box — cq.lock_box (a complete board: Lock · Preview lock; with the fill choice two verbs, RUN_WORDS
+                       lock_as_is / lock_fill: Lock as it stands · Lock and auto-fill · Preview lock, Lock and auto-fill opening its own
+                       screen with the fill box, an empty board's refusal with Lock and auto-fill + Back; the preview = the shown choice's roster as decide_box's embed),
                        cq.cancel_box (Cancel event · Cancel event with a note = reason + Tell the channel? · a plain press:
                        no reason, the line posted — D3), cq.remind_box (Send reminder), bot.end_box (LootMixin's) or rc.end_refusal's
                        refusal box (End the event); `refresh` = the same builder on the run as it stands), LootButton `loot.<gk>:<session>:<drop|->:<action>[:<arg>]`,

@@ -720,10 +720,10 @@ def test_lock_preview_route_shows_the_roster_and_saves_nothing_but_the_proposal(
         rosters[0].benched = [p for p in rc.players_for(reg_, trial) if p.signup_name not in seated]
         return [list(g) for r in rosters for g in r.groups], rosters
     monkeypatch.setattr(rc, "split_preview", preview)
-    r = web_bot.c.post(f"/api/run/{ev.key}/lock/preview", json={}, headers=H())
+    r = web_bot.c.post(f"/api/run/{ev.key}/lock/preview", json={"fill": True}, headers=H())  # nobody placed: the lock that fills
     assert r.status_code == 200, r.text
     j = r.json()
-    assert j["board"]["rosters"][0]["rostered"] == 10 and "The lock builds the roster for Barrow Deeps from those who joined." in j["consequence"]
+    assert j["board"]["rosters"][0]["rostered"] == 10 and "The lock builds the roster for Barrow Deeps from those who joined." in j["box"]["sentences"]
     assert ev.state == "open" and not ev.rosters and ev.last_proposal["kind"] == "lock preview"
 
 

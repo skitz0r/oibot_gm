@@ -40,9 +40,13 @@ def test_lock_screen_is_the_lock_box(reg, rs, officer, channel):  # noqa: F811
     ev = joined_run(reg, rs, 6)
     h = Harness(reg, rs, client=bot_for(reg, rs))
     run(FLOWS["raid_lock"](h.command(), reg))
-    box = cq.lock_box(reg, ev, rs)
+    box = cq.lock_box(reg, ev, rs)  # nobody on the board: the lock as it stands refuses, the lock that fills is offered
+    assert box["title"] in h.text and box["sentences"] == [rc.LOCK_EMPTY_BOARD] and rc.LOCK_EMPTY_BOARD in h.text
+    assert h.buttons() == ["Lock and auto-fill", "Back"]
+    run(h.press("Lock and auto-fill"))
+    box = cq.lock_box(reg, ev, rs, fill=True)
     assert box["title"] in h.text and all(s in h.text for s in box["sentences"])
-    assert h.buttons() == ["Lock", "Preview lock", "Back"]
+    assert h.buttons() == ["Lock and auto-fill", "Preview lock", "Back"]
     assert h.screen["view"].children[0].style is discord.ButtonStyle.success
 
 
@@ -51,10 +55,11 @@ def test_a_lock_box_that_changed_is_shown_again(reg, rs, officer, channel):  # n
     bot = bot_for(reg, rs)
     h = Harness(reg, rs, client=bot)
     run(FLOWS["raid_lock"](h.command(), reg))
+    run(h.press("Lock and auto-fill"))
     join(reg, rs, ev, reals(reg, 1, start=6))  # someone joins while the box is open
-    run(h.press("Lock"))
+    run(h.press("Lock and auto-fill"))
     assert not [c for c in bot.calls if c[0] == "lock_run"] and h.text.startswith(CONFIRM_WORDS["changed"])
-    run(h.press("Lock"))
+    run(h.press("Lock and auto-fill"))
     assert ("lock_run", ev.key, "Tester") in bot.calls
 
 
@@ -63,14 +68,15 @@ def test_the_preview_screens_lock_goes_back_through_the_box(reg, rs, officer, ch
     bot = bot_for(reg, rs)
     h = Harness(reg, rs, client=bot)
     run(FLOWS["raid_lock"](h.command(), reg))
+    run(h.press("Lock and auto-fill"))
     run(h.press("Preview lock"))
-    assert h.buttons() == ["Lock", "Preview lock", "Back"] and cq.lock_box(reg, ev, rs)["title"] in h.text
+    assert h.buttons() == ["Lock and auto-fill", "Preview lock", "Back"] and cq.lock_box(reg, ev, rs)["title"] in h.text
     assert h.screen["embed"] is not None, "the roster the lock would build, under the box"
     join(reg, rs, ev, reals(reg, 1, start=6))  # the box changed during the preview
-    run(h.press("Lock"))
+    run(h.press("Lock and auto-fill"))
     assert not [c for c in bot.calls if c[0] == "lock_run"] and h.text.startswith(CONFIRM_WORDS["changed"])
-    assert h.buttons() == ["Lock", "Preview lock", "Back"]
-    run(h.press("Lock"))
+    assert h.buttons() == ["Lock and auto-fill", "Preview lock", "Back"]
+    run(h.press("Lock and auto-fill"))
     assert ("lock_run", ev.key, "Tester") in bot.calls
 
 

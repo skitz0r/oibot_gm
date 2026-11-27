@@ -95,8 +95,8 @@ class FakeBot(LootMixin):
         self.calls.append(("set_answer", ev.key, m.display_name, status, character, by) + ((spec,) if spec else ()))
         return f"✅ {m.display_name} {status}"
 
-    async def lock_run(self, reg, rs, ev, by):
-        self.calls.append(("lock_run", ev.key, by))
+    async def lock_run(self, reg, rs, ev, by, fill=True):
+        self.calls.append(("lock_run", ev.key, by) + (() if fill else ("as it stands",)))
         return f"{ev.key}: locked"
 
     async def cancel_run(self, reg, rs, ev, by, reason, notify=True, by_id=None, via="discord"):
@@ -491,10 +491,13 @@ def test_lock_with_one_run_needs_no_picker(reg, rs, officer, channel):
     h, bot = harness(reg, rs)
 
     async def go():
-        # THE lock confirm screen (phase 2): the consequence from code, Lock now · Preview lock · Back — nothing before the press
+        # THE lock confirm screen (phase 2): the consequence from code — nothing before the press. Nobody is on the board,
+        # so the box offers the fill choice as two verbs (issue 14); the lock that fills has its own screen and box
         await FLOWS["raid_lock"](h.command(), reg)
-        assert h.buttons() == ["Lock", "Preview lock", "Back"] and "The lock builds the roster for Barrow Deeps from those who joined." in h.text and not bot.calls
-        await h.press("Lock")
+        assert h.buttons() == ["Lock as it stands", "Lock and auto-fill", "Preview lock", "Back"] and not bot.calls
+        await h.press("Lock and auto-fill")
+        assert h.buttons() == ["Lock and auto-fill", "Preview lock", "Back"] and "The lock builds the roster for Barrow Deeps from those who joined." in h.text and not bot.calls
+        await h.press("Lock and auto-fill")
         assert bot.calls[0] == ("lock_run", ev.key, "Tester") and bot.calls[1][0] == "emit"
         assert h.text.endswith(f"{ev.key}: locked")
     asyncio.run(go())
@@ -531,9 +534,9 @@ def test_lock_with_two_runs_shows_the_picker_and_cancel_does_nothing(reg, rs, of
         h2, bot2 = harness(reg, rs)
         await FLOWS["raid_lock"](h2.command(), reg)
         await h2.pick("Pick the event", b.team)
-        assert not bot2.calls and "Lock" in h2.buttons()
-        await h2.press("Lock")
-        assert bot2.calls[0] == ("lock_run", b.key, "Tester")
+        assert not bot2.calls and "Lock as it stands" in h2.buttons()
+        await h2.press("Lock as it stands")
+        assert bot2.calls[0] == ("lock_run", b.key, "Tester", "as it stands"), "a person's lock: the board as it stands"
     asyncio.run(go())
 
 

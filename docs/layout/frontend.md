@@ -33,7 +33,10 @@ frontend/              React + Mantine app (Vite). components/board/* (SheetCard
                        answers — through POST /api/admin/action preview → the server's box → seen, the Test bench's SheetCard too); EventDetails; ActivitySection; EventMore = the ⋯ More menu: Suggest… / Fill seats…, Remind, Pause / Resume, Re-post
                        the sheet…, Split strategy…, Loot, the asks out, End, Reopen — Remind and End print the server's box (remind_box, end_box) and
                        press with `seen`; a locked board's Move to / swap / take off (BoardView) asks POST /move's preview box and presses with `seen`
-                       (a 409 draws the fresh box and board); New event / New schedule count edits that differ from their seed (the leave guard); RescheduleBox.tsx (useRescheduleBox: the picker inside box 3, Locks only while open); shared.tsx EventHead;
+                       (a 409 draws the fresh box and board); New event / New schedule count edits that differ from their seed (the leave guard); RescheduleBox.tsx (useRescheduleBox: the picker inside box 3, Locks only while open); LockBox.tsx (useLockBox(meta, onDone) = THE lock box of
+                       the Events page's Lock now AND the SheetCard's Lock / Preview lock — SheetCard's own LockModal is gone: the server's box
+                       (POST /lock preview `fill`) with box.choice as a checkbox, unticked, re-asked through replace on change; Preview lock =
+                       /lock/preview for the current choice drawn under it (BoardPreview); Lock sends `seen` + `fill`; ConfirmBox AskBox `size`); shared.tsx EventHead;
                        ComingUpView; HistoryView), components/schedules/* (ScheduleDetails, RegularsSection + RemovedRegulars, NameFields),
                        components/raids/* (RulesView, PriorityView, ReadinessView), components/ReviewModal.tsx (THE edit-mode review: ReviewModal +
                        useOpsSave = the tiered Save over /api/ops/change — opts always / verb / title / staleOnPage, the box's diff and sentences

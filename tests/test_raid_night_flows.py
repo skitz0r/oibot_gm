@@ -34,9 +34,9 @@ class NightFlowBot(FakeBot):
     async def is_officer_anywhere(self, reg, uid):
         return True
 
-    async def lock_preview(self, reg, rs, ev, *, by, by_id=None):
+    async def lock_preview(self, reg, rs, ev, *, by, by_id=None, fill=True):
         names = [s.display_name for s in ev.by_status("in")]
-        self.calls.append(("lock_preview", ev.key, by))
+        self.calls.append(("lock_preview", ev.key, by) + (() if fill else ("as it stands",)))
         rosters = rc.board_rosters(reg, ev, [names[:5], names[5:10]], rc.run_size(reg, ev))
         seated = {p.signup_name for r in rosters for p in r.selected}
         rosters[0].benched = [p for p in rc.players_for(reg, ev) if p.signup_name not in seated]
@@ -112,7 +112,9 @@ def test_raid_lock_preview_draws_the_roster_one_member_per_line_then_locks(reg, 
 
     async def go():
         await FLOWS["raid_lock"](h.command(), reg)
-        assert h.buttons() == ["Lock", "Preview lock", "Back"]
+        assert h.buttons() == ["Lock and auto-fill", "Back"], "nobody on the board: the lock as it stands is refused"
+        await h.press("Lock and auto-fill")
+        assert h.buttons() == ["Lock and auto-fill", "Preview lock", "Back"]
         await h.press("Preview lock")
         emb = h.screen["embed"]
         assert emb is not None and emb.title.startswith("Preview")
@@ -120,10 +122,10 @@ def test_raid_lock_preview_draws_the_roster_one_member_per_line_then_locks(reg, 
         assert len(groups) == 2 and all(len(f.value.splitlines()) == 5 for f in groups), "the full roster, one member per line"
         left = next(f for f in emb.fields if f.name.startswith("Leftovers"))
         assert left.name == "Leftovers (2)"
-        assert h.buttons() == ["Lock", "Preview lock", "Back"] and ("lock_preview", ev.key, "Tester") in bot.calls
+        assert h.buttons() == ["Lock and auto-fill", "Preview lock", "Back"] and ("lock_preview", ev.key, "Tester") in bot.calls
         await h.press("Back")
-        assert h.buttons() == ["Lock", "Preview lock", "Back"]
-        await h.press("Lock")
+        assert h.buttons() == ["Lock and auto-fill", "Preview lock", "Back"]
+        await h.press("Lock and auto-fill")
     run(go())
     assert ("lock_run", ev.key, "Tester") in bot.calls
 
@@ -132,7 +134,7 @@ def test_card_lock_preview_refusal_offers_back(reg, rs):
     ev = open_test_run(reg, rs)
     h, bot = night(reg, rs, user=officer_user())
 
-    async def busy(reg_, rs_, ev_, *, by, by_id=None):
+    async def busy(reg_, rs_, ev_, *, by, by_id=None, fill=True):
         raise rc.SolverBusy()
     bot.lock_preview = busy
 
@@ -141,7 +143,7 @@ def test_card_lock_preview_refusal_offers_back(reg, rs):
         await h.press("Preview lock")
         assert "already being built" in h.text and h.buttons() == ["Back", "Cancel"]
         await h.press("Back")
-        assert h.buttons() == ["Lock", "Preview lock", "Back"]
+        assert h.buttons() == ["Lock as it stands", "Lock and auto-fill", "Preview lock", "Back"]
     run(go())
 
 

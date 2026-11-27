@@ -1242,7 +1242,9 @@ def test_the_events_page_asks_with_the_servers_box_and_lives():
     raid; the page lives on run: / member / config and keeps an open box over a reload; the routes are the read model's."""
     page = _code_only((SRC / "pages" / "Events.tsx").read_text())
     assert 'useLive(load, ["run:", "member", "config"])' in page and "usePoll(load)" in page
-    assert "ev.boxes.lock" in page and "`/api/run/${encodeURIComponent(ev.key)}/lock`" in page and "{ seen: fp }" in page
+    assert "ev.boxes.lock" in page and "lockBox(ev.key, { box: ev.boxes.lock })" in page, "the lock box with its choice (LockBox)"
+    lock = _code_only((SRC / "components" / "events" / "LockBox.tsx").read_text())
+    assert "`/api/run/${encodeURIComponent(key)}/lock`" in lock and "{ seen: fp, fill: now.fill }" in lock
     assert "ev.boxes.cancel" in page and "{ seen: fp, notify: false }" in page and "{ preview: true }" in page
     assert "ev.actions.edit_lineup" in page, "Edit lineup (Task 10) only while the event may change its raids"
     assert "Show older" in page and "history_offset=" in page and 'to="/events/new"' in page
@@ -1567,7 +1569,7 @@ def test_the_final_look_fixes():
                  ".touch :global(.mantine-Switch-body) { min-height: 44px"):
         assert rule in css, rule
     box = _code_only((SRC / "components" / "ConfirmBox.tsx").read_text())
-    assert 'size={open?.wide ? 600 : "md"}' in box and "wide?: boolean" in box
+    assert 'size={open?.size ?? (open?.wide ? 600 : "md")}' in box and "wide?: boolean" in box
     assert "wide: true" in _code_only((SRC / "components" / "events" / "RescheduleBox.tsx").read_text())
     regs = _code_only((SRC / "components" / "schedules" / "RegularsSection.tsx").read_text())
     early = regs[regs.index("openEarly(f)}>") - 200:regs.index("openEarly(f)}>")]

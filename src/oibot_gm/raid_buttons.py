@@ -31,7 +31,9 @@ log = logging.getLogger(__name__)
 # render-time variants (Locked, Resume…) and the verbs only the site's board and lock screen have (Place the rest, Preview lock).
 RUN_WORDS = {"fill": "Fill seats…", "lock": "Lock now", "locked": "Locked", "preview_lock": "Preview lock", "cancel": "Cancel event…",
              "loot": "Loot", "ask": "Ask", "suggest": "Suggest…", "remind": "Remind the unanswered", "pause": "Pause Automated Fill Requests",
-             "resume": "Resume Automated Fill Requests", "end": "End the event", "reopen": "Reopen", "place_rest": "Place the rest"}
+             "resume": "Resume Automated Fill Requests", "end": "End the event", "reopen": "Reopen", "place_rest": "Place the rest",
+             # the Discord lock screen's two verbs when the box offers the fill choice (issue 14; the site's checkbox)
+             "lock_as_is": "Lock as it stands", "lock_fill": "Lock and auto-fill"}
 
 
 class RunButton(discord.ui.DynamicItem[discord.ui.Button], template=r"runact(?:\.(?P<g>[a-z0-9_-]{1,16}))?:(?P<key>[A-Za-z0-9_\-]+):(?P<action>fill|lock|cancel|suggest|ask|loot|remind|pause|end|reopen)(?::(?P<rev>[0-9a-f]{6,16}))?"):
@@ -170,22 +172,32 @@ def officer_wizard(bot, reg, interaction: discord.Interaction, title: str):
     return Wizard(reg, interaction.user.id, title=title, guard=guard)
 
 
-async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=None) -> None:
+async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=None, fill: bool | None = None) -> None:
     """Lock — the card's Lock and /raid lock alike: the server's box (consequences.lock_box, boxes 1–2 — the site's
-    Lock now prints the same) through Wizard.decide_box, then Lock · Preview lock · Back. Preview lock draws the roster
-    the lock would build now (rc.split_preview under the run's solver single flight; nothing saved but
-    `ev.last_proposal`), one member per line with the spec icon, under the box (decide_box's `embed`). The box is built
-    again after the preview, so what changed while it ran is in the box under the roster; Lock still compares the box's
-    fp at the press, and a box that changed since is shown fresh, without the roster, instead of locking. The lock
-    itself is RaidMixin.lock_run, after the screen has acknowledged the press."""
+    Lock now prints the same) through Wizard.decide_box. A complete board (no choice in the box): Lock · Preview lock ·
+    Back, and the lock fills as it always did. A board with the fill choice (issue 14; a decide screen has no checkbox,
+    so the choice is two verbs): the as-it-stands box with **Lock as it stands** · **Lock and auto-fill** · Preview
+    lock · Back; Lock and auto-fill opens its own screen with the fill box (`fill=True`: Lock and auto-fill · Preview
+    lock · Back, Back returning here). An as-it-stands box that refuses (nobody on the board) is its sentence with Lock
+    and auto-fill and Back, so the empty board never reaches the lock. Preview lock draws the roster the shown choice
+    would build (RaidMixin.lock_preview with that `fill`; nothing saved but `ev.last_proposal`), one member per line
+    with the spec icon, under the box built again (decide_box's `embed`). Each verb compares its box's fp at the press:
+    a box that changed since is shown fresh, without the roster, instead of locking. The lock itself is
+    RaidMixin.lock_run with the screen's `fill`, after the screen has acknowledged the press."""
     from .configops import report_error
-    from .consequences import lock_box
+    from .consequences import lock_box, lock_fill
+    from .constants import CONFIRM_WORDS
+    from .wizard import box_text
 
     wiz = wiz or officer_wizard(bot, reg, interaction, f"Lock {raid_name(reg, ev)}")
     key = ev.key
+    asked = bool(fill)
 
     def box() -> dict:
-        return lock_box(reg, rs.events.get(key) or ev, rs)
+        b = lock_box(reg, rs.events.get(key) or ev, rs, fill=asked)
+        if b.get("choice") and b["verb"] is not None:  # the screen's own verb: which of the two locks this press is
+            b = {**b, "verb": RUN_WORDS["lock_fill" if asked else "lock_as_is"]}
+        return b
 
     async def do(i: discord.Interaction, _values: dict) -> None:
         cur = rs.events.get(key)  # re-read: the scheduler or another officer may have locked it meanwhile
@@ -195,9 +207,12 @@ async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=No
         if cur.state != "open":
             await wiz.finish(i, f"{rc.run_words(reg, cur)} was already locked, so nothing was changed.")
             return
-        by = i.user.display_name
+        by, f = i.user.display_name, lock_fill(reg, cur, rs, asked)
+        if not f and (why := rc.lock_empty_refusal(reg, rs, cur)) is not None:  # refused here: never the lock's failure path
+            await wiz.finish(i, why)
+            return
         try:
-            line = await bot.lock_run(reg, rs, cur, by=by)
+            line = await bot.lock_run(reg, rs, cur, by=by, fill=f)
         except RegistryError as e:  # someone else is locking it (rc.SolverBusy), or it stopped being open: nothing happened
             await wiz.finish(i, str(e))
             return
@@ -209,7 +224,13 @@ async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=No
             await bot.ops.emit(reg.config, "info", line)
 
     def again(i: discord.Interaction):
+        return lock_decide(i, bot, reg, rs, rs.events.get(key) or ev, wiz=wiz, fill=fill)
+
+    def first(i: discord.Interaction):  # the Lock and auto-fill screen's Back: the as-it-stands screen
         return lock_decide(i, bot, reg, rs, rs.events.get(key) or ev, wiz=wiz)
+
+    async def with_fill(i: discord.Interaction) -> None:
+        await lock_decide(i, bot, reg, rs, rs.events.get(key) or ev, wiz=wiz, fill=True)
 
     async def preview(i: discord.Interaction) -> None:
         cur = rs.events.get(key)
@@ -218,16 +239,32 @@ async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=No
             return
         await wiz.working(i, "Building the preview. It can take up to half a minute…")
         try:
-            rosters = await bot.lock_preview(reg, rs, cur, by=i.user.display_name, by_id=i.user.id)
+            rosters = await bot.lock_preview(reg, rs, cur, by=i.user.display_name, by_id=i.user.id, fill=lock_fill(reg, cur, rs, asked))
         except RegistryError as e:  # the solver is busy on this run, or no roster satisfies the rules
             await wiz.refuse(i, str(e), retry=again, retry_label="Back")
             return
-        # the same screen with the roster under a box built again now: Preview lock again draws a fresh roster; Lock
+        # the same screen with the roster under a box built again now: Preview lock again draws a fresh roster; the verb
         # compares this box's fp at the press, and a change since shows the fresh box, without the (now old) roster
-        await wiz.decide_box(i, box(), do=do, refresh=box, back=again, extra=[wiz.button(RUN_WORDS["preview_lock"], preview)],
-                             embed=lock_preview_embed(reg, cur, rosters, bot.ico))
+        await wiz.decide_box(i, box(), do=do, refresh=box, back=again, extra=extras(), embed=lock_preview_embed(reg, cur, rosters, bot.ico))
 
-    await wiz.decide_box(interaction, box(), do=do, refresh=box, extra=[wiz.button(RUN_WORDS["preview_lock"], preview)])
+    b = box()
+    two = bool(b.get("choice")) and not asked  # the as-it-stands screen of a board with the choice
+
+    def extras() -> list:
+        return ([wiz.button(RUN_WORDS["lock_fill"], with_fill)] if two else []) + [wiz.button(RUN_WORDS["preview_lock"], preview)]
+
+    if two and b["verb"] is None:  # nobody on the board: the refusal, and the lock that fills is still there to press
+        async def nothing(i: discord.Interaction) -> None:
+            await wiz.finish(i, "Nothing was changed.")
+
+        heading, wiz.heading = wiz.heading, False  # one heading: the box's title, as decide_box shows it
+        try:
+            await wiz.show(interaction, box_text(b), wiz.button(RUN_WORDS["lock_fill"], with_fill, discord.ButtonStyle.success),
+                           wiz.button(CONFIRM_WORDS["back"], nothing, discord.ButtonStyle.secondary))
+        finally:
+            wiz.heading = heading
+        return
+    await wiz.decide_box(interaction, b, do=do, refresh=box, back=first if asked else None, extra=extras())
 
 
 async def cancel_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=None) -> None:

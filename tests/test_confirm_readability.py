@@ -814,13 +814,103 @@ def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
     assert not dump.problems, f"{len(dump.problems)} confirm sentences break the Confirm rule:\n" + "\n".join(dump.problems)
 
 
+def lock_choice_cases(reg, rs, add):
+    """The lock box's fill choice (issue 14, Task 3): every as-it-stands case beside its auto-fill box, with the
+    sentences a raid leader reads asserted — the open slots first, who is rostered, the pause or who is told, by when."""
+    ms = [reg.members[REAL + i] for i in range(len(PEOPLE))]
+    dms = {m.discord_id: m.dm_opt_out for m in ms}
+    for m in ms:
+        m.dm_opt_out = False
+    sid = _weekly(reg, RID, ["Mon 19:30", "Wed 19:30", "Fri 19:30"], sid="choice")
+    now = reg.now_local()
+    nights = iter([t for _s, t in rc.occurrences(reg, now, 24 * 21) if _s["id"] == sid and t - now >= timedelta(hours=30)])
+    names = [m.display_name for m in ms]
+
+    def night(placed: int, joined: int = 10):
+        ev = rc.open_run(reg, rs, RID, next(nights), by="t", schedule=sid)
+        join(reg, rs, ev, ms[:joined])
+        ev.layout = [names[:min(placed, 5)], names[5:placed]] if placed else None
+        return ev
+
+    def both(case, ev, want=None, want_fill=None):
+        b, f = cq.lock_box(reg, ev, rs), cq.lock_box(reg, ev, rs, fill=True)
+        assert want is None or b["sentences"] == want, (case, b["sentences"])
+        assert want_fill is None or f["sentences"] == want_fill, (case, f["sentences"])
+        add("lock_box", f"{case}, as it stands", b)
+        add("lock_box", f"{case}, auto-fill ticked", f)
+        return b
+
+    ev = night(6)
+    both("six of ten placed, asks on", ev, ["The roster has 4 open slots.", "Only the 6 people on the board are rostered.", cq.LOCK_PAUSE],
+         ["The roster has 4 open slots.", "Everyone on the board keeps their place, and the lock fills the open seats from Not placed.",
+          f"Everyone rostered gets {cq.CONFIRM_DM}."])
+    ev.autofill_paused = True
+    both("six of ten placed, asks paused", ev, ["The roster has 4 open slots.", "Only the 6 people on the board are rostered.",
+                                                f"The 6 rostered get {cq.CONFIRM_DM}."])
+    ev.autofill_paused = False
+    rc.reschedule(reg, rs, ev, timing={"autofill": False}, by="t")
+    both("six of ten placed, asks off", rs.events[ev.key], ["The roster has 4 open slots.", "Only the 6 people on the board are rostered.",
+                                                            f"The 6 rostered get {cq.CONFIRM_DM}."])
+    ms[1].dm_opt_out = True
+    both("six of ten placed, asks off, one with DMs off", rs.events[ev.key])
+    ms[1].dm_opt_out = False
+    ev = night(6)
+    ev.pins[str(ms[8].discord_id)] = "in"
+    both("one pinned in off the board", ev, ["The roster has 4 open slots.",
+                                             f"Only the 6 people on the board are rostered, so {names[8]} is not.", cq.LOCK_PAUSE])
+    for i in (6, 7, 9):
+        ev.pins[str(ms[i].discord_id)] = "in"
+    both("four pinned in off the board", ev, ["The roster has 4 open slots.",
+                                              f"Only the 6 people on the board are rostered, so {names[8]}, {names[6]} and 2 others are not.", cq.LOCK_PAUSE])
+    ev = night(9, joined=9)  # every seat placed, one by Auto-fill from the bench: no open slot, the board is not complete
+    join(reg, rs, ev, ms[9:10], "sub")
+    ev.layout, ev.auto_placed = [names[:5], names[5:10]], [names[9]]
+    both("every seat placed, a Bench place Auto-fill made", ev, ["Only the 10 people on the board are rostered.",
+                                                                 f"The 10 rostered get {cq.CONFIRM_DM}.", cq._lock_deadline(reg, ev)],
+         [cq.AUTO_AGAIN, f"Everyone rostered gets {cq.CONFIRM_DM}.", cq._lock_deadline(reg, ev)])
+    ev = night(0)
+    both("nobody placed", ev, [rc.LOCK_EMPTY_BOARD])
+    ev = rc.open_run(reg, rs, RID, next(nights), by="t", schedule=sid)
+    both("nobody joined", ev, ["The roster has 10 open slots.", "Nobody is on the board, so the roster locks empty.", cq.LOCK_PAUSE])
+    ev = night(4, joined=12)  # two rosters expected (12 joined): roster 1 part-filled, roster 2 empty is not built
+    k = rc.groups_per_roster(reg, rc.run_size(reg, ev))
+    ev.layout = [names[:2], names[2:4]] + [[] for _ in range(k - 2)] + [names[4:7]]
+    both("two rosters, both part-filled", ev)
+    one = rc.open_run(reg, rs, RID, (now + timedelta(days=9)).replace(hour=20, minute=0, second=0, microsecond=0), by="t",
+                      schedule=rc.ADHOC_SCHEDULE)
+    join(reg, rs, one, ms[:8])
+    one.layout = [names[:5]]
+    both("one-off, five of eight placed", one, ["The roster has 5 open slots.", "Only the 5 people on the board are rostered.", cq.LOCK_PAUSE])
+    rc.reschedule(reg, rs, one, timing={"autofill": False, "confirm": False}, by="t")
+    both("one-off, asks and confirmation off", rs.events[one.key], ["The roster has 5 open slots.", "Only the 5 people on the board are rostered.",
+                                                    "Nobody is asked to confirm."])
+    reg.set_raid_overrides("hyjal_summit_forever", {"first_open": "2026-01-01T00:00"}, "t")
+    lead = rc.open_run(reg, rs, "hyjal_summit_forever", (now + timedelta(days=11)).replace(hour=18, minute=30, second=0, microsecond=0),
+                       by="t", schedule=rc.ADHOC_SCHEDULE, follow={"raid": RID, "rosters": 2})
+    join(reg, rs, lead, ms)
+    fev = rs.events[lead.followed_by]
+    lead.layout = [names[:5]]
+    both("two raids, the later board empty", lead, [rc.LOCK_EMPTY_RAID.format(raid="Barrow Deeps")])
+    fev.layout = [names[:5], names[5:10]]
+    both("two raids, open slots on the first", lead, ["The Hyjal Summit roster has 15 open slots.",
+                                                      "Only the people on each raid's board are rostered.", cq.LOCK_PAUSE])
+    fev.layout = [names[:3]]
+    both("two raids, open slots on both", lead, ["The rosters have 22 open slots across 2 raids.",
+                                                 "Only the people on each raid's board are rostered.", cq.LOCK_PAUSE])
+    fev.pins[str(ms[11].discord_id)] = "in"
+    both("two raids, one pinned in off the later board", lead)
+    for m in ms:
+        m.dm_opt_out = dms[m.discord_id]
+
+
 def box_cases(reg, rs, runs, ms, dump):
     """Every box generator across its cases (each variant of the §7b table, DMs on and off, 0 / 1 / many): the title is
     linted as a line of its own, then the sentences as one confirm."""
     hy, ony = "hyjal_summit_forever", "onyxias_lair"
 
     def add(generator, case, b):
-        assert set(b) == {"title", "sentences", "verb", "danger", "diff", "fp"}, generator
+        assert set(b) - {"choice"} == {"title", "sentences", "verb", "danger", "diff", "fp"}, generator
+        assert "choice" not in b or (generator == "lock_box" and set(b["choice"]) == {"label", "value"}), generator
         assert b["verb"] is not None or len(b["sentences"]) == 1, f"{generator} · {case}: a refusal is one sentence"
         title = b["title"] if b["title"][-1:] in ".?!" else b["title"] + "."  # a heading: linted for case, length and glue
         dump.add(f"{generator} title", case, [title])
@@ -828,16 +918,18 @@ def box_cases(reg, rs, runs, ms, dump):
 
     for case, ev in runs.items():
         add("lock_box", case, cq.lock_box(reg, ev, rs))
+        add("lock_box", f"{case}, auto-fill ticked", cq.lock_box(reg, ev, rs, fill=True))
         add("cancel_box", case, cq.cancel_box(reg, ev, rs))
     four = next(e for e in rs.events.values() if e.state == "open" and not rc.is_follow(e) and len(rc.event_parts(rs, e)) == 4)
     add("lock_box", "four raids", cq.lock_box(reg, four, rs))  # lineup_cases' four-raid event
+    add("lock_box", "four raids, auto-fill ticked", cq.lock_box(reg, four, rs, fill=True))
     ev = runs["open recurring"]  # kept-off joiners (an out pin, a drag onto Not placed): never counted as rostered
     joined, pins, layout = ev.by_status("in"), dict(ev.pins), ev.layout
     ev.layout = None  # a board place wins over a pin out: off the board for these cases
-    if joined:
-        whole = cq.lock_box(reg, ev, rs)
+    if joined:  # the lock that fills (nobody is on the board, so the lock as it stands is refused)
+        whole = cq.lock_box(reg, ev, rs, fill=True)
         ev.pins[str(joined[0].discord_id)] = "out"
-        b = cq.lock_box(reg, ev, rs)
+        b = cq.lock_box(reg, ev, rs, fill=True)
         assert b["verb"] == "Lock" and b["fp"] != whole["fp"], b  # no count to change: the fingerprint covers the pins
         add("lock_box", "open recurring, one joiner kept off", b)
         for sg in joined:
@@ -857,10 +949,14 @@ def box_cases(reg, rs, runs, ms, dump):
         raise AssertionError("no free night left for the Bench cases")
 
     def bench_case(case, ev, head=None, told=None):
-        b = cq.lock_box(reg, ev, rs)
-        assert head is None or b["sentences"][0] == head, (case, b)
-        assert told is None or b["sentences"][1] == told, (case, b)
+        """The lock that fills (auto-fill ticked, or a complete board with no choice): its rule head and who is told,
+        after the open slots sentence when one leads. The lock as it stands of the same board is linted beside it."""
+        b = cq.lock_box(reg, ev, rs, fill=True)
+        body = [x for x in b["sentences"] if " open slot" not in x]
+        assert head is None or body[0] == head, (case, b)
+        assert told is None or body[1] == told, (case, b)
         add("lock_box", case, b)
+        add("lock_box", f"{case}, as it stands", cq.lock_box(reg, ev, rs))
         return b
 
     dms = {m.discord_id: m.dm_opt_out for m in ms}  # the harness's own DMs-off people: put back after these cases
@@ -1116,6 +1212,7 @@ def box_cases(reg, rs, runs, ms, dump):
         add("leave_box", f"{n} edits", cq.leave_box(n, "Hyjal Summit"))
     for kind, title in cq.REFUSAL_TITLES.items():
         add("refusal_box", kind, cq.refusal_box(title, rc.LINEUP_LOCKED))
+    lock_choice_cases(reg, rs, add)  # last: its own schedule's nights would move the harness's recurring_run indices
 
 
 def reschedule_cases(reg, rs, runs, ms, dump):

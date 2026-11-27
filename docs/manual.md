@@ -104,8 +104,8 @@ understands; it answers in the words below.
     its group: a Bench answer Auto-fill placed there is rostered, and someone pinned on who is not on the board is not.
     Everyone left under *Not placed* gets the usual *Not rostered* notice. If seats stay open and Automated Fill
     Requests are on, the lock pauses them on every raid of that event, so nobody is DMed for those seats; the notice
-    then says *"An officer decides who takes an open seat."* Resuming them is per raid: an officer resumes each raid's
-    asks from its event. With people signed up and nobody on the board, that lock fails: the sheet stays open, the
+    then says *"An officer decides who takes an open seat."* One press of **Resume Automated Fill Requests** — on any
+    raid of the event, on the site, the lock card, plain text or MCP — resumes every raid of it. With people signed up and nobody on the board, that lock fails: the sheet stays open, the
     officers get one line (*"Nobody is on the board, so place someone or lock with auto-fill to fill the empty
     seats."*) and the bot tries again after 15 minutes, not every minute. An event of several raids is checked as a
     whole before any raid of it locks: if any of its raids has people signed up and nobody on its board, nothing locks
@@ -1382,7 +1382,23 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    or where the event is short a tank or healer that nobody who joined can cover. A Bench answer an officer placed by
    hand or pinned keeps that place, even ahead of someone who joined. The number of rosters comes from those who joined;
    the bench never adds one, unless an officer placed a Bench answer in a later roster's group. A Bench answer the lock
-   rosters gets the Confirm ask like anyone rostered. Lock now asks first. Its confirm states the rule the lock follows,
+   rosters gets the Confirm ask like anyone rostered. Lock now asks first.
+   **A lock an officer presses** (Lock now, the sheet card's Lock, the lock card and `/raid lock`, plain text, MCP) never
+   fills silently: when the board is not complete, the box offers one choice, **Auto-fill empty roster slots**,
+   unticked. Unticked, the lock rosters exactly the names on the board, each in its group — nobody else, not even
+   someone pinned on who is not on it — and the box says so: *"The roster has 4 open slots. Only the 6 people on the
+   board are rostered, so Ash is not. Automated Fill Requests pause, so an officer decides who takes an open slot."*
+   (the last sentence only while those asks are on; otherwise who is asked to confirm). The open slots are per roster
+   (*"Roster 1 has 3 open slots and roster 2 has 1."*); an event of several raids names the raid when only one has them
+   (*"The Barrow Deeps roster has 5 open slots."*), else the total (*"The rosters have 11 open slots across 2 raids."*).
+   With people signed up and nobody on the board the unticked lock can't be pressed: the box says *"Nobody is on the board,
+   so place someone or lock with auto-fill to fill the empty seats."* and the choice stays there to tick. Ticked, the lock
+   fills as described below, and the box leads with the open slots when every roster has someone on it. Changing the
+   choice redraws the box, and **Preview lock** shows the roster for the choice ticked now. A complete board (every seat
+   placed, or nobody left to place) shows the box below with no choice, and its lock is the usual one. Discord has no
+   checkbox: the screen shows **Lock as it stands** · **Lock and auto-fill** · Preview lock · Back, and Lock and auto-fill
+   opens its own screen with its own box. Plain text *"lock tonight's event"* locks as it stands; *"lock and fill tonight's
+   event"* fills — the review line says which. MCP `lock_run` takes `autofill` (false unless asked). Its confirm states the rule the lock follows,
    never a guess at who it picks — **Preview lock** shows the exact roster. *"The lock builds the roster for Hyjal
    Summit and both Barrow Deeps rosters from those who joined."* with nobody placed (*"… from those who joined, then
    from the bench."* with Bench answers, a pinned one too), *"Everyone on the board keeps their place, and the lock fills the open seats
@@ -1457,7 +1473,7 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    time, never more than 3 outstanding, and never asks someone who is rostered on another raid within 4 hours or
    absent. A fill DM that can't be delivered leaves the ask on the person's Me page (same deadline; the lock card counts
    "N wait on the site") — never a no. **Pause Automated Fill Requests** (the lock card's second row, the same button on the site's
-   locked event) stops the bot asking anyone on its own for that event; an officer's own *Fill seats…* / *Ask* still
+   locked event) stops the bot asking anyone on its own for every raid of that event; an officer's own *Fill seats…* / *Ask* still
    sends, and *Resume Automated Fill Requests* picks up where it left off. Every fill DM says when silence starts counting as no: `fill_ask_hours` [4 h] after
    it was sent, never later than the event's start; the updates thread logs the timeout and the next person is
    asked. A yes goes straight into the freed seat (a swap changes the seat in place). A roster that is full but
@@ -2322,7 +2338,7 @@ next unopened events, so "groups for tonight" and "open Saturday's alt night" st
   before lock "suggest fixes for Tuesday's Barrow Deeps" (the suggestions, nothing sent) and "send them" (the diff
   shows exactly who will be asked; if the suggestions changed before you press Apply, nothing is sent); "split tonight's event
   first-roster-first" (balanced / first / rotation); "auto-fill the board for bd-…" (before lock); "remind the
-  unconfirmed for tonight" (once an hour); "pause Automated Fill Requests on tonight's event" / "resume Automated Fill Requests"; "withdraw the ask
+  unconfirmed for tonight" (once an hour); "pause Automated Fill Requests on tonight's event" / "resume Automated Fill Requests" (every raid of the event); "lock and fill tonight's event" ("lock …" alone locks as the board stands); "withdraw the ask
   to Kestrel"; "reopen bd-k7m2qx" (an end by mistake, within the hour — never a cancelled event).
 - *The board:* "move Ash to group 3" / "put Ash in 2.1" (roster 2, group 1) / "bench Ash" / "swap Ash and Dusk" —
   one person, like a drag (after lock: in from *Not rostered* = asked to confirm, out to it = seat freed); "groups for
@@ -2661,8 +2677,8 @@ news post says can make the review read or write another server.
 | `set_answer` · `pin` · `confirm_for` · `fill_answer` | Join / Bench / No thanks for someone (character swap; `out` is *Can't make it* — a callout like `/raid out` — unless `callout=false`, which is a plain No thanks with no record; a `note` goes with a callout only and is for officers) · pin in/out for the lock · answer a Confirm ask for them · answer a fill ask (seat or swap) for them. The member gets a notice on their Me page, never a DM |
 | `member_inbox` | a member's open asks (where each waits: DM or the site, its deadline) and notices, as their Me page shows them |
 | `propose_split` · `set_strategy` · `autofill` · `set_layout` | preview a split (nothing saved; says why there can't be more rosters and who is left over) · remember the strategy · the bot builds the groups on the board · set the groups (pass `rev` from `get_run`: a board someone changed since is refused, not overwritten) |
-| `remind_unconfirmed` · `pause_autofill` · `withdraw_ask` · `reopen_run` | the Confirm / Can't DM again to the unconfirmed (once an hour per event) · pause (`paused=true`) or resume the fill engine for one event · close an ask already sent to a member (their card says never mind) · undo an end by mistake within the hour (never a cancelled event) |
-| `lock_run` · `fill_seats` · `cancel_run` · `repost_sheet` | lock now · preview who would be asked (before lock the suggestions, after lock the seats to fill — `plan.seats` with alternates and a `why`, `plan.lines`, `plan.batch_lines` = exactly what a send DMs, `plan.rev`), then `send=true` with the preview's `rev` sends exactly that batch (`picks` {seat: option} for an alternate; a changed plan is refused; without a `rev` a send is refused before lock, and after lock whenever the batch holds a role swap) · cancel with a reason (nobody is DMed: every open ask card says Cancelled and a fixed line goes to the signup channel unless `notify=false`; the reason stays with officers) · post a fresh copy of the sheet (the signup channel, or a channel you name) |
+| `remind_unconfirmed` · `pause_autofill` · `withdraw_ask` · `reopen_run` | the Confirm / Can't DM again to the unconfirmed (once an hour per event) · pause (`paused=true`) or resume the fill engine for every raid of one event · close an ask already sent to a member (their card says never mind) · undo an end by mistake within the hour (never a cancelled event) |
+| `lock_run` · `fill_seats` · `cancel_run` · `repost_sheet` | lock now (`autofill=false`, the default: exactly the board, refused with nobody on it; `autofill=true`: fill the empty slots) · preview who would be asked (before lock the suggestions, after lock the seats to fill — `plan.seats` with alternates and a `why`, `plan.lines`, `plan.batch_lines` = exactly what a send DMs, `plan.rev`), then `send=true` with the preview's `rev` sends exactly that batch (`picks` {seat: option} for an alternate; a changed plan is refused; without a `rev` a send is refused before lock, and after lock whenever the batch holds a role swap) · cancel with a reason (nobody is DMed: every open ask card says Cancelled and a fixed line goes to the signup channel unless `notify=false`; the reason stays with officers) · post a fresh copy of the sheet (the signup channel, or a channel you name) |
 | `raid_set` · `raid_reset` | a raid's own settings — one, or several as `fields` in one write (slots, weights, lockout and length, split policy, notes, first open; sheet timing is `schedule_set`'s, a minimum `set_minimum`'s) · back to defaults — the raid's schedules go too, so pass the preview's `revs` back: a schedule added or changed since is refused, never removed unseen |
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs (one field, or several as `fields` in one write; `family_new` = a new family by name) and stacking families (`value` = the whole map as an object, `value:<key>` = one beneficiary; no `family` + a `name` = a new family, its id made from the name) |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |

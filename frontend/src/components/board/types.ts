@@ -1,4 +1,4 @@
-import type { Board, Sheet } from "../../api";
+import type { Board, Box, Sheet } from "../../api";
 
 /** The raid-night fields ev_json adds in dual interfaces phase 2 (web/api.py night_json, links_json, health_json):
  *  every clock and sentence comes as words from the server — the page prints them, never composes its own. */
@@ -38,8 +38,8 @@ export interface WeekStep { step: string; when: string; at: string; done: boolea
 
 export type NightSheet = Omit<Sheet, "fill_asks" | "callouts"> & NightFields;
 
-/** POST /api/run/{key}/lock/preview — the roster(s) the lock would build now (nothing saved). */
-export interface LockPreview { board: Board; consequence: string; leftovers: string[]; strategy?: string | null; rev: string }
+/** POST /api/run/{key}/lock/preview {fill} — the roster(s) the lock would build now for that choice, and its box (nothing saved). */
+export interface LockPreview { board: Board; box: Box; leftovers: string[]; strategy?: string | null; rev: string }
 
 /** POST /api/raid/{rid}/open/preview — what Open would do (rc.open_preview); `start` is carried back to Open. */
 export interface OpenPreview {

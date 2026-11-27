@@ -36,6 +36,16 @@ def people(reg: Registry, n: int, cls_spec: tuple[str, str], rank: str = "raider
     return out
 
 
+def fill_box(reg, ev, rs):
+    """The lock box with Auto-fill empty roster slots ticked (issue 14): the lock these cases test is the one that fills
+    (rc.propose), so its rule sentences are read here — the leading open-slots sentence, a count of the board as it
+    stands, is set aside so the head is sentences[0] and who is told sentences[1], as before the choice existed."""
+    from oibot_gm import consequences as cq
+
+    b = cq.lock_box(reg, ev, rs, fill=True)
+    return {**b, "sentences": [x for x in b["sentences"] if not (" open slot" in x and x is b["sentences"][0])]}
+
+
 def schedule_event(reg, rs):
     sid = weekly(reg)
     return rc.open_run(reg, rs, RID, first_slot(reg, RID), by="t", schedule=sid)
@@ -931,7 +941,7 @@ def contradictions(reg, rs, ev) -> tuple[dict, list[str]]:
 
     from oibot_gm import consequences as cq
 
-    b = cq.lock_box(reg, ev, rs)
+    b = fill_box(reg, ev, rs)
     head, told = b["sentences"][0], b["sentences"][1]
     lf = rc.lock_forces(reg, rs, ev)
     kept_bench = {n for n in lf.kept_on if (sg := rc.signup_by_name(ev, n)) is not None and sg.status == "sub"}
@@ -988,11 +998,11 @@ def test_the_box_says_the_board_becomes_the_roster_only_when_it_is(reg, rs):
     from oibot_gm import consequences as cq
 
     ev = _case_b1_full_hand_board_healer_short(reg, rs)
-    b = cq.lock_box(reg, ev, rs)
+    b = fill_box(reg, ev, rs)
     assert b["sentences"][0] == "The board becomes the roster for Barrow Deeps.", b
     assert b["sentences"][1] == "The 10 rostered get the Confirm or Can't make it DM.", b
     ev = _case_b11_second_rosters_group(reg, rs)
-    head = cq.lock_box(reg, ev, rs)["sentences"][0]
+    head = fill_box(reg, ev, rs)["sentences"][0]
     assert head == "The lock keeps the board and fills open seats from those who joined, then from the bench.", head
 
 
@@ -1000,7 +1010,7 @@ def test_the_box_names_auto_fills_bench_places_as_open(reg, rs):
     from oibot_gm import consequences as cq
 
     for make in (_case_b12_auto_fill_then_two_joins, _case_a1_proposal_used_then_two_joins):
-        b = cq.lock_box(reg, make(reg, rs), rs)
+        b = fill_box(reg, make(reg, rs), rs)
         assert b["sentences"][0] == cq.AUTO_AGAIN, b
         assert cq.AUTO_AGAIN == ("The lock decides again where each Bench answer goes, unless an officer dragged them there "
                                  "as a Bench answer.")
@@ -1010,9 +1020,9 @@ def test_the_box_names_auto_fills_bench_places_as_open(reg, rs):
 def test_the_box_says_a_hand_placed_or_pinned_bench_answer_comes_ahead(reg, rs):
     from oibot_gm import consequences as cq
 
-    assert cq.lock_box(reg, _case_b6_pinned_bench_on_a_full_event(reg, rs), rs)["sentences"][0] == \
+    assert fill_box(reg, _case_b6_pinned_bench_on_a_full_event(reg, rs), rs)["sentences"][0] == \
         "A Bench answer an officer placed or pinned is rostered ahead of people who joined."
-    assert cq.lock_box(reg, _case_placed_bench(reg, rs), rs)["sentences"][0] == \
+    assert fill_box(reg, _case_placed_bench(reg, rs), rs)["sentences"][0] == \
         "A Bench answer an officer placed or pinned is rostered ahead of people who joined."
 
 
@@ -1020,7 +1030,7 @@ def test_the_box_says_a_benched_healer_comes_ahead_for_the_healer_minimum(reg, r
     from oibot_gm import consequences as cq
 
     for make in (_case_healer, _case_only_tank_heals):
-        head = cq.lock_box(reg, make(reg, rs), rs)["sentences"][0]
+        head = fill_box(reg, make(reg, rs), rs)["sentences"][0]
         assert head == "If those who joined cannot meet the healer minimum, a healer on the bench is rostered ahead of them.", head
     assert rc.bench_short_roles(reg, rs, _case_spare_tank_heals(reg, rs)) == [], "the joiners together cover the minimums"
 
@@ -1030,12 +1040,12 @@ def test_the_box_names_the_bench_for_a_kept_on_bench_answer_off_the_board(reg, r
     B13 (one pinned Bench answer, an empty board) names the bench; B12 (pinned joiners hold every seat) says no exception."""
     from oibot_gm import consequences as cq
 
-    b = cq.lock_box(reg, _case_p1_full_board_and_a_pinned_bench_answer_off_it(reg, rs), rs)
+    b = fill_box(reg, _case_p1_full_board_and_a_pinned_bench_answer_off_it(reg, rs), rs)
     assert b["sentences"][:2] == ["The lock keeps the board and fills open seats from those who joined, then from the bench.",
                                   "Everyone rostered gets the Confirm or Can't make it DM."], b
     for make in (_case_b13_one_pinned_bench_answer_empty_board, _case_b12_pinned_joiners_hold_every_seat):
         ev = make(reg, rs)
-        assert cq.lock_box(reg, ev, rs)["sentences"][0] == \
+        assert fill_box(reg, ev, rs)["sentences"][0] == \
             "The lock builds the roster for Barrow Deeps from those who joined, then from the bench.", make.__name__
     assert rc.bench_short_roles(reg, rs, ev) == [], "the pinned joiners hold every seat"
 
@@ -1044,11 +1054,11 @@ def test_the_box_with_bench_answers_and_nobody_placed(reg, rs):
     from oibot_gm import consequences as cq
 
     ev, joiners, *_ = case_one(reg, rs)
-    b = cq.lock_box(reg, ev, rs)
+    b = fill_box(reg, ev, rs)
     assert b["sentences"][:2] == ["The lock builds the roster for Barrow Deeps from those who joined, then from the bench.",
                                   "Everyone rostered gets the Confirm or Can't make it DM."], b
     ev.layout = [[joiners[0].display_name]]
-    assert cq.lock_box(reg, ev, rs)["sentences"][0] == \
+    assert fill_box(reg, ev, rs)["sentences"][0] == \
         "The lock keeps the board and fills open seats from those who joined, then from the bench."
 
 
@@ -1056,7 +1066,7 @@ def test_a_full_roster_of_joiners_keeps_todays_lock_box(reg, rs):
     from oibot_gm import consequences as cq
 
     ev = _case_full(reg, rs)
-    head = cq.lock_box(reg, ev, rs)["sentences"][0]
+    head = fill_box(reg, ev, rs)["sentences"][0]
     assert "bench" not in head.lower() or "then from the bench" in head, head
 
 
@@ -1064,14 +1074,14 @@ def test_the_box_fingerprint_changes_with_a_join_and_a_board_move(reg, rs):
     from oibot_gm import consequences as cq
 
     ev, joiners, *_ = case_one(reg, rs)
-    a = cq.lock_box(reg, ev, rs)
+    a = fill_box(reg, ev, rs)
     join(reg, rs, ev, people(reg, 1, DPS))
-    b = cq.lock_box(reg, ev, rs)
+    b = fill_box(reg, ev, rs)
     assert a["sentences"] == b["sentences"] and a["fp"] != b["fp"], "the answers changed, the sentences did not"
     ev.layout = [[joiners[0].display_name], [joiners[1].display_name]]
-    c = cq.lock_box(reg, ev, rs)
+    c = fill_box(reg, ev, rs)
     ev.layout = [[joiners[1].display_name], [joiners[0].display_name]]
-    assert cq.lock_box(reg, ev, rs)["fp"] != c["fp"], "the board changed"
+    assert fill_box(reg, ev, rs)["fp"] != c["fp"], "the board changed"
 
 
 # ---------------------------------------------------------------- only an officer's own drag fixes a Bench place
@@ -1254,14 +1264,14 @@ def test_raids_of_one_event_that_differ_get_the_rule_true_of_both(reg, rs):
     joiners, bench = base_eight(reg), people(reg, 2, DPS)
     join(reg, rs, lead, joiners)
     join(reg, rs, lead, bench, "sub")
-    b = cq.lock_box(reg, lead, rs)
+    b = fill_box(reg, lead, rs)
     assert b["sentences"][0] == "The lock builds the roster for Hyjal Summit and Barrow Deeps from those who joined, then from the bench.", b
     fev = rs.events[rc.follow_of(rs, lead).key]
     fev.layout, fev.auto_placed = [[bench[0].display_name]], [bench[0].display_name]
-    b = cq.lock_box(reg, lead, rs)
+    b = fill_box(reg, lead, rs)
     assert b["sentences"][0] == cq.AUTO_AGAIN, b
     fev.layout, fev.auto_placed = [[joiners[0].display_name]], []
-    b = cq.lock_box(reg, lead, rs)
+    b = fill_box(reg, lead, rs)
     assert b["sentences"][0] == "The lock fills open seats from those who joined first, then from the bench.", b
     for s in b["sentences"]:
         assert len(s.split()) <= 20 and not any(ch.isdigit() for ch in s.split(" until ")[0]), s
@@ -1337,11 +1347,11 @@ def test_the_final_reviews_two_boxes_say_what_the_lock_does(reg, rs):
     from oibot_gm import consequences as cq
 
     ev = _case_kept_on_hold_all_but_one_healer_short(reg, rs)
-    assert cq.lock_box(reg, ev, rs)["sentences"][0] == cq._short_first(("healer",))
+    assert fill_box(reg, ev, rs)["sentences"][0] == cq._short_first(("healer",))
     healer = next(s.display_name for s in ev.by_status("sub"))
     assert healer in seated(reg, rs, ev), "the lock rosters the benched healer"
     ev = _case_auto_fill_bench_then_pinned_two_joins(reg, rs)
-    assert cq.lock_box(reg, ev, rs)["sentences"][0] == \
+    assert fill_box(reg, ev, rs)["sentences"][0] == \
         "A Bench answer an officer placed or pinned is rostered ahead of people who joined."
     pinned = next(s.display_name for s in ev.by_status("sub") if ev.pins.get(str(s.discord_id)) == "in")
     assert pinned in seated(reg, rs, ev), "the lock agrees"

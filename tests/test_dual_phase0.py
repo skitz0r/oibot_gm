@@ -125,7 +125,8 @@ def test_ev_json_carries_the_consequences_so_the_browser_never_composes_them(reg
 
     sheet = Path(__file__).resolve().parents[1] / "frontend" / "src" / "components" / "board" / "SheetCard.tsx"
     text = sheet.read_text()
-    assert "e.consequences?.lock" in text and "e.consequences?.cancel" in text and "everyone rostered gets a confirmation DM" not in text
+    # the lock is THE lock box now (components/events/LockBox: the server's box with its choice, issue 14)
+    assert "useLockBox" in text and "e.consequences?.cancel" in text and "everyone rostered gets a confirmation DM" not in text
 
 
 def test_news_consequence_and_decision_refusal(reg):
@@ -340,7 +341,7 @@ def test_lock_card_button_locks_on_the_press_and_reports_a_bug_with_the_generic_
     join(reg, rs, ev, reg.test_members()[:3])
     state = {"fail": False}
 
-    async def lock_run(reg_, rs_, ev_, by="scheduler"):
+    async def lock_run(reg_, rs_, ev_, by="scheduler", fill=True):
         if state["fail"]:
             raise RuntimeError("solver exploded")
         ev_.state, ev_.lock_error = "locked", None
@@ -352,13 +353,15 @@ def test_lock_card_button_locks_on_the_press_and_reports_a_bug_with_the_generic_
     async def go():
         state["fail"] = True
         await RunButton(reg.key, ev.key, "lock").callback(h.card_press())
+        await h.press("Lock and auto-fill")  # nobody on the board: the lock that fills (issue 14)
         assert "Everyone rostered gets the Confirm or Can't make it DM" in h.text
-        await h.press("Lock")
+        await h.press("Lock and auto-fill")
         assert configops.GENERIC_ERROR in h.text and "solver exploded" not in h.text
         assert any(lvl == "error" and "solver exploded" in text for lvl, text in bot.ops.lines)
         state["fail"] = False
         await RunButton(reg.key, ev.key, "lock").callback(h.card_press())
-        await h.press("Lock")
+        await h.press("Lock and auto-fill")
+        await h.press("Lock and auto-fill")
         assert "locked by Officer" in h.text and ("info", f"{ev.key}: locked by Officer, 1 roster(s), 3 confirmation DM(s)") in bot.ops.lines
         await RunButton(reg.key, ev.key, "lock").callback(h.card_press())
         assert h.text == "Already locked."

@@ -1813,24 +1813,33 @@ class RaidMixin:
         return f"Reminded {sent} by DM" + (f"; {site} wait on the site (DMs off)" if site else "") + ". Next reminder possible in an hour."
 
     async def set_autofill_paused(self, reg, rs, ev, paused: bool, *, by: str, by_id: int | None = None, via: str = "discord") -> str:
-        """Pause / resume the fill engine for one run (D18): `ev.autofill_paused`, gated inside run_fill — the scheduler,
-        a freed seat, an answer and the site's blind send all respect it; an officer's own Ask / Send still goes."""
+        """Pause / resume the fill engine (D18) for EVERY raid of `ev`'s event still live (issue 14: one press resumes
+        after a lock as it stands, which pauses them all): `autofill_paused` on each, gated inside run_fill — the
+        scheduler, a freed seat, an answer and the site's blind send all respect it; an officer's own Ask / Send still
+        goes. The card toggle, plain text run_pause, POST /api/run/{key}/pause and MCP pause_autofill all land here."""
         if ev.state in ("done", "cancelled"):
             raise RegistryError(f"{run_title(reg, ev)} is {ev.state}.")
-        if bool(ev.autofill_paused) == bool(paused):
-            return f"Automated Fill Requests are already {'paused' if paused else 'on'} for {run_title(reg, ev)}."
-        ev.autofill_paused, ev.autofill_paused_by = bool(paused), (by if paused else None)
-        ev.log.append(f"automatic asks {'paused' if paused else 'resumed'} by {by}")
-        rs.save(ev, f"autofill {'paused' if paused else 'resumed'} by {by}")
+        parts = [ev if p.key == ev.key else p for p in rc.event_parts(rs, ev) if p.state not in ("done", "cancelled")] or [ev]
+        whom = f"every raid of {run_title(reg, rc.first_part(rs, ev))}" if len(parts) > 1 else run_title(reg, ev)
+        flip = [p for p in parts if bool(p.autofill_paused) != bool(paused)]
+        if not flip:
+            return f"Automated Fill Requests are already {'paused' if paused else 'on'} for {whom}."
+        for p in flip:
+            p.autofill_paused, p.autofill_paused_by = bool(paused), (by if paused else None)
+            p.log.append(f"automatic asks {'paused' if paused else 'resumed'} by {by}")
+            rs.save(p, f"autofill {'paused' if paused else 'resumed'} by {by}")
         await self.post_run_update(reg, ev, f"{'⏸️' if paused else '▶️'} Automated Fill Requests {'paused' if paused else 'resumed'} by {by}")
-        await self.refresh_cards(reg, ev)
-        await ops_mod.audited(self.ops, reg, by, f"{'paused' if paused else 'resumed'} automatic asks on {run_title(reg, ev)}", via=via, by_id=by_id)
-        if not paused and ev.state == "locked" and rc.team_setting(rc.run_team(reg, ev), "autofill"):
-            sent, _nd = await self.run_fill(reg, rs, ev, rc.run_team(reg, ev), by=f"resumed by {by}")
-            if sent:
-                await self.post_run_update(reg, ev, "🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
-        return (f"Automated Fill Requests are paused for {run_title(reg, ev)} — nothing goes out on its own; your Ask / Fill seats… still sends." if paused
-                else f"Automated Fill Requests are on again for {run_title(reg, ev)}.")
+        for p in flip:
+            await self.refresh_cards(reg, p)
+        await ops_mod.audited(self.ops, reg, by, f"{'paused' if paused else 'resumed'} automatic asks on {whom}", via=via, by_id=by_id)
+        if not paused:
+            for p in flip:
+                if p.state == "locked" and rc.team_setting(rc.run_team(reg, p), "autofill"):
+                    sent, _nd = await self.run_fill(reg, rs, p, rc.run_team(reg, p), by=f"resumed by {by}")
+                    if sent:
+                        await self.post_run_update(reg, p, "🧩 " + "\n🧩 ".join(ask_line(reg, self.ico, a) for a in sent))
+        return (f"Automated Fill Requests are paused for {whom} — nothing goes out on its own; your Ask / Fill seats… still sends." if paused
+                else f"Automated Fill Requests are on again for {whom}.")
 
     # ---- absences ripple into sheets
     async def after_absence_cleared(self, reg, m, a) -> list[str]:

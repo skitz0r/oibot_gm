@@ -369,7 +369,7 @@ def test_no_route_answer_carries_a_discord_time_stamp(w):
     said["run cancel"] = c.post(f"/api/run/{ev.key}/cancel", json={"reason": "x"}, headers=h)
     to_lock = open_test_run(reg, rs, days=4)
     join(reg, rs, to_lock, reg.test_members()[:10])
-    said["run lock"] = c.post(f"/api/run/{to_lock.key}/lock", json={}, headers=h)
+    said["run lock"] = c.post(f"/api/run/{to_lock.key}/lock", json={"fill": True}, headers=h)  # nobody placed: the lock that fills
     s, seated = short_one(reg, rs)  # locked, one seat freed, the bench joined
     for m in seated[:-1]:
         reg.add_placement_ask(m.discord_id, s.team, m.main.label, "lock")

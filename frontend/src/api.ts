@@ -199,7 +199,8 @@ export interface MemberEventView {
 }
 /** The confirmation box (design §7b, consequences.box): printed as it comes, Back then the verb; `verb` null = a refusal
  *  (only Back); `fp` goes back as `seen` with the press. */
-export interface Box { title: string; sentences: string[]; verb: string | null; danger: boolean; diff: string[]; fp: string }
+/** `choice`: the lock box's one choice (consequences.lock_box, issue 14) — its label and whether it is ticked; absent elsewhere */
+export interface Box { title: string; sentences: string[]; verb: string | null; danger: boolean; diff: string[]; fp: string; choice?: { label: string; value: boolean } }
 /** A Details line (event_view): the label, its value in words, and where it links (a site path or a Discord jump link).
  *  `links` = several places at once (the Raids page's Played in: each schedule with its href); `level` = a chip's level. */
 /** a Details row; `help` = the editors' (?) for the setting it names (constants.field_help: key, the sentence, its screen-reader name) */

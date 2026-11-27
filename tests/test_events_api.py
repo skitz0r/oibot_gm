@@ -185,7 +185,8 @@ def test_an_open_event_reads_by_its_sections(officer_client, reg, rs):
         "the editor's (?) key on the rows the editor has one for, and on no other row"
     assert facts["Signup sheet"] == PAGE_WORDS["sheet_waits"], "no signup channel here: the fact says what it waits for"
     assert j["signups"]["joined"] == 18 and [p["label"] for p in j["parts"]][0].endswith("· Hyjal Summit")
-    assert j["boxes"]["lock"]["verb"] == "Lock" and j["actions"]["edit_lineup"] is True
+    # nobody on the board: the unticked lock (as it stands) refuses, the choice there to tick (issue 14)
+    assert j["boxes"]["lock"]["verb"] is None and j["boxes"]["lock"]["choice"]["value"] is False and j["actions"]["edit_lineup"] is True
     assert j["boxes"]["lock"] == cq.lock_box(reg, ev, rs) and j["boxes"]["cancel"] == cq.cancel_box(reg, ev, rs)
     assert (j["kind"], j["schedule"], j["state"], j["chip"], j["title"]) == ("one_off", None, "open", rc.RUN_STATE_WORDS["open"], reg.local12(ev.start))
     assert j["actions"] == {"reschedule": True, "edit": True, "edit_lineup": True, "lock": True, "cancel": True, "open_now": False, "clear": True}

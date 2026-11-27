@@ -104,7 +104,7 @@ def dm_bot(duo, members=None, flaky=None):
         bot.did.append(("signup", reg.key, status))
         await interaction.response.send_message("ok", ephemeral=True)
 
-    async def lock_run(reg, rs, ev, by="scheduler"):
+    async def lock_run(reg, rs, ev, by="scheduler", fill=True):
         bot.did.append(("lock", reg.key))
         return f"locked {ev.key}"
 
@@ -229,7 +229,12 @@ def test_a_sheet_join_and_an_officer_lock_land_in_their_own_guild(duo):
     screen = i.views[-1]
     press = Itx(bot)
     press.message = types.SimpleNamespace(id=screen.message_id)
-    run(next(b for b in screen.children if b.label == "Lock").callback(press))
+    # nobody is on the board: the lock as it stands is refused, the lock that fills opens its own screen (issue 14)
+    run(next(b for b in screen.children if b.label == "Lock and auto-fill").callback(press))
+    assert [d for d in bot.did if d[0] == "lock"] == []
+    press2 = Itx(bot)
+    press2.message = types.SimpleNamespace(id=screen.message_id)
+    run(next(b for b in screen.children if b.label == "Lock and auto-fill").callback(press2))
     assert [d for d in bot.did if d[0] in ("signup", "lock")] == [("signup", GUILD2, "in"), ("lock", GUILD2)]
 
 

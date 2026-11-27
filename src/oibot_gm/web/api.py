@@ -29,7 +29,7 @@ from .api_prices import prices_meta
 from .api_armory import char_extras as armory_extras
 from .. import professions as professions_mod
 from .. import guild_routing
-from ..consequences import consequence as consequence_lines, consequences_json, regular_remove as regular_remove_lines
+from ..consequences import consequences_json, regular_remove as regular_remove_lines
 from ..presets import DURATIONS, PRESETS
 from ..registry import ABSENCE_REASON_MAX, DECISION_NOTE_MAX, MAX_ABSENCE_DAYS, RANKS, CharactersChanged, is_superuser
 from ..registry import CLASS_WORDS, MAX_SCHEDULE_ROSTERS, PLAIN_GROUPS, schedule_class, QUESTIONS_MAX, PLAIN_MODES, PLAIN_WEB, PLAIN_WHO, RAID_BOOL_FIELDS, RAID_HOURS_FIELDS, RAID_WEIGHT_DEFAULTS, SCHEDULE_CADENCE, SCHEDULE_KINDS, SPLIT_POLICIES, RegistryError
@@ -1645,24 +1645,35 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             return JSONResponse({"error": str(e)}, status_code=400)
         return {"message": rc.site_words(v.reg, line)}  # the guild's 12-hour words, never a Discord time stamp
 
+    def lock_fill_asked(d: dict) -> bool:
+        """The lock's fill choice a person's press carries (`fill`, issue 14): absent = False, the box's unticked
+        Auto-fill empty roster slots — a person's lock rosters the board as it stands unless they ask it to fill."""
+        return d.get("fill") in (True, "true", 1, "1", "yes")
+
     @app.post("/api/run/{key}/lock")
     async def run_lock(request: Request, key: str):
-        """Lock the event (RaidMixin.lock_run). {preview?, seen?}: `preview` → {box} (consequences.lock_box), nothing
-        written; `seen` = the box's fp the officer pressed on — when the box built now differs (someone joined, the run
-        changed) nothing is locked and the fresh box comes back (409). A run that ended or was cancelled, named by its
-        key, answers with its refusal box (400), so a Lock box left open on it says so instead of failing."""
+        """Lock the event (RaidMixin.lock_run). {preview?, seen?, fill?}: `fill` = the box's choice (default False: as the
+        board stands); `preview` → {box} (consequences.lock_box for that `fill`), nothing written; `seen` = the box's fp
+        the officer pressed on — when the box built now differs (someone joined, the run changed, the other choice)
+        nothing is locked and the fresh box comes back (409). A run that ended or was cancelled, named by its key,
+        answers with its refusal box (400), so a Lock box left open on it says so instead of failing; so does a lock as
+        it stands with nobody on the board (rc.lock_empty_refusal) — refused here, never the lock's failure path."""
         v, d = await body(request, officer=True)
         rs = bot.raids.store(v.reg)
         ev = rs.events.get(key) or find_live(v.reg, rs, key)
-        fresh = cq.lock_box(v.reg, ev, rs)
-        if fresh["verb"] is None:  # already locked, finished or cancelled
+        asked = lock_fill_asked(d)
+        fresh = cq.lock_box(v.reg, ev, rs, fill=asked)
+        if fresh["verb"] is None and not (d.get("preview") and fresh.get("choice")):  # closed, kept off, or an empty board
             return JSONResponse({"error": fresh["sentences"][0], "box": fresh}, status_code=400)
         if d.get("preview"):
             return {"box": fresh}
         if (r := box_stale(d, fresh)) is not None:
             return r
+        fill = cq.lock_fill(v.reg, ev, rs, asked)
+        if not fill and (why := rc.lock_empty_refusal(v.reg, rs, ev)) is not None:  # MCP (no seen): the same refusal
+            return JSONResponse({"error": why, "box": cq.lock_box(v.reg, ev, rs, fill=False)}, status_code=400)
         try:  # lock_run holds the run's solver single-flight and board lock itself
-            line = await bot.lock_run(v.reg, rs, ev, by=v.name)
+            line = await bot.lock_run(v.reg, rs, ev, by=v.name, fill=fill)
         except RegistryError as e:  # rc.SolverBusy (someone else is locking it), or no longer open
             return JSONResponse({"error": str(e)}, status_code=409)
         except RuntimeError as e:  # lock_run catches the solver itself; this is the belt to its braces
@@ -1674,20 +1685,22 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     @app.post("/api/run/{key}/lock/preview")
     async def run_lock_preview(request: Request, key: str):
-        """The lock modal's Preview (design B6): the roster(s) the lock would build NOW (RaidMixin.lock_preview —
-        rc.split_preview with the run's strategy, the board and the pins; nothing saved but ev.last_proposal), as the
-        board shows it, plus the consequence sentence the confirm prints and the leftovers. 409 when the solver is busy
-        on this run or no roster satisfies the rules (the sentence says which)."""
-        v, _ = await body(request, officer=True)
+        """The lock box's Preview lock (design B6): the roster(s) the lock would build NOW for the box's choice `fill`
+        (default False: the board as it stands, no solve; True: RaidMixin.lock_preview's solve — rc.split_preview with
+        the run's strategy, the board and the pins; nothing saved but ev.last_proposal), as the board shows it, plus the
+        box for that choice and the leftovers. 409 when the solver is busy on this run, no roster satisfies the rules,
+        or a lock as it stands has nobody on the board (the sentence says which)."""
+        v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         if ev.state != "open":
             return JSONResponse({"error": "already locked"}, status_code=400)
+        fill = cq.lock_fill(v.reg, ev, rs, lock_fill_asked(d))
         try:
-            rosters = await bot.lock_preview(v.reg, rs, ev, by=v.name, by_id=v.uid)
+            rosters = await bot.lock_preview(v.reg, rs, ev, by=v.name, by_id=v.uid, fill=fill)
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=409)
         left = rc.leftovers(v.reg, ev, rosters)
-        return {"board": board_json(v.reg, ev, rosters, []), "consequence": " ".join(consequence_lines("lock", v.reg, ev, rs=rs)),
+        return {"board": board_json(v.reg, ev, rosters, []), "box": cq.lock_box(v.reg, ev, rs, fill=lock_fill_asked(d)),
                 "leftovers": [p.signup_name for p in left], "strategy": (ev.last_proposal or {}).get("strategy"), "rev": rc.board_rev(v.reg, ev)}
 
     def send_batch_json(reg, plan) -> list[dict]:

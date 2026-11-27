@@ -613,10 +613,13 @@ def pin(run: str, member: str, pin: str | None = None, guild: Guild = None) -> s
 
 
 @mcp.tool()
-def lock_run(run: str, guild: Guild = None) -> str:
-    """Lock an open run now: the roster is built from the board (or solved), roster cards are posted and everyone seated
-    gets a Confirm / Can't make it DM. What the scheduled lock does, early."""
-    return msg(api(guild).post(f"/api/run/{run}/lock"))
+def lock_run(run: str, autofill: bool = False, guild: Guild = None) -> str:
+    """Lock an open run now: roster cards are posted and everyone rostered gets a Confirm / Can't make it DM.
+    autofill=false (the default, as the site's unticked "Auto-fill empty roster slots"): exactly the names on the board
+    are rostered, nobody added, and Automated Fill Requests pause when slots stay open; refused when people answered
+    and nobody is on the board. autofill=true: the lock fills the empty slots from those who joined, as the scheduled
+    lock does. Look first (get_run) and say which you will do."""
+    return msg(api(guild).post(f"/api/run/{run}/lock", {"fill": bool(autofill)}))
 
 
 @mcp.tool()
@@ -665,8 +668,8 @@ def remind_unconfirmed(run: str, guild: Guild = None) -> str:
 
 @mcp.tool()
 def pause_autofill(run: str, paused: bool = True, guild: Guild = None) -> str:
-    """Pause (paused=true) or resume (paused=false) the fill engine for one run: paused, nothing goes out on its own
-    (the scheduler, a freed seat, an answer); an officer's own fill send (fill_seats send=true) still goes."""
+    """Pause (paused=true) or resume (paused=false) the fill engine for every raid of the run's event: paused, nothing
+    goes out on its own (the scheduler, a freed seat, an answer); an officer's own fill send (fill_seats send=true) still goes."""
     return msg(api(guild).post(f"/api/run/{run}/pause", {"paused": bool(paused)}))
 
 

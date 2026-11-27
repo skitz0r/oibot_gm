@@ -175,7 +175,9 @@ Runs (officer; target = the event key like bd-k7m2qx from the live-events list, 
     join or bench: the spec they play, e.g. Holy — their spec, offspec or an extra role's>, reason=<optional, with
     no thanks: why, a note only the officers see> — an officer sets someone's answer, or someone answers for themselves
     (after lock: join seats them and asks them to confirm, no thanks frees their seat and the fill engine looks for cover).
-  run_lock: target — lock now: roster(s) built from the signups (pins honoured), confirmation DMs to everyone rostered.
+  run_lock: target, value=fill when they ask the lock to fill the empty roster slots ("lock and fill …", "lock and auto-fill …");
+    empty = lock exactly as the board stands ("lock …": only the names placed on the board are rostered) — confirmation DMs
+    to everyone rostered.
   run_cancel: target, reason=<optional, for the officers only>, value=quiet when they ask for no line in the signup channel
     (default: one fixed line there; nobody is DMed either way — the sheet and every open ask card say Cancelled).
   run_remind: target — after lock: the Confirm / Can't DM again to everyone rostered who hasn't answered (their existing ask;
@@ -2117,6 +2119,17 @@ def _pause_value(op: ConfigOp) -> bool:
     raise RegistryError("run_pause is pause | resume")
 
 
+def _lock_fill_value(op: ConfigOp) -> bool:
+    """run_lock's fill choice (issue 14): "lock and fill …" → True; anything else → False, the board as it stands (a
+    person's lock follows the site's unticked Auto-fill empty roster slots)."""
+    v = (op.value or "").strip().lower().replace("-", "").replace(" ", "")
+    if v in ("", "asitstands", "asis", "board", "nofill", "false", "no", "off"):
+        return False
+    if v in ("fill", "autofill", "andfill", "true", "yes", "on"):
+        return True
+    raise RegistryError("run_lock is fill, or empty to lock as the board stands")
+
+
 RUN_VERBS_AUDITED = {"run_cancel", "run_remind", "run_pause", "run_withdraw", "run_reopen", "run_reschedule", "run_lineup"}  # the RaidMixin verb writes ops.audited itself
 CANCEL_QUIET = {"quiet", "silent", "no line", "no notice", "no announcement", "none", "false", "off", "no"}
 
@@ -3056,9 +3069,18 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
             return f"{label}: move the live sheet to {where}; its buttons and later updates follow the new message"
         return f"{label}: post the sheet in {where} — an officer's re-post moves the live sheet there, anyone else's is a read-only copy"
     if op.op == "run_lock":
+        from .consequences import lock_fill
+
         if ev.state != "open":
             raise RegistryError(f"{label} is already {ev.state}")
-        return f"lock {label} now: roster built from {len(ev.by_status('in'))} joined ({rc.pin_summary(ev)}), cards in the roster channel, confirmation DMs to everyone rostered"
+        fill = lock_fill(reg, ev, rs, _lock_fill_value(op))
+        if not fill:  # as the board stands: an empty board is refused here, at the review, never at the lock
+            if (why := rc.lock_empty_refusal(reg, rs, ev)) is not None:
+                raise RegistryError(why)
+            placed = sum(len(g) for g in rc.board_layout(reg, ev))
+            return f"lock {label} now as the board stands: the {placed} on the board rostered, cards in the roster channel, confirmation DMs to everyone rostered"
+        how = "and auto-fill the empty roster slots" if _lock_fill_value(op) else ""
+        return f"lock {label} now{' ' + how if how else ''}: roster built from {len(ev.by_status('in'))} joined ({rc.pin_summary(ev)}), cards in the roster channel, confirmation DMs to everyone rostered"
     if op.op == "run_cancel":
         from .consequences import consequence
 
@@ -3833,9 +3855,14 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
     if op.op == "run_propose":
         return await _propose(reg, rs, ev, op, by, bot, by_id, rev, via)
     if op.op == "run_lock":
+        from .consequences import lock_fill
+
         if ev.state != "open":
             raise RegistryError(f"{run_words(reg, ev)} is already {ev.state}")
-        line = await bot.lock_run(reg, rs, ev, by=by)
+        fill = lock_fill(reg, ev, rs, _lock_fill_value(op))  # a person's lock: as the board stands unless "lock and fill"
+        if not fill and (why := rc.lock_empty_refusal(reg, rs, ev)) is not None:
+            raise RegistryError(why)  # refused before the lock: never its failure path
+        line = await bot.lock_run(reg, rs, ev, by=by, fill=fill)
         if ev.lock_error:
             raise RegistryError(ev.lock_error)
         return str(line)

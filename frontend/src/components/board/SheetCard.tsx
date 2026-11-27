@@ -10,13 +10,13 @@ import { GameIcon } from "../Icons";
 import { Eyebrow, fail } from "../Page";
 import { useConfirm } from "../ConfirmModal";
 import { useDirty } from "../../hooks/useDirty";
-import { BoardPreview } from "./BoardPreview";
 import { BoardView } from "./BoardView";
 import { FillModal } from "./FillModal";
 import { TellTheBot } from "../TellTheBot";
 import { PinMark, RoleCounts, SeatLine, markOf, runName, type Act, type OnBoard } from "./shared";
 import { RunStrip } from "../RaidCard";
-import type { LockPreview, NightSheet } from "./types";
+import type { NightSheet } from "./types";
+import { useLockBox } from "../events/LockBox";
 import css from "./board.module.css";
 
 /** One live run's card (design §5.56), in the order a raid leader reads it: the time, its state and kind; the run's week
@@ -48,8 +48,9 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
   const anyone = locked || joined.length > 0;
   const [ask, confirmDialog] = useConfirm();
   const [fillOpen, setFillOpen] = useState(false);
-  const [lockOpen, setLockOpen] = useState(false);
-  const [lockPreview, setLockPreview] = useState(false);  // Preview lock opens the lock screen with the roster drawn
+  // Lock and Preview lock open THE lock box (the Events page's too): the server's box with its choice; Preview lock opens
+  // it with the roster drawn
+  const [lockBox, lockDialog] = useLockBox(meta, () => { onReload().catch(fail); });
   const [cancelOpen, setCancelOpen] = useState(false);
   const [boardOpen, setBoardOpenState] = useState<boolean>(() => { try { return localStorage.getItem(`oibot.board.${e.key}`) === "1"; } catch { return false; } });
   const setBoardOpen = (v: boolean) => { setBoardOpenState(v); try { localStorage.setItem(`oibot.board.${e.key}`, v ? "1" : "0"); } catch { /* per-viewer convenience only */ } };
@@ -209,8 +210,8 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
           <Tooltip label={fillTip}>
             <Button size="xs" variant={asksN ? "light" : "default"} color={asksN ? "teal" : undefined} leftSection={<IconUsersPlus size={13} />} onClick={() => setFillOpen(true)}>{locked ? L.fill : L.suggest}</Button>
           </Tooltip>
-          {!locked && <Button size="xs" variant="default" onClick={() => { setLockPreview(true); setLockOpen(true); }}>{L.preview_lock}</Button>}
-          <Button size="xs" leftSection={<IconLock size={13} />} disabled={locked} loading={busy === `lock${e.key}`} onClick={() => { setLockPreview(false); setLockOpen(true); }}>{locked ? `${L.locked}${e.timeline?.locked_at ? ` ${e.timeline.locked_at}` : ""}` : L.lock}</Button>
+          {!locked && <Button size="xs" variant="default" onClick={() => lockBox(e.key, { preview: true })}>{L.preview_lock}</Button>}
+          <Button size="xs" leftSection={<IconLock size={13} />} disabled={locked} loading={busy === `lock${e.key}`} onClick={() => lockBox(e.key)}>{locked ? `${L.locked}${e.timeline?.locked_at ? ` ${e.timeline.locked_at}` : ""}` : L.lock}</Button>
           {/* after lock, the next step is the loot council (design §3.1): open it here (the same route as Loot › Tonight), or go to it */}
           {e.loot?.may_open && (
             <Tooltip label={`opens the council: a thread in the officer channel${(e.n_rosters || 1) > 1 ? ` — one per roster (${e.n_rosters})` : ""}`}>
@@ -223,7 +224,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
       </Group>
       <Detail e={e} meta={meta} onAct={onAct} busy={busy} />
       <FillModal e={e as unknown as Sheet} meta={meta} opened={fillOpen} onClose={() => setFillOpen(false)} onSent={onReload} />
-      <LockModal e={e} meta={meta} opened={lockOpen} preview={lockPreview} onClose={() => setLockOpen(false)} onLock={() => onAct(`lock${e.key}`, `/api/run/${e.key}/lock`)} />
+      {lockDialog}
       <RepostSheetModal run={e.key} opened={repostOpen} onClose={() => setRepostOpen(false)} onDone={onReload} />
       <RescheduleModal e={e} opened={moveOpen} onClose={() => setMoveOpen(false)} onPick={reschedule} />
       <CancelModal e={e} opened={cancelOpen} onClose={() => setCancelOpen(false)} onCancel={(reason, notify) => onAct(`cancel${e.key}`, `/api/run/${e.key}/cancel`, { reason, notify: notify && e.cancel_tells_channel !== false })} />
@@ -311,33 +312,6 @@ function NightBlock({ e, meta, onFill }: { e: NightSheet; meta: Meta; onFill: ()
         </Group>
       )}
     </Stack>
-  );
-}
-
-/** Lock now: the server's consequence sentence, and a Preview of the roster(s) the lock would build now
- *  (POST /api/run/{key}/lock/preview — nothing saved); Lock now sends the lock. */
-function LockModal({ e, meta, opened, preview: startWithPreview = false, onClose, onLock }: { e: NightSheet; meta: Meta; opened: boolean; preview?: boolean; onClose: () => void; onLock: () => Promise<void> }) {
-  const [p, setP] = useState<LockPreview | null>(null);
-  const [busy, setBusy] = useState(false);
-  async function preview() {
-    setBusy(true);
-    try { setP(await api.post<LockPreview>(`/api/run/${e.key}/lock/preview`, {})); } catch (err) { fail(err); } finally { setBusy(false); }
-  }
-  useEffect(() => { if (opened && startWithPreview) preview(); }, [opened]);  // eslint-disable-line react-hooks/exhaustive-deps
-  const close = () => { setP(null); onClose(); };
-  return (
-    <Modal opened={opened} onClose={close} title={`Lock ${runName(e as unknown as Sheet)} now?`} centered size={p ? "xl" : "md"}>
-      <Stack gap="md">
-        <Text size="sm" style={{ whiteSpace: "pre-line" }}>{p?.consequence || e.consequences?.lock}</Text>
-        {p && <BoardPreview meta={meta} board={p.board} />}
-        {p && <Text size="xs" c="dimmed">Nothing is saved — {meta.run_labels.lock} builds the roster again from the sheet as it is then.</Text>}
-        <Group justify="flex-end" gap="sm">
-          <Button variant="default" size="sm" onClick={close}>Back</Button>
-          <Button variant="light" size="sm" loading={busy} onClick={preview}>{p ? "Preview again" : meta.run_labels.preview_lock}</Button>
-          <Button size="sm" onClick={async () => { close(); await onLock(); }}>{meta.run_labels.lock}</Button>
-        </Group>
-      </Stack>
-    </Modal>
   );
 }
 

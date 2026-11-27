@@ -197,6 +197,8 @@ PAGE_WORDS = {
     # Auto Lock's and its auto-fill's values (constants.switch_words), and the Details Locks row of an event (or a
     # schedule, or a coming-up night) whose Auto Lock is off: nobody's clock locks it
     "switch_on": "On", "switch_off": "Off", "officer_locks": "An officer locks it.",
+    # the lock box's one choice (issue 14, consequences.lock_box `choice`): unticked, the lock rosters the board as it stands
+    "lock_fill": "Auto-fill empty roster slots",
     # a raid's settings by name: the Raids page's Details labels and its Save box's lines
     "raid_fields": {"lockout_days": "Lockout", "duration_hours": "Length", "first_open": "First opens"},
     # how one night's joiners are split into two rosters (registry.SPLIT_POLICIES)
