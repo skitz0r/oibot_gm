@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from conftest import OWNER, join, lock_with_board, open_test_run, weekly as _weekly
 
@@ -245,7 +247,56 @@ def run_cases(reg, rs, ms):
     return cases
 
 
-def test_every_confirm_reads_aloud(reg, rs, monkeypatch):
+# ------------------------------------------------------------------------------------------------------- the clock
+PINNED = datetime(2026, 11, 26, 20, 0, tzinfo=timezone.utc)  # a Thursday, noon in the harness's Los Angeles
+_LAZY = ("appeals", "armory", "armory_seed", "auctions", "configops", "discord_armory", "discord_loot", "discord_pool",
+         "discord_registry", "event_view", "feed", "flows_armory", "flows_misc", "guides.library", "memory", "news", "perms",
+         "professions", "web.api_armory", "web.api_me", "wizard")
+
+
+class _PinnedMeta(type):
+    def __instancecheck__(cls, obj):  # a datetime made anywhere (a parse, a sum) is still a datetime to the patched module
+        return isinstance(obj, _real_datetime)
+
+    def __subclasscheck__(cls, sub):
+        return issubclass(sub, _real_datetime)
+
+
+_real_datetime = datetime
+
+
+@pytest.fixture
+def pinned_clock(monkeypatch):
+    """Every case's date is worked out from 'now' (a schedule's next nights, a one-off N days out at a fixed hour), so
+    the WEEKDAY the suite runs on decided which runs met which (2026-11-27: a one-off nine days out met a harness
+    schedule's Saturday run only when run on a Thursday). The harness runs on one fixed day, ticking from PINNED: every
+    oibot_gm module's `datetime` (those the harness imports late too) reads this clock."""
+    import importlib
+    import sys
+    import time
+
+    t0 = time.monotonic()
+
+    class Pinned(_real_datetime, metaclass=_PinnedMeta):
+        @classmethod
+        def now(cls, tz=None):
+            at = PINNED + timedelta(seconds=time.monotonic() - t0)
+            return at.astimezone(tz) if tz is not None else at.astimezone().replace(tzinfo=None)
+
+    for name in _LAZY:
+        importlib.import_module(f"oibot_gm.{name}")
+    for name, mod in list(sys.modules.items()):
+        if (name == "oibot_gm" or name.startswith("oibot_gm.")) and getattr(mod, "datetime", None) is _real_datetime:
+            monkeypatch.setattr(mod, "datetime", Pinned)
+    return PINNED
+
+
+def test_the_harness_clock_is_pinned(pinned_clock, reg):
+    assert abs(reg.now_local() - PINNED) < timedelta(minutes=5)
+    assert abs(datetime.fromisoformat(rc.now()) - PINNED) < timedelta(minutes=5)
+
+
+def test_every_confirm_reads_aloud(pinned_clock, reg, rs, monkeypatch):
     ms = people(reg)
     runs = run_cases(reg, rs, ms)
     dump = Dump(names_of(reg))
@@ -886,11 +937,17 @@ def lock_choice_cases(reg, rs, add):
     k = rc.groups_per_roster(reg, rc.run_size(reg, ev))
     ev.layout = [names[:2], names[2:4]] + [[] for _ in range(k - 2)] + [names[4:7]]
     both("two rosters, both part-filled", ev)
-    one = rc.open_run(reg, rs, RID, (now + timedelta(days=9)).replace(hour=20, minute=0, second=0, microsecond=0), by="t",
+    # a one-off at a minute no harness schedule uses (20:00 met the alt schedule's Saturday run, a recurring run that asks
+    # to confirm, whenever nine days out was a Saturday): a one-off asks nobody to confirm unless an officer turns it on
+    one = rc.open_run(reg, rs, RID, (now + timedelta(days=9)).replace(hour=20, minute=15, second=0, microsecond=0), by="t",
                       schedule=rc.ADHOC_SCHEDULE)
+    assert rc.run_team(reg, one)["schedule_id"] == rc.ADHOC_SCHEDULE, "a one-off, not a schedule's run"
     join(reg, rs, one, ms[:8])
     one.layout = [names[:5]]
     both("one-off, five of eight placed", one, ["The roster has 5 open slots.",
+         "Only the 5 people on the board are rostered, and nobody is asked to confirm.", cq.LOCK_PAUSE])
+    rc.reschedule(reg, rs, one, timing={"confirm": True}, by="t")
+    both("one-off, five of eight placed, confirmation on", rs.events[one.key], ["The roster has 5 open slots.",
          f"Only the 5 people on the board are rostered and get {cq.CONFIRM_DM}.", cq.LOCK_PAUSE])
     rc.reschedule(reg, rs, one, timing={"autofill": False, "confirm": False}, by="t")
     both("one-off, asks and confirmation off", rs.events[one.key], ["The roster has 5 open slots.",
