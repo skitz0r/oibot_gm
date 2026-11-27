@@ -53,6 +53,8 @@ SURFACES: dict[str, dict[str, str]] = {
     "run_pause": {"discord": "button:oibot_gm.raid_buttons.RunButton", "web": "POST /api/run/{key}/pause", "mcp": "pause_autofill"},
     "run_withdraw": {"discord": "flow:raid_suggest", "web": "POST /api/run/{key}/withdraw", "mcp": "withdraw_ask"},
     "run_reopen": {"discord": "button:oibot_gm.raid_buttons.RunButton", "web": "POST /api/run/{key}/reopen", "mcp": "reopen_run"},
+    # issue 14: a locked event back to open signup — the lock card's Unlock and /raid unlock open the same screen
+    "run_unlock": {"discord": "flow:raid_unlock", "web": "POST /api/run/{key}/unlock", "mcp": "unlock_run"},
     # move / re-time an event and change its raids: phase 3's routes and tools, phase 5's /raid reschedule | edit | lineup
     "run_reschedule": {"discord": "flow:raid_reschedule", "web": "POST /api/run/{key}/reschedule", "mcp": "reschedule_run"},
     "run_lineup": {"discord": "flow:raid_lineup", "web": "POST /api/run/{key}/lineup", "mcp": "edit_lineup"},

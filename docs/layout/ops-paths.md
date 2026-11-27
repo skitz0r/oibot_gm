@@ -43,6 +43,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        their Discord rows (phase 5 wizards; /gm change reaches them meanwhile); run_words(reg, ev) = a run as a person reads it in a
                        plain-text line or refusal (raid + 12-hour start, never the key); every ops / audit line names runs the same way (raid_views.run_title,
                        rc.run_words, LootMixin.loot_where; the help snapshot too) — MCP fields, log.* lines and commit messages keep the key
+                       Issue 14: run_unlock (target; RUN_OPS, group `runs`, RUN_VERBS_AUDITED, WARN_OPS always) — _unlock_event finds any event by
+                       its key (an ended one answers with rc.unlock_refusal's sentence) else the live one; its review line is "unlock <event>. " +
+                       consequences.unlock_box's sentences; apply = RaidMixin.unlock_run. SCHEMA_TEXT tells it from run_reopen (an END undone).
                        Phase 4 (§5.67): op_box(reg, ops, diff, rs=) → Described.box (and each line's) for one schedule's or one raid's write (boxes
                        13–17 and 19); Described.asks_first (a box with a verb: the site's Save always previews) beside review, and Described.quiet (a
                        routine box's sentences never make the TIERED Save reviewed alone); Described.fingerprint covers the box's title, sentences and
@@ -53,7 +56,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        _character_rows refuses the four old fields (PROFESSION_FIELDS) with PROFESSIONS_NOT_HERE; the editors are /me professions and the
                        Me page, a linked character follows the armory. The listening gate (discord_bot.LISTEN_QUESTION / LISTEN_CRITERIA) treats "I have /
                        learned / can make X" as chat between people; scripts/listen_probe.py's NEWS set guards it (under 50 %)
-  mcp_server.py        `oibot-mcp` (stdio MCP server, FastMCP): tools named by intent (guild_overview, get_run, set_answer, lock_run, plain_change …)
+  mcp_server.py        `oibot-mcp` (stdio MCP server, FastMCP): tools named by intent (guild_overview, get_run, set_answer, lock_run, unlock_run, plain_change …)
                        that call the RUNNING bot's /api/* over HTTP as the OWNER OF THE CHOSEN GUILD (every tool's optional `guild` = key or name,
                        default OIBOT_MCP_GUILD / --guild, else the only guild; names → keys client side via GET /api/guilds; header X-Oibot-Guild;
                        list_guilds; the bot never reads OIBOT_MCP_GUILD) (`Authorization: Bearer $OIBOT_MCP_TOKEN` → web/app.py `mcp_authorized` + `mcp_guild` → `mcp_viewer`,

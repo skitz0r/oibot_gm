@@ -1463,6 +1463,18 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    locked again. It works for any event, test or not, while it is locked and before its start; it is refused, one sentence
    each, once the event has started (*"This event has already started, so it can't be unlocked."*), while a loot council
    is open on it, and for an event that is still open, ended or cancelled. Every raid of the event unlocks together.
+   - **Where.** **Unlock** in the event's **More** menu on the Events page (once, for the whole event) and beside **End the
+     event** on the sheet card; **Unlock** on the Discord lock card's second row (greyed once the event has started) and
+     `/raid unlock` (it asks which event when several are locked); plain text *"unlock tonight's event"*, *"reopen the
+     roster for Tuesday"* or *"undo the lock"* (always reviewed first; *"reopen …"* of an event that **ended** is Reopen, not
+     this); MCP `unlock_run`. Where it is refused the control is greyed with the refusal under it (the site) or the screen
+     shows the refusal with only Back (Discord).
+   - **It asks first**, the same box everywhere: *"The event goes back to open signup with its rosters on the board."*
+     (an event of several raids: *"The whole event goes back to open signup, with every raid's rosters on the board."*),
+     then *"Nobody gets a DM."* — followed, when fill asks are out, by *", and the 2 people asked to fill a seat see their
+     ask withdrawn"*, or else, when confirmation asks are unanswered, by *", and 3 confirmation asks stay open"* —, then
+     *"Auto Lock is turned off, so an officer locks it again."* If anything it counts changes while the box is open, the
+     fresh box is shown instead of unlocking.
    - **The board is the locked roster.** Every rostered name stays in the group the lock, a later drag or a fill put it in,
      and counts as placed by hand: the next lock keeps it there, and nobody's **Undo my moves** takes it off. Joiners who
      weren't rostered are in *Not placed*, Bench answers in *Bench*. Locking again as it stands with nothing changed
@@ -1917,7 +1929,7 @@ edits that new family and leaves the one it shared alone.
   goes and what stays: *"Orrin's record goes, with Wrenna, their absences, wishlists and notices. Loot already awarded
   stays in the ledger, and nobody gets a DM. …"*); in Discord `/roster remove-record member:`; MCP `remove_record`. Refused
   while they're still in the server or hold a seat on a live event. Members can't delete their own record.
-- Events: `/raid open|sheet|health|fill|lock|set|cancel|reschedule|edit|lineup|list|loot|distribute|end` (officers) and `/raid out` (anyone).
+- Events: `/raid open|sheet|health|fill|lock|unlock|set|cancel|reschedule|edit|lineup|list|loot|distribute|end` (officers) and `/raid out` (anyone).
   `/raid reschedule` moves an event to a day and time picked from lists, and `/raid edit` changes the event's own settings
   (§4 *Moving an event, and its own sheet timing*); `/raid lineup` changes its raids before the lock (§4 *Changing the raids
   of an open event*).
@@ -2377,7 +2389,8 @@ next unopened events, so "groups for tonight" and "open Saturday's alt night" st
   shows exactly who will be asked; if the suggestions changed before you press Apply, nothing is sent); "split tonight's event
   first-roster-first" (balanced / first / rotation); "auto-fill the board for bd-…" (before lock); "remind the
   unconfirmed for tonight" (once an hour); "pause Automated Fill Requests on tonight's event" / "resume Automated Fill Requests" (every raid of the event); "lock and fill tonight's event" ("lock …" alone locks as the board stands); "withdraw the ask
-  to Kestrel"; "reopen bd-k7m2qx" (an end by mistake, within the hour — never a cancelled event).
+  to Kestrel"; "reopen bd-k7m2qx" (an end by mistake, within the hour — never a cancelled event); "unlock tonight's event" /
+  "undo the lock" (a locked event back to open signup, its rosters on the board — always reviewed first).
 - *The board:* "move Ash to group 3" / "put Ash in 2.1" (roster 2, group 1) / "bench Ash" / "swap Ash and Dusk" —
   one person, like a drag (after lock: in from *Not rostered* = asked to confirm, out to it = seat freed); "groups for
   bd-…: Ash, Bright, Cinder | Dusk, Ember" sets the whole board — the layout the lock will use, or after lock the roster
@@ -2715,7 +2728,7 @@ news post says can make the review read or write another server.
 | `set_answer` · `pin` · `confirm_for` · `fill_answer` | Join / Bench / No thanks for someone (character swap; `out` is *Can't make it* — a callout like `/raid out` — unless `callout=false`, which is a plain No thanks with no record; a `note` goes with a callout only and is for officers) · pin in/out for the lock · answer a Confirm ask for them · answer a fill ask (seat or swap) for them. The member gets a notice on their Me page, never a DM |
 | `member_inbox` | a member's open asks (where each waits: DM or the site, its deadline) and notices, as their Me page shows them |
 | `propose_split` · `set_strategy` · `autofill` · `set_layout` | preview a split (nothing saved; says why there can't be more rosters and who is left over) · remember the strategy · the bot builds the groups on the board · set the groups (pass `rev` from `get_run`: a board someone changed since is refused, not overwritten) |
-| `remind_unconfirmed` · `pause_autofill` · `withdraw_ask` · `reopen_run` | the Confirm / Can't DM again to the unconfirmed (once an hour per event) · pause (`paused=true`) or resume the fill engine for every raid of one event · close an ask already sent to a member (their card says never mind) · undo an end by mistake within the hour (never a cancelled event) |
+| `remind_unconfirmed` · `pause_autofill` · `withdraw_ask` · `reopen_run` · `unlock_run` | the Confirm / Can't DM again to the unconfirmed (once an hour per event) · pause (`paused=true`) or resume the fill engine for every raid of one event · close an ask already sent to a member (their card says never mind) · undo an end by mistake within the hour (never a cancelled event) · a locked event back to open signup with its rosters on the board, before its start (nobody is DMed; fill asks withdrawn; Auto Lock off) |
 | `lock_run` · `fill_seats` · `cancel_run` · `repost_sheet` | lock now (`autofill=false`, the default: exactly the board, refused with nobody on it; `autofill=true`: fill the empty slots) · preview who would be asked (before lock the suggestions, after lock the seats to fill — `plan.seats` with alternates and a `why`, `plan.lines`, `plan.batch_lines` = exactly what a send DMs, `plan.rev`), then `send=true` with the preview's `rev` sends exactly that batch (`picks` {seat: option} for an alternate; a changed plan is refused; without a `rev` a send is refused before lock, and after lock whenever the batch holds a role swap) · cancel with a reason (nobody is DMed: every open ask card says Cancelled and a fixed line goes to the signup channel unless `notify=false`; the reason stays with officers) · post a fresh copy of the sheet (the signup channel, or a channel you name) |
 | `raid_set` · `raid_reset` | a raid's own settings — one, or several as `fields` in one write (slots, weights, lockout and length, split policy, notes, first open; sheet timing is `schedule_set`'s, a minimum `set_minimum`'s) · back to defaults — the raid's schedules go too, so pass the preview's `revs` back: a schedule added or changed since is refused, never removed unseen |
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs (one field, or several as `fields` in one write; `family_new` = a new family by name) and stacking families (`value` = the whole map as an object, `value:<key>` = one beneficiary; no `family` + a `name` = a new family, its id made from the name) |

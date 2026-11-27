@@ -478,14 +478,17 @@ def run_actions_row(reg: Registry, ev: rc.RaidEvent, locked: bool):
 
 def night_actions_row(reg: Registry, ev: rc.RaidEvent):
     """The lock card's second row — the raid-night levers (design B2/B4/B7): Remind the unanswered (greyed when
-    rc.remind_refusal says it can't go now, e.g. within the hour), Pause / Resume automatic asks (D18), End the run
-    (after the scheduled start; LootMixin.end_run). One order always; what does not apply is disabled in place."""
+    rc.remind_refusal says it can't go now, e.g. within the hour), Pause / Resume automatic asks (D18), Unlock (before
+    the start; the decide screen prints consequences.unlock_box or its refusal), End the run (after the scheduled start;
+    LootMixin.end_run). One order always; what does not apply is disabled in place."""
     ui = discord.ui
     started = datetime.now(ev.start.tzinfo) >= ev.start
     remind_no = rc.remind_refusal(reg, ev) if rc.run_confirms(reg, ev) else rc.NO_CONFIRMATIONS
     down = bool((boss_progress(reg, ev) or {}).get("all_down"))  # the last boss is down: End is the next thing to press (L12)
+    first_start = ev.start - timedelta(minutes=int(ev.starts or 0)) if rc.is_follow(ev) else ev.start  # the event starts with its first raid
     return ui.ActionRow(RunButton(reg.key, ev.key, "remind", disabled=bool(remind_no)),
                         RunButton(reg.key, ev.key, "pause", label=RUN_WORDS["resume"] if ev.autofill_paused else None),
+                        RunButton(reg.key, ev.key, "unlock", disabled=datetime.now(ev.start.tzinfo) >= first_start),  # issue 14: before the start (decide: rc.unlock_refusal)
                         RunButton(reg.key, ev.key, "end", disabled=not (started or down)))
 
 

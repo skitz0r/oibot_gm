@@ -922,6 +922,48 @@ def lock_choice_cases(reg, rs, add):
         m.dm_opt_out = dms[m.discord_id]
 
 
+def unlock_cases(reg, rs, add):
+    """Issue 14, Task 5: the Unlock box (consequences.unlock_box) — nothing out, confirmation asks open (one, many), fill
+    asks out (one, many, and with asks open too: the fill asks are said), a lineup (the whole event), and each refusal."""
+    ev = open_test_run(reg, rs, days=13)
+    pool = reg.test_members()[:10]
+    join(reg, rs, ev, pool)
+    lock_with_board(reg, rs, ev, [m.display_name for m in pool[:8]])
+    for m in pool:  # nothing left over from another case on this roster
+        m.placement_asks = [a for a in m.placement_asks if a["roster"] != ev.team]
+    add("unlock_box", "nothing out", cq.unlock_box(reg, ev, rs))
+    for n, case in ((1, "one confirmation ask open"), (8, "eight confirmation asks open")):
+        for m in pool[:n]:
+            m.placement_asks.append({"roster": ev.team, "answer": None, "asked_at": rc.now(), "channel": "dm"})
+        b = cq.unlock_box(reg, ev, rs)
+        assert b["sentences"][1] == f"Nobody gets a DM, and {n} confirmation ask{'s stay' if n > 1 else ' stays'} open.", b
+        add("unlock_box", case, b)
+        for m in pool[:n]:
+            m.placement_asks = [a for a in m.placement_asks if a["roster"] != ev.team]
+    for n, case in ((1, "one fill ask out"), (2, "two fill asks out")):
+        ev.fill_asks = [rc.FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind="sub", role="dps",
+                                   character=m.main.label, spec=m.main.spec, reason="short 1") for m in pool[8:8 + n]]
+        add("unlock_box", case, cq.unlock_box(reg, ev, rs))
+    pool[0].placement_asks.append({"roster": ev.team, "answer": None, "asked_at": rc.now(), "channel": "dm"})
+    b = cq.unlock_box(reg, ev, rs)
+    assert "withdrawn" in b["sentences"][1] and "confirmation" not in b["sentences"][1], b
+    add("unlock_box", "fill asks out and a confirmation ask open", b)
+    four = next(e for e in rs.events.values() if e.state == "open" and not rc.is_follow(e) and len(rc.event_parts(rs, e)) == 4)
+    add("unlock_box", "an open event", cq.unlock_box(reg, four, rs))
+    for p in rc.event_parts(rs, four):
+        lock_with_board(reg, rs, p, [])
+    b = cq.unlock_box(reg, rc.event_parts(rs, four)[2], rs)
+    assert b["sentences"][0].startswith("The whole event"), b
+    add("unlock_box", "four raids", b)
+    d = rs.store.root / rs.key / "events"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{ev.key}.json").write_text("{}")
+    add("unlock_box", "a loot council open", cq.unlock_box(reg, ev, rs))
+    (d / f"{ev.key}.json").unlink()
+    rc.end_run(reg, rs, ev, "t")
+    add("unlock_box", "an ended event", cq.unlock_box(reg, ev, rs))
+
+
 def box_cases(reg, rs, runs, ms, dump):
     """Every box generator across its cases (each variant of the §7b table, DMs on and off, 0 / 1 / many): the title is
     linted as a line of its own, then the sentences as one confirm."""
@@ -1232,6 +1274,7 @@ def box_cases(reg, rs, runs, ms, dump):
     for kind, title in cq.REFUSAL_TITLES.items():
         add("refusal_box", kind, cq.refusal_box(title, rc.LINEUP_LOCKED))
     lock_choice_cases(reg, rs, add)  # last: its own schedule's nights would move the harness's recurring_run indices
+    unlock_cases(reg, rs, add)  # after it: it locks the four-raid event
 
 
 def reschedule_cases(reg, rs, runs, ms, dump):

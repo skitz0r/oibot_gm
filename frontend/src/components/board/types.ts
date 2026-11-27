@@ -21,6 +21,8 @@ export interface NightFields {
   may_remind?: boolean; remind_note?: string | null;
   may_end?: boolean; end_note?: string | null;
   may_reopen?: boolean; reopen_note?: string | null;
+  // Unlock (issue 14): shown while the event's first raid is locked; greyed with the server's refusal under it
+  may_unlock?: boolean; unlock_note?: string | null;
   closed_at?: string | null;
   log_rows?: { at: string; when: string; text: string; officer: boolean }[];
   links?: { sheet: string | null; card?: string | null; thread?: string | null; updates: string | null; loot: string | null };

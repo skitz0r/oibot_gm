@@ -1,14 +1,16 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Accordion, ActionIcon, Alert, Anchor, Badge, Box, Button, Checkbox, Group, Menu, Modal, Stack, Text, Textarea, Tooltip } from "@mantine/core";
 import { WhenPicker, wallTime } from "../WhenPicker";
-import { IconBell, IconCalendarTime, IconDiamond, IconDotsVertical, IconFlagCheck, IconLock, IconMessageCircle, IconPlayerPause, IconPlayerPlay, IconSend, IconUsersPlus } from "@tabler/icons-react";
+import { IconBell, IconCalendarTime, IconDiamond, IconDotsVertical, IconFlagCheck, IconLock, IconLockOpen, IconMessageCircle, IconPlayerPause, IconPlayerPlay, IconSend, IconUsersPlus } from "@tabler/icons-react";
 import { Link } from "react-router-dom";
-import { api, type Meta, type Person, type RunPreview, type Sheet, type Signup } from "../../api";
+import { api, type Box as ConfirmBoxT, type Meta, type Person, type RunPreview, type Sheet, type Signup } from "../../api";
 import { MemberMenu, RepostSheetModal, SomeoneElse } from "./MemberMenu";
 import { classColour } from "../../theme";
 import { GameIcon } from "../Icons";
-import { Eyebrow, fail } from "../Page";
+import { Eyebrow, fail, ok } from "../Page";
 import { useConfirm } from "../ConfirmModal";
+import { useConfirmBox } from "../ConfirmBox";
+import { boxOf } from "../events/shared";
 import { useDirty } from "../../hooks/useDirty";
 import { BoardView } from "./BoardView";
 import { FillModal } from "./FillModal";
@@ -47,6 +49,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
   const isShort = shortRoles.length > 0 || extraSeats > 0;
   const anyone = locked || joined.length > 0;
   const [ask, confirmDialog] = useConfirm();
+  const [askBox, boxDialog] = useConfirmBox(["run:"]);
   const [fillOpen, setFillOpen] = useState(false);
   // Lock and Preview lock open THE lock box (the Events page's too): the server's box with its choice; Preview lock opens
   // it with the roster drawn
@@ -79,6 +82,25 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
     try { preview = (await api.post<{ preview: string }>(`/api/loot/${e.key}/end`, { preview: true })).preview; } catch (err) { fail(err); return; }
     if (!(await ask({ title: `End ${name}?`, message: preview, confirmLabel: L.end, cancelLabel: "Back", color: "red" }))) return;
     await onAct(`end${e.key}`, `/api/loot/${e.key}/end`);
+  }
+  /** Unlock (issue 14) prints the SERVER's box (consequences.unlock_box, the Events page's More › Unlock and the Discord
+   *  lock card's too): the press sends its fp as `seen`, a box that changed while open comes back fresh (409) and waits
+   *  again, a refusal is its box with Back alone. */
+  async function unlock() {
+    const url = `/api/run/${encodeURIComponent(e.key)}/unlock`;
+    const preview = async (): Promise<ConfirmBoxT> => {
+      try { return (await api.post<{ box: ConfirmBoxT }>(url, { preview: true })).box; } catch (err) { const b = boxOf(err); if (b) return b; throw err; }
+    };
+    let first: ConfirmBoxT;
+    try { first = await preview(); } catch (err) { fail(err); return; }
+    const said = { text: "" };
+    const done = await askBox({
+      box: first, refresh: preview,
+      act: async (fp) => {
+        try { said.text = (await api.post<{ message: string }>(url, { seen: fp })).message; return null; } catch (err) { const b = boxOf(err); if (b) return b; throw err; }
+      },
+    });
+    if (done) { if (said.text) ok(said.text); await onReload().catch(fail); }
   }
   const pause = (paused: boolean) => onAct(`pause${e.key}`, `/api/run/${e.key}/pause`, { paused });
   /** Reschedule: the picked start → the server's preview (consequences.reschedule_consequence, printed as it comes) →
@@ -200,6 +222,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
         <Group gap="xs" wrap="wrap">
           <Button size="xs" variant="subtle" color="red" loading={busy === `cancel${e.key}`} onClick={() => setCancelOpen(true)}>{L.cancel}</Button>
           {/* after the lock, the raid-night levers the Discord lock card's second row has — the same labels (meta.run_labels) */}
+          {locked && e.live && (e.may_unlock || e.unlock_note) && <Tooltip label={e.unlock_note || ""} disabled={!e.unlock_note}><span><Button size="xs" variant="subtle" leftSection={<IconLockOpen size={13} />} disabled={!e.may_unlock} onClick={unlock}>{L.unlock}</Button></span></Tooltip>}
           {locked && e.live && <Tooltip label={e.end_note || ""} disabled={!e.end_note}><span><Button size="xs" variant="subtle" color="red" leftSection={<IconFlagCheck size={13} />} disabled={!e.may_end} loading={busy === `end${e.key}`} onClick={endNow}>{L.end}</Button></span></Tooltip>}
         </Group>
         <Group gap="xs" wrap="wrap">
@@ -229,6 +252,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
       <RescheduleModal e={e} opened={moveOpen} onClose={() => setMoveOpen(false)} onPick={reschedule} />
       <CancelModal e={e} opened={cancelOpen} onClose={() => setCancelOpen(false)} onCancel={(reason, notify) => onAct(`cancel${e.key}`, `/api/run/${e.key}/cancel`, { reason, notify: notify && e.cancel_tells_channel !== false })} />
       {confirmDialog}
+      {boxDialog}
     </Box>
   );
 }

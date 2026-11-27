@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ActionIcon, Menu, Modal, Text, Tooltip } from "@mantine/core";
-import { IconBell, IconDiamond, IconDots, IconEraser, IconFlagCheck, IconListCheck, IconPlayerPause, IconPlayerPlay, IconRotate, IconSend, IconUsersPlus } from "@tabler/icons-react";
+import { IconBell, IconDiamond, IconDots, IconEraser, IconFlagCheck, IconListCheck, IconLockOpen, IconPlayerPause, IconPlayerPlay, IconRotate, IconSend, IconUsersPlus } from "@tabler/icons-react";
 import { api, type Box, type EventView, type Meta, type Sheet } from "../../api";
 import { useConfirmBox } from "../ConfirmBox";
 import { boxOf as boxOf_ } from "./shared";
@@ -20,7 +20,7 @@ import css from "../board/board.module.css";
  *  the board (every open raid's groups back to Not placed, the server's box — consequences.clear_board_box). Each raid's split
  *  moved to Edit event (the owner's tweaks, B) with the event's other own settings. Each verb is named as
  *  on Discord (meta.run_labels); what can't be pressed is greyed with the server's reason under it; Remind and End ask
- *  first with the server's box (remind_box, end_box); the fill and
+ *  first with the server's box (remind_box, end_box); Unlock (issue 14) once for the whole event, with unlock_box; the fill and
  *  re-post screens are the board's own. Nothing here composes a sentence. */
 export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; onChanged: () => void }) {
   const [ask, dialog] = useConfirmBox(["run:", "loot"]);
@@ -58,6 +58,7 @@ export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; 
   const remind = (s: NightSheet) => boxed(`/api/run/${encodeURIComponent(s.key)}/remind`);
   const clear = () => boxed(`/api/event/${encodeURIComponent(ev.key)}/clear`);
   const end = (s: NightSheet) => boxed(`/api/loot/${encodeURIComponent(s.key)}/end`);
+  const unlock = (s: NightSheet) => boxed(`/api/run/${encodeURIComponent(s.key)}/unlock`);
 
   /** one raid's items */
   const items = ({ p, s }: (typeof parts)[number], i: number) => {
@@ -94,6 +95,12 @@ export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; 
       ...(several ? [<Menu.Divider key="pause:div" />] : [])] : []),
     ...parts.flatMap(items),
   ];
+  // Unlock acts on the whole event (RaidMixin.unlock_run): once, at the foot, while its first raid is locked — greyed with
+  // the server's refusal (started, a loot council open) under it; the box is the server's (consequences.unlock_box)
+  const head = parts[0]?.s;
+  if (live && head && (head.may_unlock || head.unlock_note)) {
+    all.push(<Menu.Divider key="unlock:div" />, <Menu.Item key="unlock" leftSection={<IconLockOpen size={14} />} disabled={!head.may_unlock} onClick={() => unlock(head)}>{L.unlock}{head.may_unlock ? null : <Text size="xs" c="dimmed">{head.unlock_note}</Text>}</Menu.Item>);
+  }
   if (ev.actions.clear) {  // the whole event's board, once: every open raid's groups back to Not placed (pins stay)
     all.push(<Menu.Divider key="clear:div" />, <Menu.Item key="clear" leftSection={<IconEraser size={14} />} onClick={clear}>Clear the board…</Menu.Item>);
   }

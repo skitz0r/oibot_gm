@@ -1311,6 +1311,46 @@ def end_box(reg: Registry, ev: rc.RaidEvent, sentences: list[str], rev: str = ""
     return box(f"End {event_title(reg, ev)}?", sentences, "End the event", rev=rev)
 
 
+UNLOCK_VERB = "Unlock"
+UNLOCK_AGAIN = "Auto Lock is turned off, so an officer locks it again."
+
+
+def unlock_facts(reg: Registry, ev: rc.RaidEvent, rs) -> tuple[int, int, int]:
+    """What an unlock (rc.unlock) will touch, read BEFORE it: (raids it unlocks — every locked raid of the event,
+    confirmation asks that stay open — rc.open_placement_rows on the first raid, as rc.Unlocked.asks_kept counts them,
+    fill asks still out that it withdraws)."""
+    first = rc.first_part(rs, ev)
+    locked = [p for p in rc.event_parts(rs, first) if p.state == "locked"]
+    fills = sum(1 for p in locked for a in p.fill_asks if a.pending)
+    return len(locked), len(rc.open_placement_rows(reg, first)), fills
+
+
+def _unlock_told(asks: int, fills: int) -> str:
+    """Who is told at an unlock: nobody gets a DM; then the one fact the reader would not expect. Fill asks withdrawn win
+    over confirmation asks kept when both apply: a withdrawn ask takes an offer back from someone, a kept ask is the
+    unlock leaving a person alone."""
+    if fills:
+        who = "the one person asked to fill a seat sees their ask" if fills == 1 else f"the {fills} people asked to fill a seat see their ask"
+        return f"Nobody gets a DM, and {who} withdrawn."
+    if asks:
+        return f"Nobody gets a DM, and {_n(asks, 'confirmation ask')} {'stays' if asks == 1 else 'stay'} open."
+    return "Nobody gets a DM."
+
+
+def unlock_box(reg: Registry, ev: rc.RaidEvent, rs) -> dict:
+    """Unlock a locked event (issue 14; RaidMixin.unlock_run): what changes (open signup, the rosters stay on the board;
+    the whole event when it has several raids), who is told (_unlock_told), what follows (UNLOCK_AGAIN: Auto Lock goes off).
+    Not red: the officer locks it again. Refused (rc.unlock_refusal: still open, started, a loot council open, ended,
+    cancelled) → the refusal box, Back alone. Its fp carries rc.event_rev and the counts it printed."""
+    if (why := rc.unlock_refusal(reg, rs, ev)) is not None:
+        return refusal_box_for(why)
+    raids, asks, fills = unlock_facts(reg, ev, rs)
+    head = ("The whole event goes back to open signup, with every raid's rosters on the board." if raids > 1
+            else "The event goes back to open signup with its rosters on the board.")
+    return box(f"Unlock {event_title(reg, ev)}?", [head, _unlock_told(asks, fills), UNLOCK_AGAIN], UNLOCK_VERB,
+               rev=f"{rc.event_rev(reg, rs, ev)}|{asks}|{fills}")
+
+
 BOARD_MOVE_TITLES = {"move": "Move {name}?", "roster": "Put {name} on the roster?", "swap": "Swap {name} and {other}?",
                      "substitute": "Put {name} in {other}'s seat?", "release": "Take {name} off the roster?"}
 BOARD_MOVE_VERBS = {"move": "Move", "roster": "Put on the roster", "swap": "Swap", "substitute": "Put in the seat",

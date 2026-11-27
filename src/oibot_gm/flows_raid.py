@@ -607,6 +607,26 @@ async def open_raid_lock(interaction: discord.Interaction, reg: Registry, **_see
     await with_run(interaction, reg, title="Lock a sheet", then=body, states=("open",), officer=True)
 
 
+@flow("raid_unlock")
+async def open_raid_unlock(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
+    """/raid unlock (issue 14) — the event picker when several are locked (an event once: its first raid), then THE
+    Unlock screen (raid_buttons.unlock_decide: consequences.unlock_box, Unlock · Back) — the lock card's Unlock shows the
+    same screen. Nothing is asked that a parser must read."""
+    if not await officer_only(interaction, reg):
+        return
+
+    async def body(i: discord.Interaction, wiz: Wizard, rs, ev) -> None:
+        if not ev or ev.state != "locked":
+            await wiz.finish(i, "No event is locked, so there is nothing to unlock.")
+            return
+        from .raid_buttons import unlock_decide
+
+        wiz.title = f"Unlock {raid_name(reg, ev)}"
+        await unlock_decide(i, i.client, reg, rs, rc.first_part(rs, ev), wiz=wiz)
+    await with_run(interaction, reg, title="Unlock an event", then=body, states=("locked",), officer=True,
+                   prefer=lambda e: not rc.is_follow(e))
+
+
 @flow("raid_loot")
 async def open_raid_loot(interaction: discord.Interaction, reg: Registry, *, key: str | None = None, **_seed) -> None:
     """/raid loot (the run picker when several are locked) or the lock card's Loot button (`key`: that card's run,

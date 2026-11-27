@@ -688,6 +688,15 @@ def reopen_run(run: str, guild: Guild = None) -> str:
 
 
 @mcp.tool()
+def unlock_run(run: str, guild: Guild = None) -> str:
+    """Unlock a LOCKED event before its start: every raid of it goes back to open signup with its rosters still on the
+    board, so the board can be changed and locked again (lock_run). Answers and open confirmation asks stay, fill asks
+    out are withdrawn (their cards edited), nobody is DMed, and Auto Lock goes off so an officer locks it again. Refused
+    once it has started, while a loot council is open, and for an ended event (that is reopen_run). Look first (get_run)."""
+    return msg(api(guild).post(f"/api/run/{run}/unlock"))
+
+
+@mcp.tool()
 def confirm_for(run: str, member: str, yes: bool = True, guild: Guild = None) -> str:
     """Answer a member's Confirm / Can't make it ask on their behalf (yes = confirmed, no = can't make it, which frees
     the seat). Same ripple as the member pressing the button; use it when they told you out of band."""

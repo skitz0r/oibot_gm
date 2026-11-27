@@ -75,7 +75,10 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        (19, open_events_of_raid), leave_box / leave_unsaved_sentence / LEAVE_TEMPLATE (20, /api/meta.leave); + raid_reset_box,
                        strategy_box (More › Split strategy, fp = rc.board_rev + the split the raid has now) and strategy_refusal = STRATEGY_LOCKED
                        after the lock on EVERY surface (the route, MCP, plain text's run_strategy in the diff and at apply); the final fix wave's
-                       remind_box (POST /api/run/{key}/remind), end_box (LootMixin.end_box builds it from end_sentences, its fp covering the councils; POST /api/loot/{run}/end) and
+                       remind_box (POST /api/run/{key}/remind), unlock_box(reg, ev, rs) (issue 14: S1 open signup with the rosters on the board —
+                       "The whole event…" with several raids; S2 _unlock_told: "Nobody gets a DM", then the fill asks it withdraws, else the
+                       confirmation asks that stay open — unlock_facts reads both BEFORE the unlock; S3 UNLOCK_AGAIN; verb UNLOCK_VERB; rc.unlock_refusal
+                       → the refusal box; POST /api/run/{key}/unlock, unlock_decide, run_unlock's review), end_box (LootMixin.end_box builds it from end_sentences, its fp covering the councils; POST /api/loot/{run}/end) and
                        board_move_box (over rc.board_move_kind: a locked board's Move to / swap / take off, POST /api/run/{key}/move);
                        event_title, count_words.
                        A route takes `preview` → {box} and `seen` (the fp pressed) → 409 {error: CONFIRM_WORDS changed, box: fresh}, nothing written;
