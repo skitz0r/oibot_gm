@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { ActionIcon, Button, Group, Loader, Menu, Modal, Select, Stack, Text, Textarea } from "@mantine/core";
 import { IconArrowsMove, IconDotsVertical, IconPin, IconPinnedOff, IconUserOff, IconUserPlus } from "@tabler/icons-react";
-import { api, type Box, type MemberAction, type MemberActions, type Person } from "../../api";
+import { api, type Box, type MemberAction, type MemberActions, type Meta, type Person, type RaidSwitchOption } from "../../api";
+import { GameIcon } from "../Icons";
 import { fail, ok } from "../Page";
 import { pageWords, useConfirmBox } from "../ConfirmBox";
 import { boxOf } from "../events/shared";
@@ -73,6 +74,36 @@ function useRecord(run: string, onDone: () => Promise<void> | void) {
   return [record, dialog] as const;
 }
 
+/** A role switch for this raid alone (the board ⋮ menu, issue 15): the SERVER's box (consequences.raid_switch_box
+ *  through POST /api/run/{run}/play-as `preview`), then the write with the box's fp as `seen` — a member who changed
+ *  meanwhile brings the fresh box back (409), a switch that no longer applies is the refusal box (400). */
+function usePlayAs(run: string, onDone: () => Promise<void> | void) {
+  const [ask, dialog] = useConfirmBox(["run:", "member"]);
+  async function playAs(uid: string, o: RaidSwitchOption) {
+    const url = `/api/run/${encodeURIComponent(run)}/play-as`;
+    const body = { uid, character: o.character, spec: o.spec };
+    const preview = async (): Promise<Box> => {
+      try { return (await api.post<{ box: Box }>(url, { ...body, preview: true })).box; } catch (e) { const b = boxOf(e); if (b) return b; throw e; }
+    };
+    let reload = false;
+    try {
+      let said = "";
+      const done = await ask({
+        box: await preview(),
+        refresh: preview,
+        act: async (fp) => {
+          try { said = (await api.post<{ message: string }>(url, { ...body, seen: fp })).message; return null; }
+          catch (e) { const b = boxOf(e); if (b) return b; throw e; }
+        },
+      });
+      if (done) ok(said);
+      reload = done;
+    } catch (e) { fail(e); reload = true; }
+    finally { if (reload) await onDone(); }
+  }
+  return [playAs, dialog] as const;
+}
+
 /** One "Move to…" destination in a board chip's menu (BoardView): a group, or Not placed / Not rostered. `onPick` is the
  *  board's own move — the same POST /api/run/{key}/move a drag sends, after the server's confirm sentence. */
 export type MoveTarget = { key: string; label: string; disabled?: boolean; hint?: string; aria?: string; onPick: () => void };
@@ -89,12 +120,16 @@ const AFTER_SWITCH = new Set(["bench", "no_thanks", "pin_in", "pin_out", "unpin"
  *  `onAnswer` (the Events page): Join / Join as… / Bench / No thanks open the SERVER's answer box (useAnswerBox, the member
  *  fixed) with its fields. Callouts, pins and the confirm / fill answers ask in the server's box too (useRecord), and so
  *  does every pick on the Test bench, which passes no `onAnswer`. */
-export function MemberMenu({ run, uid, name, onDone, moves, onAnswer, switches }: {
+export function MemberMenu({ run, uid, name, onDone, moves, onAnswer, switches, meta }: {
   run: string; uid: string | null | undefined; name: string; onDone: () => Promise<void> | void; moves?: MoveTarget[];
   onAnswer?: (action: string, character: string | null) => void; switches?: SwitchItem[];
+  /** a raid's board (BoardView): the server's switches for THIS raid alone (`raid_switches`, issue 15), each with its spec icon */
+  meta?: Meta;
 }) {
   const [list, setList] = useState<MemberActions | null>(null);
   const [record, dialog] = useRecord(run, onDone);
+  const [playAs, playDialog] = usePlayAs(run, onDone);
+  const raidSwitches = meta ? list?.raid_switches || [] : [];
   const load = () => { setList(null); if (uid) api.get<MemberActions>(`/api/admin/actions?run=${encodeURIComponent(run)}&member=${encodeURIComponent(uid)}`).then(setList).catch(fail); };
   return (
     <>
@@ -112,7 +147,11 @@ export function MemberMenu({ run, uid, name, onDone, moves, onAnswer, switches }
           )}
           {uid && <Menu.Label>{name}{list ? ` · ${list.now}` : ""}</Menu.Label>}
           {uid && !list && <Group justify="center" p="xs"><Loader size="xs" /></Group>}
-          {uid && list && list.actions.length === 0 && !switches?.length && <Menu.Item disabled>{pageWords().nothing_applies}</Menu.Item>}
+          {uid && list && list.actions.length === 0 && !switches?.length && !raidSwitches.length && <Menu.Item disabled>{pageWords().nothing_applies}</Menu.Item>}
+          {uid && meta && raidSwitches.map((o) => (
+            <Menu.Item key={`play:${o.character}:${o.spec}`} leftSection={<GameIcon meta={meta} kind="spec" id={`${o.cls}:${o.spec}`} size={14} title={o.spec} />}
+              onClick={() => playAs(uid, o)}>{o.label}</Menu.Item>
+          ))}
           {uid && list && withSwitches(items(list.actions), switches || []).map((it) => ("onPick" in it ? (
             <Menu.Item key={`switch:${it.key}`} leftSection={it.icon} onClick={it.onPick}>{it.label}</Menu.Item>
           ) : (
@@ -122,6 +161,7 @@ export function MemberMenu({ run, uid, name, onDone, moves, onAnswer, switches }
         </Menu.Dropdown>
       </Menu>
       {dialog}
+      {playDialog}
     </>
   );
 }

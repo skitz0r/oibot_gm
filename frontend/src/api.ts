@@ -204,7 +204,10 @@ export interface MemberEventView {
 /** `choice`: the lock box's one choice (consequences.lock_box, issue 14) — its label and whether it is ticked; absent elsewhere */
 /** `done` (a refusal only): the verb's outcome is already true (Unlock on an open event, Lock on a locked one, Cancel on a
  *  cancelled one, Start now on a started one) — useConfirmBox closes the box and the page reloads, no refusal shown. */
-export interface Box { title: string; sentences: string[]; verb: string | null; danger: boolean; diff: string[]; fp: string; choice?: { label: string; value: boolean }; done?: boolean }
+/** `scope` (the Role switches box before the lock, issue 15): where the switch reaches — one raid or the whole event —
+ *  its label, the value on screen and the options in the server's words; a change asks the server's box again. */
+export interface Box { title: string; sentences: string[]; verb: string | null; danger: boolean; diff: string[]; fp: string; choice?: { label: string; value: boolean };
+  scope?: { label: string; value: string; options: { value: string; label: string }[] }; done?: boolean }
 /** A Details line (event_view): the label, its value in words, and where it links (a site path or a Discord jump link).
  *  `links` = several places at once (the Raids page's Played in: each schedule with its href); `level` = a chip's level. */
 /** a Details row; `help` = the editors' (?) for the setting it names (constants.field_help: key, the sentence, its screen-reader name) */
@@ -333,6 +336,8 @@ export interface EventEdit {
 export interface SwitchRow {
   uid: string; display_name: string; role: string; from: string; to: string; answered: boolean; button: string; raids: string[];
   part: string; seat: number; option: number; character: string; spec: string; box: Box;
+  /** the box's scope on opening (issue 15): "raid" (the row's raid alone) | "event"; null = no choice offered */
+  scope?: string | null;
 }
 /** `short` = each raid short of a minimum (role → how many), `why` the sentence when it has no row; `revs` = each raid's plan rev. */
 export interface Switches { short: { raid: string; roles: Record<string, number>; why: string | null }[]; rows: SwitchRow[]; revs: Record<string, string> }
@@ -519,7 +524,9 @@ export interface Absence { start: string; end: string; reason: string | null; sp
 export interface MySheet { key: string; raid: string; starts_at: string; when: string; state: string; status: string | null; label: string | null; character: string | null; note: string | null; rostered: boolean; roster: number | null; badge?: string; state_word?: string; kind?: "recurring" | "adhoc"; regular?: boolean; confirms?: boolean; may_answer?: boolean; may_cant?: boolean; cant_consequence?: string | null; queue_note?: string | null; receipt?: string | null;
   /** follow-on runs (design §5.62): `then` = the follow-on in words on a lead, `lead_raid` = the lead's name on a follow-on;
    *  `may_leave` = Leaving after the lead applies, `leave_consequence` = its confirm's sentence; `may_stay` = I'm staying undoes it */
-  then?: string | null; lead_raid?: string | null; may_leave?: boolean; may_stay?: boolean; leave_consequence?: string | null }
+  then?: string | null; lead_raid?: string | null; may_leave?: boolean; may_stay?: boolean; leave_consequence?: string | null;
+  /** what you play in this raid when an officer switched you for it alone (issue 15): a sentence, else null */
+  plays?: string | null }
 /** One recurring schedule the viewer is a regular of (the Me page's My regular raids). */
 export interface MyRegular { series: string; label: string; character: string; cls: string; spec: string; role: string }
 /** One seat of the group an ask would put you in (spec icon alone on the card; `me` = you). */
@@ -538,7 +545,9 @@ export interface Notice { id: string; kind: string; text: string; run: string | 
 /** What an officer may record for a member on a run (GET /api/admin/actions — rc.member_actions, the SetWizard's list), each with the
  *  consequence sentence from the server; `rev` = the member's state the list was drawn from (a stale one is a 409 naming the change). */
 export interface MemberAction { key: string; label: string; needs: "character" | "note" | null; characters?: string[]; consequence: string; by_character?: Record<string, string> }
-export interface MemberActions { uid: string; display_name: string; run: string; actions: MemberAction[]; rev: string; now: string }
+/** A role switch for this raid alone (issue 15, rc.raid_switch_options): the board ⋮ menu's "Play as Holy in this raid". */
+export interface RaidSwitchOption { character: string; spec: string; cls: string; label: string }
+export interface MemberActions { uid: string; display_name: string; run: string; actions: MemberAction[]; rev: string; now: string; raid_switches?: RaidSwitchOption[] }
 export interface Aura { abbr: string; colour: string; art: string | null; name: string; who?: string; in_run?: boolean; covered?: boolean }
 export interface GroupSummary {
   roles: Record<string, number>; synergy: number | null; unmet: string[]; assumptions: string[];

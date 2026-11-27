@@ -77,6 +77,7 @@ export function MyAnswer({ s, characters, meta, ask, onDone, flash, link }: {
       {s.may_cant && <Group gap={6}><Button size="compact-sm" variant="subtle" color="red" loading={busy === "cant"} disabled={busy !== null} onClick={cant}>Can't make it…</Button></Group>}
       {s.may_leave && <Group gap={6}><Button size="compact-sm" variant="subtle" color="red" loading={busy === "leave"} disabled={busy !== null} onClick={leave}>Leaving after {s.lead_raid}…</Button></Group>}
       {s.may_stay && <Group gap={6}><Button size="compact-sm" variant="subtle" color="teal" loading={busy === "stay"} disabled={busy !== null} onClick={stay}>I'm staying</Button></Group>}
+      {s.plays && <Text size="xs">{s.plays}</Text>}
       {s.receipt && s.status && <Text size="xs" c="dimmed">{s.receipt}</Text>}
     </Stack>
   );

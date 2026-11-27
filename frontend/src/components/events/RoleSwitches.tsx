@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Badge, Button, Group, Stack, Text, VisuallyHidden } from "@mantine/core";
+import { Badge, Button, Group, SegmentedControl, Stack, Text, VisuallyHidden } from "@mantine/core";
 import { api, ApiError, type Box, type EventView, type Meta, type SwitchRow, type Switches } from "../../api";
 import { fail, ok } from "../Page";
 import { useConfirmBox } from "../ConfirmBox";
@@ -12,21 +12,42 @@ import css from "../../pages/listpage.module.css";
 const FOLD = "oibot.events.switches";  // the viewer's own fold (a per-viewer convenience: localStorage)
 const same = (a: SwitchRow, b: SwitchRow) => a.uid === b.uid && a.character === b.character && a.spec === b.spec && a.part === b.part;
 
+/** The box's scope choice (issue 15): this raid or the whole event, the SERVER's options; a change asks the box again
+ *  (`onPick` → the fresh box replaces the one on screen). Kept as the box's own field, as LockBox keeps its choice. */
+function ScopeField({ scope, onPick }: { scope: NonNullable<Box["scope"]>; onPick: (value: string) => void }) {
+  const [value, setValue] = useState(scope.value);
+  return (
+    <Stack gap={4}>
+      <Text size="sm" fw={500}>{scope.label}</Text>
+      <SegmentedControl fullWidth value={value} data={scope.options} aria-label={scope.label}
+        onChange={(v) => { setValue(v); onPick(v); }} />
+    </Stack>
+  );
+}
+
 /** THE press of one Role switches row — the section's button and a Signups row's ⋮ item (SignupsSection) both call it:
  *  the row's own box from the server; the verb sends the row with its raid's plan rev (`view.switches.revs`) and the
  *  box's fp as `seen`: a box that changed comes back fresh, a list that changed brings the row's fresh box (or, when the
  *  row is gone, says so in the server's words and the page reloads). `dialog` is mounted by the caller, which stays
  *  mounted while the box is open (a menu that closes never takes the box with it). */
 export function useSwitchPress(view: EventView, onReload: () => void): [(row: SwitchRow) => Promise<void>, React.ReactNode] {
-  const [ask, dialog] = useConfirmBox(["run:", "member"]);
+  const [ask, dialog, replace] = useConfirmBox(["run:", "member"]);
   const switches = view.switches;
   async function press(first: SwitchRow) {
     let row = first;
     let said = "";
     let gone = "";
     let revs: Record<string, string> | null = null;  // the plan revs a 409 brought, once one did
+    let scope = row.box.scope?.value || null;  // the box's choice on screen (issue 15): sent with every preview and the press
+    let seq = 0;
     const url = () => `/api/run/${encodeURIComponent(row.part)}/switch`;
-    const body = (extra: object) => ({ uid: row.uid, character: row.character, spec: row.spec, part: row.part, seat: row.seat, option: row.option, rev: revs ? revs[row.part] : switches.revs[row.part], ...extra });
+    const body = (extra: object) => ({ uid: row.uid, character: row.character, spec: row.spec, part: row.part, seat: row.seat, option: row.option, rev: revs ? revs[row.part] : switches.revs[row.part], ...(scope ? { scope } : {}), ...extra });
+    const preview = async (): Promise<Box> => (await api.post<{ box: Box }>(url(), body({ preview: true }))).box;
+    const pick = (value: string) => {
+      scope = value;
+      const n = ++seq;
+      preview().then((b) => { if (n === seq) replace(b); }).catch(fail);
+    };
     /** a 409 that carries the fresh list: the same person's row there (its fresh box waits), else the list's sentence */
     const fresh = (e: unknown): Box | null => {
       const b = e instanceof ApiError ? (e.body as { error?: string; switches?: Switches } | undefined) : undefined;
@@ -39,7 +60,8 @@ export function useSwitchPress(view: EventView, onReload: () => void): [(row: Sw
     };
     const done = await ask({
       box: row.box,
-      refresh: async (): Promise<Box> => (await api.post<{ box: Box }>(url(), body({ preview: true }))).box,
+      fields: row.box.scope ? <ScopeField scope={row.box.scope} onPick={pick} /> : undefined,
+      refresh: preview,
       act: async (fp) => {
         try { said = (await api.post<{ message: string }>(url(), body({ seen: fp }))).message; return null; }
         catch (e) {
