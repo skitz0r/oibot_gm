@@ -496,7 +496,8 @@ def test_lock_with_one_run_needs_no_picker(reg, rs, officer, channel):
         await FLOWS["raid_lock"](h.command(), reg)
         assert h.buttons() == ["Lock as it stands", "Lock and auto-fill", "Preview lock", "Back"] and not bot.calls
         await h.press("Lock and auto-fill")
-        assert h.buttons() == ["Lock and auto-fill", "Preview lock", "Back"] and "The lock builds the roster for Barrow Deeps from those who joined." in h.text and not bot.calls
+        # nobody joined: ticking places nobody, so the box says what it then does (fix round 1)
+        assert h.buttons() == ["Lock and auto-fill", "Preview lock", "Back"] and "Automated Fill Requests then ask others to take the open slots." in h.text and not bot.calls
         await h.press("Lock and auto-fill")
         assert bot.calls[0] == ("lock_run", ev.key, "Tester") and bot.calls[1][0] == "emit"
         assert h.text.endswith(f"{ev.key}: locked")

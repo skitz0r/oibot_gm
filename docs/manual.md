@@ -109,8 +109,8 @@ understands; it answers in the words below.
     Requests are on, the lock pauses them on every raid of that event, so nobody is DMed for those seats; the notice
     then says *"An officer decides who takes an open seat."* One press of **Resume Automated Fill Requests** — on any
     raid of the event, on the site, the lock card, plain text or MCP — resumes every raid of it. With people signed up and nobody on the board, that lock fails: the sheet stays open, the
-    officers get one line (*"Nobody is on the board, so place someone or lock with auto-fill to fill the empty
-    seats."*) and the bot tries again after 15 minutes, not every minute. An event of several raids is checked as a
+    officers get one line (*"Nobody is on the board, so place someone or lock with auto-fill to fill the open
+    slots."*) and the bot tries again after 15 minutes, not every minute. An event of several raids is checked as a
     whole before any raid of it locks: if any of its raids has people signed up and nobody on its board, nothing locks
     and the line names that raid (*"Nobody is on the Barrow Deeps board, so place someone or lock with auto-fill."*).
     An event nobody signed up for still locks. Later raids of the event lock the same way as its first. It is greyed out (in Discord, not offered) while Auto Lock is off.
@@ -1387,25 +1387,27 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    the bench never adds one, unless an officer placed a Bench answer in a later roster's group. A Bench answer the lock
    rosters gets the Confirm ask like anyone rostered. Lock now asks first.
    **A lock an officer presses** (Lock now, the sheet card's Lock, the lock card and `/raid lock`, plain text, MCP) never
-   fills silently: when the board is not complete, the box offers one choice, **Auto-fill empty roster slots**,
-   unticked. Unticked, the lock rosters exactly the names on the board, each in its group — nobody else, not even
-   someone pinned on who is not on it — and the box says so: *"The roster has 4 open slots. Only the 6 people on the
-   board are rostered, so Ash is not. Automated Fill Requests pause, so an officer decides who takes an open slot."*
-   (the last sentence only while those asks are on; otherwise who is asked to confirm). The open slots are per roster
+   fills silently: whenever any roster of the event has open slots — even when everyone who answered is placed — the
+   box offers one choice, **Auto-fill empty roster slots**, unticked. Unticked, the lock rosters exactly the names on
+   the board, each in its group — nobody else, not even someone pinned on who is not on it — and the box says so:
+   *"The roster has 4 open slots, and Ash is not rostered. Only the 6 people on the board are rostered and get the
+   Confirm or Can't make it DM. Automated Fill Requests pause until an officer resumes them from the event."* (with
+   those asks off or already paused, the last sentence is the confirm deadline instead). The open slots are per roster
    (*"Roster 1 has 3 open slots and roster 2 has 1."*); an event of several raids names the raid when only one has them
    (*"The Barrow Deeps roster has 5 open slots."*), else the total (*"The rosters have 11 open slots across 2 raids."*).
    With people signed up and nobody on the board the unticked lock can't be pressed: the box says *"Nobody is on the board,
-   so place someone or lock with auto-fill to fill the empty seats."* and the choice stays there to tick. Ticked, the lock
-   fills as described below, and the box leads with the open slots when every roster has someone on it. Changing the
-   choice redraws the box, and **Preview lock** shows the roster for the choice ticked now. A complete board (every seat
-   placed, or nobody left to place) shows the box below with no choice, and its lock is the usual one. Discord has no
+   so place someone or lock with auto-fill to fill the open slots."* and the choice stays there to tick. Ticked, the lock
+   fills as described below, and the box leads with the open slots when every roster has someone on it; where ticking
+   places nobody (everyone who answered is already placed) it says what follows: *"Automated Fill Requests then ask
+   others to take the open slots."* Changing the choice redraws the box, and **Preview lock** shows the roster for the
+   choice ticked now. A board with no open slot shows the box below with no choice, and its lock is the usual one. Discord has no
    checkbox: the screen shows **Lock as it stands** · **Lock and auto-fill** · Preview lock · Back, and Lock and auto-fill
    opens its own screen with its own box. Plain text *"lock tonight's event"* locks as it stands; *"lock and fill tonight's
    event"* fills — the review line says which. MCP `lock_run` takes `autofill` (false unless asked). Its confirm states the rule the lock follows,
    never a guess at who it picks — **Preview lock** shows the exact roster. *"The lock builds the roster for Hyjal
    Summit and both Barrow Deeps rosters from those who joined."* with nobody placed (*"… from those who joined, then
-   from the bench."* with Bench answers, a pinned one too), *"Everyone on the board keeps their place, and the lock fills the open seats
-   from Not placed."* with some (*"The lock keeps the board and fills open seats from those who joined, then from the
+   from the bench."* with Bench answers, a pinned one too), *"Everyone on the board keeps their place, and the lock fills the open slots
+   from Not placed."* with some (*"The lock keeps the board and fills open slots from those who joined, then from the
    bench."* with Bench answers), *"The board becomes the roster for Hyjal Summit and both Barrow Deeps rosters."* when
    every seat of every roster the lock builds is placed, or nobody is left to place, and everyone pinned on is on the
    board. Where it applies the first sentence
@@ -1713,7 +1715,7 @@ Fill seats… · Loot · Cancel event… (the *Suggested* block has its own row:
 a second row: **Remind the unanswered** · **Pause Automated Fill Requests** · **End the event**. **One confirm screen, the same
 words everywhere.** Before a lock, a cancel, clearing the test bench, deciding an application or approving / dismissing
 a news proposal, the bot shows one sentence computed from the event as it stands — for a lock: *"Everyone on the board keeps
-their place, and the lock fills the open seats from Not placed. 16 of the 18 rostered get the Confirm or Can't make it DM and 2 see it on the site. They have until Tue 9 Dec
+their place, and the lock fills the open slots from Not placed. 16 of the 18 rostered get the Confirm or Can't make it DM and 2 see it on the site. They have until Tue 9 Dec
 6:30 PM to answer."*; on a one-off: *"On a one-off event Join is the commitment, so nobody is asked to confirm."* — then the verb's own button (*Lock*, *Cancel event*, *Send reminder*, *End the event*, *Approve*…), **<verb> with a
 note** where a note makes sense, and **Back**. In Discord, Lock, Cancel event, Send reminder and End the event print the very
 box the site's confirm shows — its title, its sentences, its verb; a box that changed while it was open is shown again

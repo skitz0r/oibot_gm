@@ -380,7 +380,8 @@ class Wizard(discord.ui.View):
                          do: Callable[[discord.Interaction, dict[str, str]], Awaitable[None]],
                          refresh: Callable[[], dict | Awaitable[dict]] | None = None, note: Sequence[Field] = (),
                          extra: Sequence[discord.ui.Item] = (), back: Callable[[discord.Interaction], Awaitable[None]] | None = None,
-                         hint: str | None = None, changed: bool = False, embed: discord.Embed | None = None) -> None:
+                         hint: str | None = None, changed: bool = False, embed: discord.Embed | None = None,
+                         refused: Sequence[discord.ui.Item] = ()) -> None:
         """The server's box (consequences.box) on one screen — the same box the site prints (§7b). The text is
         `box_text(box)` in place of the wizard's own title. Buttons: the box's verb (red iff `danger`), `<verb> with a
         note` when `note` (a Form of those Fields whose Submit is the write), `extra` (reads only), then Back (`back`, or
@@ -390,13 +391,14 @@ class Wizard(discord.ui.View):
         box (consequences.refusal_box_for: its sentence, Back alone, nothing written). Otherwise `working`, then
         `do(interaction, values)` (`{}` for a plain press). `refresh` must not solve; a sync one runs inside Discord's 3
         seconds, an awaitable one (a thread) after `working` has answered the press. A verb ending in "…" is taken once without it.
-        `embed`: shown under the box on this screen only (the lock's preview roster); a box shown again goes without it."""
+        `embed`: shown under the box on this screen only (the lock's preview roster); a box shown again goes without it.
+        `refused`: buttons a refusal box keeps before Back (the lock's empty board keeps Lock and auto-fill)."""
         verb = box.get("verb")
         if verb is not None and verb != button_label(verb):
             box = {**box, "verb": button_label(verb)}
             verb = box["verb"]
         note = list(note)
-        again = dict(do=do, refresh=refresh, note=note, extra=extra, back=back, hint=hint)
+        again = dict(do=do, refresh=refresh, note=note, extra=extra, back=back, hint=hint, refused=refused)
 
         async def go(i: discord.Interaction, values: dict[str, str]) -> None:
             worked = False
@@ -443,6 +445,8 @@ class Wizard(discord.ui.View):
             if note:
                 items.append(self.button(f"{verb} with a note", with_note, discord.ButtonStyle.secondary))
             items += list(extra)
+        else:
+            items += list(refused)
         items.append(self.button(CONFIRM_WORDS["back"], back or nothing, discord.ButtonStyle.secondary))
         text = box_text(box, changed=changed)
         heading, self.heading = self.heading, False  # one heading: the box's title, never the wizard's too

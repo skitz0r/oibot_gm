@@ -43,7 +43,9 @@ def fill_box(reg, ev, rs):
     from oibot_gm import consequences as cq
 
     b = cq.lock_box(reg, ev, rs, fill=True)
-    return {**b, "sentences": [x for x in b["sentences"] if not (" open slot" in x and x is b["sentences"][0])]}
+    import re
+
+    return {**b, "sentences": [x for x in b["sentences"] if not (re.search(r"\d+ open slots?\b", x) and x is b["sentences"][0])]}
 
 
 def schedule_event(reg, rs):
@@ -1003,7 +1005,7 @@ def test_the_box_says_the_board_becomes_the_roster_only_when_it_is(reg, rs):
     assert b["sentences"][1] == "The 10 rostered get the Confirm or Can't make it DM.", b
     ev = _case_b11_second_rosters_group(reg, rs)
     head = fill_box(reg, ev, rs)["sentences"][0]
-    assert head == "The lock keeps the board and fills open seats from those who joined, then from the bench.", head
+    assert head == "The lock keeps the board and fills open slots from those who joined, then from the bench.", head
 
 
 def test_the_box_names_auto_fills_bench_places_as_open(reg, rs):
@@ -1041,7 +1043,7 @@ def test_the_box_names_the_bench_for_a_kept_on_bench_answer_off_the_board(reg, r
     from oibot_gm import consequences as cq
 
     b = fill_box(reg, _case_p1_full_board_and_a_pinned_bench_answer_off_it(reg, rs), rs)
-    assert b["sentences"][:2] == ["The lock keeps the board and fills open seats from those who joined, then from the bench.",
+    assert b["sentences"][:2] == ["The lock keeps the board and fills open slots from those who joined, then from the bench.",
                                   "Everyone rostered gets the Confirm or Can't make it DM."], b
     for make in (_case_b13_one_pinned_bench_answer_empty_board, _case_b12_pinned_joiners_hold_every_seat):
         ev = make(reg, rs)
@@ -1059,7 +1061,7 @@ def test_the_box_with_bench_answers_and_nobody_placed(reg, rs):
                                   "Everyone rostered gets the Confirm or Can't make it DM."], b
     ev.layout = [[joiners[0].display_name]]
     assert fill_box(reg, ev, rs)["sentences"][0] == \
-        "The lock keeps the board and fills open seats from those who joined, then from the bench."
+        "The lock keeps the board and fills open slots from those who joined, then from the bench."
 
 
 def test_a_full_roster_of_joiners_keeps_todays_lock_box(reg, rs):
@@ -1272,7 +1274,7 @@ def test_raids_of_one_event_that_differ_get_the_rule_true_of_both(reg, rs):
     assert b["sentences"][0] == cq.AUTO_AGAIN, b
     fev.layout, fev.auto_placed = [[joiners[0].display_name]], []
     b = fill_box(reg, lead, rs)
-    assert b["sentences"][0] == "The lock fills open seats from those who joined first, then from the bench.", b
+    assert b["sentences"][0] == "The lock fills open slots from those who joined first, then from the bench.", b
     for s in b["sentences"]:
         assert len(s.split()) <= 20 and not any(ch.isdigit() for ch in s.split(" until ")[0]), s
 

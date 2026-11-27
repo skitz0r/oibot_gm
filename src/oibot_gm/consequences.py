@@ -272,14 +272,14 @@ def _lock_head(reg: Registry, ev: rc.RaidEvent, rs=None) -> str:
         if k[0] == "empty":
             return _fit(lambda w: f"The lock builds the roster{w} from those who joined.", whom, lineup)
         if k[0] == "part":
-            return "Everyone on the board keeps their place, and the lock fills the open seats from Not placed."
+            return "Everyone on the board keeps their place, and the lock fills the open slots from Not placed."
         if k[0] == "EX":
             return _short_first(k[1])
         if k[0] == "A":
             return AUTO_AGAIN
         if k[0] == "EB":
             return _fit(lambda w: f"The lock builds the roster{w} from those who joined, then from the bench.", whom, lineup)
-        return "The lock keeps the board and fills open seats from those who joined, then from the bench."
+        return "The lock keeps the board and fills open slots from those who joined, then from the bench."
     if kinds <= {"full", "FH"}:
         many = any(k[0] == "FH" and k[1] for k in keys)
         return _fit(lambda w: f"The board becomes the roster{w}, so its Bench answer{'s are' if many else ' is'} rostered "
@@ -291,8 +291,8 @@ def _lock_head(reg: Registry, ev: rc.RaidEvent, rs=None) -> str:
     if "A" in kinds:
         return AUTO_AGAIN
     if kinds & {"EB", "PB"}:
-        return "The lock fills open seats from those who joined first, then from the bench."
-    return "Everyone on the board keeps their place, and the lock fills the open seats from Not placed."
+        return "The lock fills open slots from those who joined first, then from the bench."
+    return "Everyone on the board keeps their place, and the lock fills the open slots from Not placed."
 
 
 # the lock box's head when a Bench answer's place on the board is decided again at the lock (lock_forces in
@@ -367,12 +367,13 @@ def _lock_told(reg: Registry, ev: rc.RaidEvent, names: list[str] | None, cands: 
 
 
 # ---------------------------------------------------------------- the lock's fill choice (issue 14, Task 3)
-# A board that is not complete (some open raid's _LockFacts is not `full`) offers the choice PAGE_WORDS["lock_fill"],
-# unticked: a lock AS IT STANDS (fill=False — exactly the board, rc.board_as_it_stands) or a lock that fills (fill=True —
-# the solve, today's box). A complete board's box is today's, with no choice, and its lock fills (the board is the
-# roster either way, and Automated Fill Requests ask for its open slots as they always did).
+# A board with an open slot on any roster (rc.lock_open_slots of any open raid) offers the choice PAGE_WORDS["lock_fill"],
+# unticked (the owner's ruling, fix round 1: "Roster X has open slots remaining, are you sure you want to lock?"): a lock
+# AS IT STANDS (fill=False — exactly the board, rc.board_as_it_stands) or a lock that fills (fill=True — the solve, today's
+# rule sentences). A board with no open slot gets today's box, with no choice, and its lock fills (it can add nobody).
 
-LOCK_PAUSE = "Automated Fill Requests pause, so an officer decides who takes an open slot."
+LOCK_PAUSE = "Automated Fill Requests pause until an officer resumes them from the event."
+LOCK_ASKS = "Automated Fill Requests then ask others to take the open slots."  # ticked, where the lock places nobody
 
 
 def _open_parts(rs, ev: rc.RaidEvent) -> list[rc.RaidEvent]:
@@ -384,17 +385,22 @@ def _open_parts(rs, ev: rc.RaidEvent) -> list[rc.RaidEvent]:
 
 
 def lock_choice(reg: Registry, ev: rc.RaidEvent, rs=None) -> bool:
-    """Whether the lock box offers the fill choice: an open event whose board is not complete (some open raid's
-    _LockFacts is not `full`). A refused lock (closed, everyone who joined kept off) has no choice."""
+    """Whether the lock box offers the fill choice: an open event, not refused, with an open slot on any roster of any
+    open raid (rc.lock_open_slots — the board as it stands). A board with no open slot has no choice."""
     if ev.state != "open" or lock_refusal(reg, ev) is not None:
         return False
-    return not all(_LockFacts(reg, rs, p).full for p in _open_parts(rs, ev))
+    return any(sum(rc.lock_open_slots(reg, rs, p)) for p in _open_parts(rs, ev))
 
 
 def lock_fill(reg: Registry, ev: rc.RaidEvent, rs, fill: bool) -> bool:
-    """The `fill` a person's lock passes to RaidMixin.lock_run: their choice when the box offers one, else True (a
-    complete board: the box is today's, and so is the lock)."""
+    """The `fill` a person's lock passes to RaidMixin.lock_run: their choice when the box offers one, else True (no open
+    slot: the box is today's, and so is the lock)."""
     return bool(fill) if lock_choice(reg, ev, rs) else True
+
+
+def _asks_on(reg: Registry, ev: rc.RaidEvent) -> bool:
+    """Automated Fill Requests on for the event and not paused: what asks for open slots after a lock."""
+    return bool(rc.team_setting(rc.run_team(reg, ev), "autofill")) and not ev.autofill_paused
 
 
 def _slots_sentence(per_raid: list[tuple[str, list[int]]]) -> str | None:
@@ -428,33 +434,73 @@ def _on_board(reg: Registry, p: rc.RaidEvent) -> list[str]:
     return [x.signup_name for r in rc.board_rosters(reg, p, rc.board_layout(reg, p), rc.run_size(reg, p)) for x in r.selected]
 
 
-def _lock_as_it_stands(reg: Registry, ev: rc.RaidEvent, rs, parts: list[rc.RaidEvent], slots: str | None) -> list[str]:
-    """fill=False: the open slots, who is rostered (only the board; a name kept on but off it is not), that Automated
-    Fill Requests pause when they are on and slots stay open, who is asked to confirm, by when — the first three."""
+def _with_left(slots: str, left: list[str]) -> str:
+    """The open slots sentence with the kept-on names a lock as it stands leaves off (rc.lock_left_out): '…, and Linnea
+    is not rostered.', '…, and Linnea, Juniper and 2 others are not rostered.', or a count when the names don't fit."""
+    if not left:
+        return slots
+    shown = left if len(left) <= 3 else left[:2] + [f"{len(left) - 2} others"]
+    s = f"{slots[:-1]}, and {rc.join_words(shown)} {'is' if len(left) == 1 else 'are'} not rostered."
+    if _words(s) <= 20:
+        return s
+    return f"{slots[:-1]}, and {_n(len(left), 'person', 'people')} pinned on {'is' if len(left) == 1 else 'are'} not rostered."
+
+
+def _rostered_told(reg: Registry, ev: rc.RaidEvent, many: bool, names: list[str], cands: list) -> str:
+    """A lock as it stands: who is rostered (only the board, so the number is certain) and who is told, in one sentence."""
+    n = len(names)
+    if not many and not n:
+        return "Nobody is on the board, so the roster locks empty."
+    base = ("Only the people on each raid's board are rostered" if many else
+            "Only the one person on the board is rostered" if n == 1 else f"Only the {n} people on the board are rostered")
+    if not rc.run_confirms(reg, ev):
+        return f"{base}, and nobody is asked to confirm."
+    if rc.is_test_run(reg, ev):
+        return f"{base}, and the puppets' DMs come to the tester."
+    if many:
+        return f"{base}, and some see their ask on the site." if _dms_off(reg, cands) else f"{base} and get {CONFIRM_DM}."
+    off = _dms_off(reg, [sg.discord_id for x in names if (sg := rc.signup_by_name(ev, x)) is not None])
+    if not off:
+        return f"{base} and {'gets' if n == 1 else 'get'} {CONFIRM_DM}."
+    if off >= n:
+        return f"{base}, and {'they see' if n == 1 else 'all see'} the ask on the site."
+    return f"{base}, and {off} of them {'sees' if off == 1 else 'see'} the ask on the site."  # the rest get the DM
+
+
+def _lock_as_it_stands(reg: Registry, ev: rc.RaidEvent, rs, parts: list[rc.RaidEvent], slots: str) -> list[str]:
+    """fill=False, in the Confirm rule's order: the open slots (and a kept-on name the board leaves off), who is rostered
+    and told, then what can be undone — Automated Fill Requests pause until resumed — or, with them off or already
+    paused, the confirm deadline."""
     many = len(parts) > 1
     names = _on_board(reg, ev)
     left = list(dict.fromkeys(n for p in parts for n in rc.lock_left_out(reg, rs, p)))
-    if many:
-        who = "Only the people on each raid's board are rostered"
-    elif not names:
-        who = "Nobody is on the board, so the roster locks empty"
-    else:
-        who = "Only the one person on the board is rostered" if len(names) == 1 else f"Only the {len(names)} people on the board are rostered"
-    if left and (many or names):
-        shown = left if len(left) <= 3 else left[:2] + [f"{len(left) - 2} others"]
-        who += f", so {rc.join_words(shown)} {'is' if len(left) == 1 else 'are'} not"
-    lines = ([slots] if slots else []) + [who + "."]
-    if slots and rc.team_setting(rc.run_team(reg, ev), "autofill") and not ev.autofill_paused:
+    cands = [s.discord_id for s in ev.signups.values() if s.status in ("in", "sub")]
+    lines = [_with_left(slots, left), _rostered_told(reg, ev, many, names, cands)]
+    if _asks_on(reg, ev):
         lines.append(LOCK_PAUSE)
-    joined = [s for s in ev.signups.values() if s.status in ("in", "sub")]
-    if not rc.run_confirms(reg, ev):
-        lines.append("Nobody is asked to confirm.")
-    elif not joined:
-        lines.append("Nobody has joined yet, so nobody is asked to confirm.")
-    else:
-        lines.append(_lock_told(reg, ev, None if many else names, [s.discord_id for s in joined]))
+    elif rc.run_confirms(reg, ev) and (names or many):
         lines.append(_lock_deadline(reg, ev))
-    return lines[:3]
+    return lines
+
+
+def _lock_ticked(reg: Registry, ev: rc.RaidEvent, rs, parts: list[rc.RaidEvent], slots: str) -> list[str]:
+    """fill=True. Where the lock places nobody (every raid's board is the roster, or nobody answered): the open slots,
+    who is told, then what ticking does — Automated Fill Requests ask for the open slots, when they are on. Otherwise
+    the open slots lead only where they are the board's for certain (every raid has someone on every roster it
+    expects), then today's rule sentences (_lock) — never a prediction of who the solve rosters."""
+    facts = [_LockFacts(reg, rs, p) for p in parts]
+    if all(f.full or (not f.joined and not f.bench) for f in facts):
+        f = facts[0]
+        if not f.joined and not f.bench:
+            told = "Nobody has joined yet, so nobody is asked to confirm."
+        elif not rc.run_confirms(reg, ev):
+            told = "Nobody is asked to confirm."
+        else:
+            told = _lock_told(reg, ev, f.placed, [s.discord_id for s in f.joined + f.bench])
+        last = LOCK_ASKS if _asks_on(reg, ev) else (_lock_deadline(reg, ev) if rc.run_confirms(reg, ev) and f.placed else None)
+        return [slots, told] + ([last] if last else [])
+    whole = all(len(rc.lock_open_slots(reg, rs, p)) == rc.run_rosters(reg, p) and _on_board(reg, p) for p in parts)
+    return ([slots] if whole else []) + _lock(reg, ev, rs)
 
 
 def _lock_rev(reg: Registry, rs, ev: rc.RaidEvent) -> str:
@@ -482,10 +528,10 @@ def lock_refusal(reg: Registry, ev: rc.RaidEvent) -> str | None:
 def lock_box(reg: Registry, ev: rc.RaidEvent, rs=None, fill: bool = False) -> dict:
     """Boxes 1 and 2: Lock an event (`rs` adds the event's fingerprint, so a box whose run changed is refused). An event
     already locked, finished or cancelled answers with a refusal box; so does one whose every joiner is kept off. A
-    complete board (lock_choice False) is today's box. Otherwise the box carries `choice` {label, value} — PAGE_WORDS
-    ["lock_fill"], `value` = `fill` — and its fingerprint covers `fill`: `fill` False (a person's default) leads with
-    the open slots and says what a lock as it stands does, or refuses in rc.lock_empty_refusal's one sentence (verb None,
-    the choice still there to tick); `fill` True leads with the open slots, then today's rule sentences."""
+    board with no open slot (lock_choice False) is today's box. Otherwise the box carries `choice` {label, value} —
+    PAGE_WORDS["lock_fill"], `value` = `fill` — and its fingerprint covers `fill`: `fill` False (a person's default) is
+    _lock_as_it_stands, or refuses in rc.lock_empty_refusal's one sentence (verb None, the choice still there to tick);
+    `fill` True is _lock_ticked."""
     from .constants import PAGE_WORDS
 
     if ev.state != "open":
@@ -501,15 +547,8 @@ def lock_box(reg: Registry, ev: rc.RaidEvent, rs=None, fill: bool = False) -> di
     parts = _open_parts(rs, ev)
     if not fill and (why := rc.lock_empty_refusal(reg, rs, ev)) is not None:
         return {**box(title, [why], None, rev=rev), "choice": choice}
-    per_raid = [(_raid(reg, p.instance), rc.lock_open_slots(reg, rs, p)) for p in parts]
-    slots = _slots_sentence(per_raid)
-    if fill:
-        # the open slots lead only where they are the board's for certain: every raid has someone on every roster it
-        # expects (an empty raid or roster is the solve's to fill or leave out — never a number here)
-        whole = all(len(n) == rc.run_rosters(reg, p) and _on_board(reg, p) for p, (_, n) in zip(parts, per_raid))
-        lines = ([slots] if slots and whole else []) + _lock(reg, ev, rs)
-    else:
-        lines = _lock_as_it_stands(reg, ev, rs, parts, slots)
+    slots = _slots_sentence([(_raid(reg, p.instance), rc.lock_open_slots(reg, rs, p)) for p in parts])
+    lines = (_lock_ticked if fill else _lock_as_it_stands)(reg, ev, rs, parts, slots)
     return {**box(title, lines[:3], "Lock", rev=rev), "choice": choice}
 
 

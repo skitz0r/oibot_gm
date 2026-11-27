@@ -15,7 +15,7 @@ import css from "../board/board.module.css";
 /** The event's More menu (phase 4, Task 10 — the capability inventory): the raid-night levers the old run card
  *  had and the approved mockup does not draw, kept on the event so none is lost — per raid, from the run's own JSON
  *  (`part.sheet`, ev_json): Fill seats… after the lock / Suggest… before it (the fill screen), Remind the unanswered,
- *  Pause / Resume automatic asks, Re-post the sheet… (the first raid's: it holds the sheet), the loot council, End the
+ *  Pause / Resume Automated Fill Requests (once, for the whole event), Re-post the sheet… (the first raid's: it holds the sheet), the loot council, End the
  *  run, the asks out (each with Withdraw) and, on a finished event, Reopen an end made by mistake; before the lock, Clear
  *  the board (every open raid's groups back to Not placed, the server's box — consequences.clear_board_box). Each raid's split
  *  moved to Edit event (the owner's tweaks, B) with the event's other own settings. Each verb is named as
@@ -68,9 +68,6 @@ export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; 
       out.push(<Menu.Item key={`${p.key}:fill`} leftSection={<IconUsersPlus size={14} />} onClick={() => setFill(s)}>{locked ? L.fill : L.suggest}</Menu.Item>);
       if (locked) {
         out.push(<Menu.Item key={`${p.key}:remind`} leftSection={<IconBell size={14} />} disabled={!s.may_remind} onClick={() => remind(s)}>{L.remind}{why(s.may_remind ? null : s.remind_note)}</Menu.Item>);
-        out.push(s.autofill_paused
-          ? <Menu.Item key={`${p.key}:pause`} leftSection={<IconPlayerPlay size={14} />} onClick={() => post(`/api/run/${encodeURIComponent(s.key)}/pause`, { paused: false })}>{L.resume}</Menu.Item>
-          : <Menu.Item key={`${p.key}:pause`} leftSection={<IconPlayerPause size={14} />} onClick={() => post(`/api/run/${encodeURIComponent(s.key)}/pause`, { paused: true })}>{L.pause}</Menu.Item>);
       }
       if (i === 0) out.push(<Menu.Item key={`${p.key}:repost`} leftSection={<IconSend size={14} />} onClick={() => setRepost(s.key)}>Re-post the sheet…</Menu.Item>);
       if (s.loot?.may_open) out.push(<Menu.Item key={`${p.key}:loot`} leftSection={<IconDiamond size={14} />} onClick={() => post(`/api/loot/${encodeURIComponent(s.key)}/open`)}>{L.loot}</Menu.Item>);
@@ -86,7 +83,17 @@ export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; 
     if (!out.length) return [];
     return [...(several ? [<Menu.Label key={`${p.key}:label`}>{p.raid_name}</Menu.Label>] : []), ...out];
   };
-  const all = parts.flatMap(items);
+  // Pause / Resume Automated Fill Requests acts on every raid of the event (RaidMixin.set_autofill_paused): once, above
+  // the raids — Resume while any locked raid is paused, Pause otherwise
+  const lockedParts = live ? parts.filter(({ s }) => s.state === "locked") : [];
+  const anyPaused = lockedParts.some(({ s }) => s.autofill_paused);
+  const all = [
+    ...(lockedParts.length ? [anyPaused
+      ? <Menu.Item key="pause" leftSection={<IconPlayerPlay size={14} />} onClick={() => post(`/api/run/${encodeURIComponent(lockedParts[0].s.key)}/pause`, { paused: false })}>{L.resume}</Menu.Item>
+      : <Menu.Item key="pause" leftSection={<IconPlayerPause size={14} />} onClick={() => post(`/api/run/${encodeURIComponent(lockedParts[0].s.key)}/pause`, { paused: true })}>{L.pause}</Menu.Item>,
+      ...(several ? [<Menu.Divider key="pause:div" />] : [])] : []),
+    ...parts.flatMap(items),
+  ];
   if (ev.actions.clear) {  // the whole event's board, once: every open raid's groups back to Not placed (pins stay)
     all.push(<Menu.Divider key="clear:div" />, <Menu.Item key="clear" leftSection={<IconEraser size={14} />} onClick={clear}>Clear the board…</Menu.Item>);
   }

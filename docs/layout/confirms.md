@@ -36,14 +36,16 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        THE confirmation box (§5.67 phase 4, spec §7b): box(title, sentences, verb, *, danger, diff, rev) → {title, sentences, verb,
                        danger, diff, fp} (fp = sha1 of title + diff + sentences + rev, 12 hex; verb None = a refusal, Back alone; red only when it can't
                        be undone); refusal_box / refusal_kind (the kind a built refusal carries — rc.Refusal past | clash — or the constant it equals,
-                       never words inside it) / refusal_box_for → REFUSAL_TITLES; the twenty boxes: lock_box(reg, ev, rs, fill=False) (1–2; issue 14: lock_choice = the board is not complete (some open raid's
-                       _LockFacts not full) → the box carries `choice` {label: PAGE_WORDS["lock_fill"], value: fill} and its fp covers `fill`;
+                       never words inside it) / refusal_box_for → REFUSAL_TITLES; the twenty boxes: lock_box(reg, ev, rs, fill=False) (1–2; issue 14: lock_choice = any roster of any open raid has an
+                       open slot (rc.lock_open_slots; the owner's ruling, fix round 1) → the box carries `choice` {label: PAGE_WORDS["lock_fill"], value: fill} and its fp covers `fill`;
                        lock_fill(reg, ev, rs, fill) = the `fill` a person's lock passes (their choice, else True on a complete board — every
-                       surface reads it); fill=False leads with _slots_sentence (rc.lock_open_slots per open raid; several raids: the raid
-                       named only when one has them, else the total), then _lock_as_it_stands (only the board rostered, a kept-on name off it
-                       named, LOCK_PAUSE when Automated Fill Requests are on and slots stay open, who is told, by when — the first three),
-                       or rc.lock_empty_refusal's sentence with verb None and the choice still there; fill=True = the slots sentence (only
-                       when every raid has someone on every roster it expects) + _lock; a complete board = _lock, no choice. _lock_told /
+                       surface reads it); fill=False = _lock_as_it_stands: S1 _slots_sentence (rc.lock_open_slots per open raid; several
+                       raids: the raid named only when one has them, else the total) + _with_left (", and X is not rostered"), S2
+                       _rostered_told (only the board rostered + who is told: DMs off, a test event, no confirmation, several raids), S3
+                       LOCK_PAUSE while Automated Fill Requests are on and not paused, else the deadline — or rc.lock_empty_refusal's
+                       sentence with verb None and the choice still there; fill=True = _lock_ticked: where the lock places nobody
+                       (every raid full, or nobody answered) slots + who is told + LOCK_ASKS (asks on) or the deadline, else the slots
+                       sentence (only when every raid has someone on every roster it expects) + _lock; no open slot = _lock, no choice. _lock_told /
                        _lock_deadline (rc.late_confirm_by, as the lock) are shared by both; the head states a RULE true whatever the solve decides, never a predicted
                        number (Task 6 fix): _LockFacts per open raid from rc.lock_forces + rc.lock_seat_count (full = every seat of every
                        roster the lock builds placed, or nobody left to place, no auto-placed Bench name, and every kept-on name on the

@@ -148,9 +148,9 @@ def test_describe_run_ops(reg, rs):
     d = lambda **kw: configops.describe(reg, ConfigOp(**kw))  # noqa: E731
     title = f"Barrow Deeps {reg.local12(ev.start)}"  # a person reads the run's name and time, never its key (phase 3)
     # "lock and fill …" (issue 14): nobody is on the board, so a plain "lock …" is refused at the review
-    fl = d(op="run_lock", target=ev.key, value="fill")
-    assert fl.startswith(f"lock {title} ") and ev.key not in fl and "confirmation DMs" in fl and "auto-fill" in fl
-    assert "6 joined" in fl
+    fl = d(op="run_lock", target=ev.key, value="fill")  # the review line reads the lock box (fix round 1)
+    assert fl.startswith(f"lock {title} now and auto-fill the empty roster slots. ") and ev.key not in fl
+    assert "The lock builds the roster for Barrow Deeps from those who joined." in fl
     assert d(op="run_lock", target=ev.key).endswith(f": {rc.LOCK_EMPTY_BOARD}")
     assert d(op="run_answer", target=ev.team, member=ms[0].display_name, value="bench").endswith(f"{ms[0].display_name} → Bench (now Join as {ms[0].main.label})")
     assert "hasn't answered" in d(op="run_answer", target=ev.key, member=ms[9].display_name, value="join")

@@ -16,7 +16,7 @@ from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
-from conftest import OWNER, join, lock_with_board, weekly as _weekly
+from conftest import OWNER, join, lock_with_board, open_test_run, weekly as _weekly
 
 from oibot_gm import consequences as cq
 from oibot_gm import discord_people, inbox
@@ -841,33 +841,43 @@ def lock_choice_cases(reg, rs, add):
         return b
 
     ev = night(6)
-    both("six of ten placed, asks on", ev, ["The roster has 4 open slots.", "Only the 6 people on the board are rostered.", cq.LOCK_PAUSE],
-         ["The roster has 4 open slots.", "Everyone on the board keeps their place, and the lock fills the open seats from Not placed.",
+    both("six of ten placed, asks on", ev, ["The roster has 4 open slots.", "Only the 6 people on the board are rostered and get the Confirm or Can't make it DM.", cq.LOCK_PAUSE],
+         ["The roster has 4 open slots.", "Everyone on the board keeps their place, and the lock fills the open slots from Not placed.",
           f"Everyone rostered gets {cq.CONFIRM_DM}."])
     ev.autofill_paused = True
-    both("six of ten placed, asks paused", ev, ["The roster has 4 open slots.", "Only the 6 people on the board are rostered.",
-                                                f"The 6 rostered get {cq.CONFIRM_DM}."])
+    both("six of ten placed, asks paused", ev, ["The roster has 4 open slots.", "Only the 6 people on the board are rostered and get the Confirm or Can't make it DM.", cq._lock_deadline(reg, ev)])
     ev.autofill_paused = False
     rc.reschedule(reg, rs, ev, timing={"autofill": False}, by="t")
-    both("six of ten placed, asks off", rs.events[ev.key], ["The roster has 4 open slots.", "Only the 6 people on the board are rostered.",
-                                                            f"The 6 rostered get {cq.CONFIRM_DM}."])
+    both("six of ten placed, asks off", rs.events[ev.key], ["The roster has 4 open slots.", "Only the 6 people on the board are rostered and get the Confirm or Can't make it DM.", cq._lock_deadline(reg, ev)])
     ms[1].dm_opt_out = True
-    both("six of ten placed, asks off, one with DMs off", rs.events[ev.key])
-    ms[1].dm_opt_out = False
+    both("six of ten placed, asks off, one with DMs off", rs.events[ev.key], ["The roster has 4 open slots.",
+         "Only the 6 people on the board are rostered, and 1 of them sees the ask on the site.", cq._lock_deadline(reg, ev)])
+    for m in ms[:6]:
+        m.dm_opt_out = True
+    both("six of ten placed, asks off, everyone with DMs off", rs.events[ev.key], ["The roster has 4 open slots.",
+         "Only the 6 people on the board are rostered, and all see the ask on the site.", cq._lock_deadline(reg, ev)])
+    for m in ms[:6]:
+        m.dm_opt_out = False
+    ev = night(6, joined=6)  # everyone who answered placed, four seats spare: the choice all the same (the owner's ruling)
+    both("everyone placed, spare slots, asks on", ev, ["The roster has 4 open slots.", "Only the 6 people on the board are rostered and get the Confirm or Can't make it DM.", cq.LOCK_PAUSE],
+         ["The roster has 4 open slots.", f"The 6 rostered get {cq.CONFIRM_DM}.", cq.LOCK_ASKS])
+    rc.reschedule(reg, rs, ev, timing={"autofill": False}, by="t")
+    both("everyone placed, spare slots, asks off", rs.events[ev.key], None,
+         ["The roster has 4 open slots.", f"The 6 rostered get {cq.CONFIRM_DM}.", cq._lock_deadline(reg, ev)])
+    ev = night(1, joined=1)
+    both("one person, placed", ev, ["The roster has 9 open slots.",
+         f"Only the one person on the board is rostered and gets {cq.CONFIRM_DM}.", cq.LOCK_PAUSE])
     ev = night(6)
     ev.pins[str(ms[8].discord_id)] = "in"
-    both("one pinned in off the board", ev, ["The roster has 4 open slots.",
-                                             f"Only the 6 people on the board are rostered, so {names[8]} is not.", cq.LOCK_PAUSE])
+    both("one pinned in off the board", ev, [f"The roster has 4 open slots, and {names[8]} is not rostered.", "Only the 6 people on the board are rostered and get the Confirm or Can't make it DM.", cq.LOCK_PAUSE])
     for i in (6, 7, 9):
         ev.pins[str(ms[i].discord_id)] = "in"
-    both("four pinned in off the board", ev, ["The roster has 4 open slots.",
-                                              f"Only the 6 people on the board are rostered, so {names[8]}, {names[6]} and 2 others are not.", cq.LOCK_PAUSE])
+    both("four pinned in off the board", ev, [f"The roster has 4 open slots, and {names[8]}, {names[6]} and 2 others are not rostered.", "Only the 6 people on the board are rostered and get the Confirm or Can't make it DM.", cq.LOCK_PAUSE])
     ev = night(9, joined=9)  # every seat placed, one by Auto-fill from the bench: no open slot, the board is not complete
     join(reg, rs, ev, ms[9:10], "sub")
     ev.layout, ev.auto_placed = [names[:5], names[5:10]], [names[9]]
-    both("every seat placed, a Bench place Auto-fill made", ev, ["Only the 10 people on the board are rostered.",
-                                                                 f"The 10 rostered get {cq.CONFIRM_DM}.", cq._lock_deadline(reg, ev)],
-         [cq.AUTO_AGAIN, f"Everyone rostered gets {cq.CONFIRM_DM}.", cq._lock_deadline(reg, ev)])
+    b = both("every seat placed, a Bench place Auto-fill made", ev, [cq.AUTO_AGAIN, f"Everyone rostered gets {cq.CONFIRM_DM}.", cq._lock_deadline(reg, ev)])
+    assert "choice" not in b, "no open slot: today's box, no choice"
     ev = night(0)
     both("nobody placed", ev, [rc.LOCK_EMPTY_BOARD])
     ev = rc.open_run(reg, rs, RID, next(nights), by="t", schedule=sid)
@@ -880,10 +890,11 @@ def lock_choice_cases(reg, rs, add):
                       schedule=rc.ADHOC_SCHEDULE)
     join(reg, rs, one, ms[:8])
     one.layout = [names[:5]]
-    both("one-off, five of eight placed", one, ["The roster has 5 open slots.", "Only the 5 people on the board are rostered.", cq.LOCK_PAUSE])
+    both("one-off, five of eight placed", one, ["The roster has 5 open slots.",
+         f"Only the 5 people on the board are rostered and get {cq.CONFIRM_DM}.", cq.LOCK_PAUSE])
     rc.reschedule(reg, rs, one, timing={"autofill": False, "confirm": False}, by="t")
-    both("one-off, asks and confirmation off", rs.events[one.key], ["The roster has 5 open slots.", "Only the 5 people on the board are rostered.",
-                                                    "Nobody is asked to confirm."])
+    both("one-off, asks and confirmation off", rs.events[one.key], ["The roster has 5 open slots.",
+         "Only the 5 people on the board are rostered, and nobody is asked to confirm."])
     reg.set_raid_overrides("hyjal_summit_forever", {"first_open": "2026-01-01T00:00"}, "t")
     lead = rc.open_run(reg, rs, "hyjal_summit_forever", (now + timedelta(days=11)).replace(hour=18, minute=30, second=0, microsecond=0),
                        by="t", schedule=rc.ADHOC_SCHEDULE, follow={"raid": RID, "rosters": 2})
@@ -893,12 +904,20 @@ def lock_choice_cases(reg, rs, add):
     both("two raids, the later board empty", lead, [rc.LOCK_EMPTY_RAID.format(raid="Barrow Deeps")])
     fev.layout = [names[:5], names[5:10]]
     both("two raids, open slots on the first", lead, ["The Hyjal Summit roster has 15 open slots.",
-                                                      "Only the people on each raid's board are rostered.", cq.LOCK_PAUSE])
+                                                      "Only the people on each raid's board are rostered, and nobody is asked to confirm.", cq.LOCK_PAUSE])
     fev.layout = [names[:3]]
     both("two raids, open slots on both", lead, ["The rosters have 22 open slots across 2 raids.",
-                                                 "Only the people on each raid's board are rostered.", cq.LOCK_PAUSE])
+                                                 "Only the people on each raid's board are rostered, and nobody is asked to confirm.", cq.LOCK_PAUSE])
     fev.pins[str(ms[11].discord_id)] = "in"
-    both("two raids, one pinned in off the later board", lead)
+    both("two raids, one pinned in off the later board", lead, ["The rosters have 22 open slots across 2 raids, and Orrin is not rostered.",
+         "Only the people on each raid's board are rostered, and nobody is asked to confirm.", cq.LOCK_PAUSE])
+    rc.reschedule(reg, rs, lead, timing={"confirm": True}, by="t")
+    both("two raids, confirmation on", rs.events[lead.key])
+    reg.seed_test_members(6, "t")  # a test event: the puppets' DMs come to the tester
+    t = open_test_run(reg, rs, days=13)
+    join(reg, rs, t, reg.test_members()[:6])
+    t.layout = [[m.display_name for m in reg.test_members()[:3]]]
+    both("a test event, three of six placed", t)
     for m in ms:
         m.dm_opt_out = dms[m.discord_id]
 
@@ -952,7 +971,7 @@ def box_cases(reg, rs, runs, ms, dump):
         """The lock that fills (auto-fill ticked, or a complete board with no choice): its rule head and who is told,
         after the open slots sentence when one leads. The lock as it stands of the same board is linted beside it."""
         b = cq.lock_box(reg, ev, rs, fill=True)
-        body = [x for x in b["sentences"] if " open slot" not in x]
+        body = [x for x in b["sentences"] if not re.search(r"\d+ open slots?\b", x)]
         assert head is None or body[0] == head, (case, b)
         assert told is None or body[1] == told, (case, b)
         add("lock_box", case, b)
@@ -970,7 +989,7 @@ def box_cases(reg, rs, runs, ms, dump):
                f"Everyone rostered gets {cq.CONFIRM_DM}.")
     b1.layout = [[ms[0].display_name]]
     bench_case("open recurring, one placed, Bench answers", b1,
-               "The lock keeps the board and fills open seats from those who joined, then from the bench.")
+               "The lock keeps the board and fills open slots from those who joined, then from the bench.")
     b1.auto_placed = [ms[8].display_name]
     b1.layout = [[ms[0].display_name, ms[8].display_name]]
     bench_case("open recurring, a Bench place Auto-fill made", b1, cq.AUTO_AGAIN)
@@ -996,7 +1015,7 @@ def box_cases(reg, rs, runs, ms, dump):
     k = rc.groups_per_roster(reg, rc.run_size(reg, b1))
     b1.layout = [[] for _ in range(k)] + [[ms[8].display_name]]  # a Bench answer placed in a second roster's group
     bench_case("open recurring, a Bench answer placed in a second roster", b1,
-               "The lock keeps the board and fills open seats from those who joined, then from the bench.",
+               "The lock keeps the board and fills open slots from those who joined, then from the bench.",
                f"Everyone rostered gets {cq.CONFIRM_DM}.")
     b1.layout = None
     b3 = fresh_run()  # no healer joined: the benched Priest may take a seat for the healer minimum
@@ -1037,7 +1056,7 @@ def box_cases(reg, rs, runs, ms, dump):
     bench_case("two raids, a Bench place on the second decided again", pair, cq.AUTO_AGAIN)
     later.layout, later.auto_placed = [[ms[0].display_name]], []
     bench_case("two raids, one board part-filled, one empty", pair,
-               "The lock fills open seats from those who joined first, then from the bench.")
+               "The lock fills open slots from those who joined first, then from the bench.")
     later.layout = None
     for m in ms:
         m.dm_opt_out = dms[m.discord_id]

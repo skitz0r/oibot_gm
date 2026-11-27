@@ -43,11 +43,12 @@ def test_a_part_filled_board_offers_the_choice_unticked(reg, rs):
     b = cq.lock_box(reg, ev, rs)
     assert b["choice"] == {"label": "Auto-fill empty roster slots", "value": False} and b["verb"] == "Lock"
     assert PAGE_WORDS["lock_fill"] == "Auto-fill empty roster slots"
-    assert b["sentences"] == ["The roster has 4 open slots.", "Only the 6 people on the board are rostered.", cq.LOCK_PAUSE]
+    assert b["sentences"] == ["The roster has 4 open slots.", "Only the 6 people on the board are rostered and get the Confirm or Can't make it DM.", cq.LOCK_PAUSE]
+    assert cq.LOCK_PAUSE == "Automated Fill Requests pause until an officer resumes them from the event."
     f = cq.lock_box(reg, ev, rs, fill=True)
     assert f["choice"] == {"label": "Auto-fill empty roster slots", "value": True}
     assert f["sentences"] == ["The roster has 4 open slots.",
-                              "Everyone on the board keeps their place, and the lock fills the open seats from Not placed.",
+                              "Everyone on the board keeps their place, and the lock fills the open slots from Not placed.",
                               f"Everyone rostered gets {cq.CONFIRM_DM}."]
     assert f["fp"] != b["fp"], "the fingerprint covers the choice"
     assert f["title"] == b["title"]
@@ -57,11 +58,11 @@ def test_as_it_stands_with_asks_off_or_paused_says_who_is_asked(reg, rs):
     ev, ms = ten(reg, rs, placed=6)
     ev.autofill_paused = True
     b = cq.lock_box(reg, ev, rs)
-    assert b["sentences"] == ["The roster has 4 open slots.", "Only the 6 people on the board are rostered.",
-                              f"The 6 rostered get {cq.CONFIRM_DM}."]
+    assert b["sentences"] == ["The roster has 4 open slots.", "Only the 6 people on the board are rostered and get the Confirm or Can't make it DM.", cq._lock_deadline(reg, ev)], "paused already: the deadline"
     ev.autofill_paused = False
     ms[0].dm_opt_out = True
-    assert cq.lock_box(reg, ev, rs)["sentences"][2] == cq.LOCK_PAUSE, "the pause leads the third sentence"
+    assert cq.lock_box(reg, ev, rs)["sentences"][1:] == [
+        "Only the 6 people on the board are rostered, and 1 of them sees the ask on the site.", cq.LOCK_PAUSE]
 
 
 def test_a_name_kept_on_off_the_board_is_named(reg, rs):
@@ -69,7 +70,7 @@ def test_a_name_kept_on_off_the_board_is_named(reg, rs):
     ev.pins[str(ms[8].discord_id)] = "in"
     assert rc.lock_left_out(reg, rs, ev) == [ms[8].display_name]
     b = cq.lock_box(reg, ev, rs)
-    assert b["sentences"][1] == f"Only the 6 people on the board are rostered, so {ms[8].display_name} is not."
+    assert b["sentences"][0] == f"The roster has 4 open slots, and {ms[8].display_name} is not rostered."
 
 
 def test_an_empty_board_refuses_the_unticked_lock_and_keeps_the_choice(reg, rs):
@@ -82,14 +83,30 @@ def test_an_empty_board_refuses_the_unticked_lock_and_keeps_the_choice(reg, rs):
     assert len(f["sentences"]) == 3, "an empty board's fill box is today's box"
 
 
-def test_a_complete_board_is_todays_box_with_no_choice(reg, rs):
+def test_a_board_with_no_open_slot_is_todays_box_with_no_choice(reg, rs):
     ev, ms = ten(reg, rs, placed=10)
     b = cq.lock_box(reg, ev, rs)
     assert "choice" not in b and b["sentences"][0] == "The board becomes the roster for Barrow Deeps."
     assert cq.lock_box(reg, ev, rs, fill=True) == b, "no choice: the fill asked for changes nothing"
-    assert cq.lock_fill(reg, ev, rs, False) is True, "a complete board's lock is today's"
+    assert cq.lock_fill(reg, ev, rs, False) is True, "no open slot: the lock is today's"
     ev.layout = [ev.layout[0], ev.layout[1][:3]]
     assert cq.lock_fill(reg, ev, rs, False) is False and cq.lock_fill(reg, ev, rs, True) is True
+
+
+def test_everyone_placed_with_spare_slots_still_asks_first(reg, rs):
+    """The owner's ruling (fix round 1): open slots on a board where everyone who answered is placed still get the
+    choice; ticked, the lock places nobody, so the box says what ticking does — Automated Fill Requests ask."""
+    ev = schedule_event(reg, rs)
+    ms = base_eight(reg)[:6]
+    join(reg, rs, ev, ms)
+    ev.layout = [[m.display_name for m in ms[:5]], [ms[5].display_name]]
+    b = cq.lock_box(reg, ev, rs)
+    assert b["choice"]["value"] is False and b["sentences"] == [
+        "The roster has 4 open slots.", "Only the 6 people on the board are rostered and get the Confirm or Can't make it DM.", cq.LOCK_PAUSE]
+    f = cq.lock_box(reg, ev, rs, fill=True)
+    assert f["sentences"] == ["The roster has 4 open slots.", f"The 6 rostered get {cq.CONFIRM_DM}.", cq.LOCK_ASKS]
+    assert cq.LOCK_ASKS == "Automated Fill Requests then ask others to take the open slots."
+    assert cq.lock_fill(reg, ev, rs, False) is False
 
 
 def test_an_event_nobody_joined_locks_empty(reg, rs):
@@ -107,12 +124,12 @@ def test_two_raids_lead_with_the_raid_that_has_open_slots(reg, rs):
     fev.layout = [[m.display_name for m in ms[5:10]], [m.display_name for m in ms[10:15]]]
     b = cq.lock_box(reg, lead, rs)
     assert b["choice"]["value"] is False
-    assert b["sentences"][:2] == [f"The {cq._raid(reg, lead.instance)} roster has 15 open slots.",
-                                  "Only the people on each raid's board are rostered."], b
+    assert b["sentences"] == [f"The {cq._raid(reg, lead.instance)} roster has 15 open slots.",
+                              "Only the people on each raid's board are rostered, and nobody is asked to confirm.", cq.LOCK_PAUSE], b
     fev.layout = [[m.display_name for m in ms[5:8]]]
     assert cq.lock_box(reg, lead, rs)["sentences"][0] == "The rosters have 22 open slots across 2 raids."
     # ticked, the open slots lead only where they are the board's for certain: the second Barrow Deeps roster is the solve's
-    assert cq.lock_box(reg, lead, rs, fill=True)["sentences"][0] == "Everyone on the board keeps their place, and the lock fills the open seats from Not placed."
+    assert cq.lock_box(reg, lead, rs, fill=True)["sentences"][0] == "Everyone on the board keeps their place, and the lock fills the open slots from Not placed."
 
 
 def test_the_slot_sentences():
@@ -222,7 +239,7 @@ class LockBot:
     def __init__(self, rs):
         self.raids, self.calls = type("S", (), {"store": lambda _s, _r: rs})(), []
 
-    async def lock_run(self, reg, rs, ev, by="scheduler", fill=True):
+    async def lock_run(self, reg, rs, ev, by="scheduler", fill=True, by_person=False):
         self.calls.append(("lock_run", ev.key, by, fill))
         ev.state = "locked"
         return f"{ev.key}: locked by {by}"
@@ -289,8 +306,46 @@ def test_pause_and_resume_act_on_every_raid_of_the_event(reg, rs):
 def test_one_lock_box_with_the_choice_on_both_pages():
     src = ROOT / "frontend" / "src"
     lb = (src / "components" / "events" / "LockBox.tsx").read_text()
-    assert ".choice.label" in lb and "<Checkbox" in lb and "replace(b)" in lb and "/preview`" in lb and "fill: now.fill" in lb
-    assert "seen: fp, fill: now.fill" in lb, "the press carries the choice on screen"
+    assert ".choice.label" in lb and "<Checkbox" in lb and "replace(b)" in lb and "/preview`" in lb
+    assert "seen: fp, fill: fillOf()" in lb, "the press carries the choice of the box on screen"
+    assert "if (n !== seq) return null" in lb and "useSyncExternalStore(store.sub, store.get)" in lb, "only the latest answer lands; no stale copy"
+    more = (src / "components" / "events" / "EventMore.tsx").read_text()
+    assert more.count("/pause`") == 2 and 'key="pause"' in more, "Pause / Resume once, for the whole event"
     sheet = (src / "components" / "board" / "SheetCard.tsx").read_text()
     events = (src / "pages" / "Events.tsx").read_text()
     assert "function LockModal" not in sheet and "useLockBox" in sheet and "useLockBox" in events
+
+
+# ---------------------------------------------------------------- fix round 1: the parser and the review lines
+
+@pytest.mark.parametrize("value,fill", [
+    ("fill", True), ("and auto-fill", True), ("fill the empty slots", True), ("auto fill empty roster slots", True),
+    ("Auto-Fill", True), ("lock and fill", True), ("autofill", True), ("true", True),
+    (None, False), ("", False), ("as it stands", False), ("no fill", False), ("don't fill", False), ("without auto-fill", False),
+    ("whatever this means", False), ("board", False)])
+def test_the_fill_wording_never_refuses(value, fill):
+    assert configops._lock_fill_value(ConfigOp(op="run_lock", target="x", value=value)) is fill
+
+
+def test_plain_text_lock_review_reads_the_box(reg, rs):
+    ev, ms = ten(reg, rs, placed=6)
+    ev.pins[str(ms[8].discord_id)] = "in"
+    rs.save(ev, "pin (test)")
+    d = configops.describe(reg, ConfigOp(op="run_lock", target=ev.key))
+    want = " ".join(cq.lock_box(reg, rs.events[ev.key], rs)["sentences"])
+    assert d.endswith("now as the board stands. " + want), d
+    assert "is not rostered" in d and cq.LOCK_PAUSE in d
+
+
+def test_plain_text_pause_review_names_the_whole_event(reg, rs):
+    lead, fev, _ms = _pair_with_lead_board(reg, rs)
+    lead.autofill_paused = True
+    rs.save(lead, "paused (test)")
+    d = configops.describe(reg, ConfigOp(op="run_pause", target=lead.key, value="pause"))
+    assert d.startswith("every raid of ") and "already" not in d, "the later raid would still flip"
+    for p in (lead, fev):
+        p.autofill_paused = True
+        rs.save(p, "paused (test)")
+    assert "already paused" in configops.describe(reg, ConfigOp(op="run_pause", target=lead.key, value="pause"))
+    r = configops.describe(reg, ConfigOp(op="run_pause", target=fev.key, value="resume"))
+    assert r.startswith("every raid of ") and "fill asks may go out" in r and "Hyjal Summit and Barrow Deeps" in r, r

@@ -2120,14 +2120,13 @@ def _pause_value(op: ConfigOp) -> bool:
 
 
 def _lock_fill_value(op: ConfigOp) -> bool:
-    """run_lock's fill choice (issue 14): "lock and fill …" → True; anything else → False, the board as it stands (a
-    person's lock follows the site's unticked Auto-fill empty roster slots)."""
-    v = (op.value or "").strip().lower().replace("-", "").replace(" ", "")
-    if v in ("", "asitstands", "asis", "board", "nofill", "false", "no", "off"):
+    """run_lock's fill choice (issue 14): any wording that asks to fill ("fill", "and auto-fill", "fill the empty slots",
+    "auto fill empty roster slots") → True; a negation or anything else → False, the board as it stands (a person's lock
+    follows the site's unticked Auto-fill empty roster slots). Never refuses: unknown wording is the safe lock."""
+    v = " " + re.sub(r"[^a-z]+", " ", (op.value or "").lower()) + " "
+    if any(f" {no} " in v for no in ("no", "not", "without", "dont", "don", "never", "false", "off")):
         return False
-    if v in ("fill", "autofill", "andfill", "true", "yes", "on"):
-        return True
-    raise RegistryError("run_lock is fill, or empty to lock as the board stands")
+    return "fill" in v.replace(" ", "") or v.strip() in ("true", "yes", "on")
 
 
 RUN_VERBS_AUDITED = {"run_cancel", "run_remind", "run_pause", "run_withdraw", "run_reopen", "run_reschedule", "run_lineup"}  # the RaidMixin verb writes ops.audited itself
@@ -3019,9 +3018,16 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         paused = _pause_value(op)
         if ev.state not in ("open", "locked"):
             raise RegistryError(f"{label} is {ev.state}")
-        if bool(ev.autofill_paused) == paused:
-            return f"{label}: Automated Fill Requests are already {'paused' if paused else 'on'} — nothing changes"
-        return f"{label}: {'pause Automated Fill Requests — nothing goes out on its own; an officer’s Fill seats… still sends' if paused else 'resume Automated Fill Requests — open seats are asked for again on the next pass'}"
+        # the whole event, as RaidMixin.set_autofill_paused applies it: every raid still live, named once
+        parts = [p for p in rc.event_parts(rs, ev) if p.state not in ("done", "cancelled")] or [ev]
+        whom = f"every raid of {run_words(reg, rc.first_part(rs, ev))}" if len(parts) > 1 else label
+        flip = [p for p in parts if bool(p.autofill_paused) != paused]
+        if not flip:
+            return f"{whom}: Automated Fill Requests are already {'paused' if paused else 'on'} — nothing changes"
+        if paused:
+            return f"{whom}: pause Automated Fill Requests — nothing goes out on its own; an officer’s Fill seats… still sends"
+        raids = rc.join_words([reg.raid_def(p.instance).get("name", p.instance) for p in flip]) if len(parts) > 1 else "the event"
+        return f"{whom}: resume Automated Fill Requests — fill asks may go out for the open seats of {raids} on the next pass"
     if op.op == "run_withdraw":
         m = _need_member(reg, op.member)
         ask = next((a for a in ev.fill_asks if a.discord_id == m.discord_id and a.pending), None)
@@ -3073,14 +3079,16 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
 
         if ev.state != "open":
             raise RegistryError(f"{label} is already {ev.state}")
-        fill = lock_fill(reg, ev, rs, _lock_fill_value(op))
-        if not fill:  # as the board stands: an empty board is refused here, at the review, never at the lock
-            if (why := rc.lock_empty_refusal(reg, rs, ev)) is not None:
-                raise RegistryError(why)
-            placed = sum(len(g) for g in rc.board_layout(reg, ev))
-            return f"lock {label} now as the board stands: the {placed} on the board rostered, cards in the roster channel, confirmation DMs to everyone rostered"
-        how = "and auto-fill the empty roster slots" if _lock_fill_value(op) else ""
-        return f"lock {label} now{' ' + how if how else ''}: roster built from {len(ev.by_status('in'))} joined ({rc.pin_summary(ev)}), cards in the roster channel, confirmation DMs to everyone rostered"
+        from .consequences import lock_box
+
+        asked = _lock_fill_value(op)
+        fill = lock_fill(reg, ev, rs, asked)
+        if not fill and (why := rc.lock_empty_refusal(reg, rs, ev)) is not None:
+            raise RegistryError(why)  # as the board stands with nobody on it: refused here, at the review, never at the lock
+        b = lock_box(reg, ev, rs, fill=asked)  # the box's own sentences: the same facts the site and Discord print
+        if b.get("choice"):
+            return f"lock {label} now {'and auto-fill the empty roster slots' if fill else 'as the board stands'}. " + " ".join(b["sentences"])
+        return f"lock {label} now: roster built from {len(ev.by_status('in'))} joined ({rc.pin_summary(ev)}), cards in the roster channel, confirmation DMs to everyone rostered"
     if op.op == "run_cancel":
         from .consequences import consequence
 
@@ -3862,7 +3870,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         fill = lock_fill(reg, ev, rs, _lock_fill_value(op))  # a person's lock: as the board stands unless "lock and fill"
         if not fill and (why := rc.lock_empty_refusal(reg, rs, ev)) is not None:
             raise RegistryError(why)  # refused before the lock: never its failure path
-        line = await bot.lock_run(reg, rs, ev, by=by, fill=fill)
+        line = await bot.lock_run(reg, rs, ev, by=by, fill=fill, by_person=True)
         if ev.lock_error:
             raise RegistryError(ev.lock_error)
         return str(line)

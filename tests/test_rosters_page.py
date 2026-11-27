@@ -296,7 +296,7 @@ def test_end_reads_the_reopen_window_from_code(reg, rs, monkeypatch):
 def test_ev_json_carries_every_board_sentence_with_tokens_for_the_names(reg, rs, c):
     ev, _ = locked_ten(reg, rs, asks=True)
     j = c.get(f"/api/run/{ev.key}", headers=bearer()).json()["consequences"]
-    assert set(j) == set(cq.VERBS) | {"release_named"}
+    assert set(j) == (set(cq.VERBS) - {"lock"}) | {"release_named"}, "the lock's sentence is the lock box's (issue 14)"
     for verb in cq.BOARD_VERBS:
         assert cq.NAME_TOKEN in j[verb] and j[verb] == " ".join(cq.consequence(verb, reg, ev, name=cq.NAME_TOKEN, other=cq.OTHER_TOKEN, to=cq.TO_TOKEN))
     assert cq.TO_TOKEN in j["move"] and cq.OTHER_TOKEN in j["substitute"]

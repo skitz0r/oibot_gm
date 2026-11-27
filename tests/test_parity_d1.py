@@ -658,7 +658,7 @@ def test_card_lock_button_answers_a_busy_or_locked_run_quietly(reg, rs, why):
     async def go():
         await RunButton(reg.key, ev.key, "lock").callback(h.card_press())  # the decide screen (consequence · Lock now · Back)
         await h.press("Lock and auto-fill")  # the lock that fills: its own screen and box (issue 14)
-        assert "The lock builds the roster for Barrow Deeps from those who joined." in h.text and h.buttons() == ["Lock and auto-fill", "Preview lock", "Back"]
+        assert "Nobody has joined yet, so nobody is asked to confirm." in h.text and h.buttons() == ["Lock and auto-fill", "Preview lock", "Back"]
         await h.press("Lock and auto-fill")
 
     asyncio.run(go())

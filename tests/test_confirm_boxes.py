@@ -100,6 +100,7 @@ def test_the_word_helpers(reg, rs):
 
 def test_lock_box_names_the_lineup_and_says_one_off_rules(reg, rs):
     ev = one_off(reg, rs)
+    join(reg, rs, ev, people(reg, 4))  # people to place: the ticked box states the fill rule (nobody joined: what ticking does)
     b = cq.lock_box(reg, ev, fill=True)
     assert b["title"] == f"Lock {reg.local12(ev.starts_at)}?" and b["verb"] == "Lock" and not b["danger"]
     assert b["sentences"] == ["The lock builds the roster for Hyjal Summit and both Barrow Deeps rosters from those who joined.",
@@ -110,7 +111,8 @@ def test_lock_box_names_the_lineup_and_says_one_off_rules(reg, rs):
 def test_lock_box_on_a_scheduled_event_says_who_confirms(reg, rs):
     sid = tuesday(reg)
     ev = rc.open_run(reg, rs, HYJAL, next_tuesday(reg, sid), schedule=sid)
-    assert cq.lock_box(reg, ev, fill=True)["sentences"][1:] == ["Nobody has joined yet, so nobody is asked to confirm."]
+    # nobody joined: ticking places nobody, so the ticked box says what it then does (fix round 1)
+    assert cq.lock_box(reg, ev, fill=True)["sentences"][1:] == ["Nobody has joined yet, so nobody is asked to confirm.", cq.LOCK_ASKS]
     join(reg, rs, ev, people(reg, 20))
     s = cq.lock_box(reg, ev, fill=True)["sentences"]
     assert s[0] == "The lock builds the roster for Hyjal Summit and both Barrow Deeps rosters from those who joined."
@@ -131,7 +133,7 @@ def test_lock_box_says_what_the_board_becomes(reg, rs):
     names = [x.display_name for x in ev.by_status("in")]
     ev.layout = [names[:2]]
     part = cq.lock_box(reg, ev, rs, fill=True)["sentences"]
-    assert part[0] == "Everyone on the board keeps their place, and the lock fills the open seats from Not placed."
+    assert part[0] == "Everyone on the board keeps their place, and the lock fills the open slots from Not placed."
     assert cq.consequence("lock", reg, ev, rs=rs)[0] == part[0], "the Discord screen and the site say the same"
     for p in parts:  # every raid's board holds everyone who joined: nobody is left under Not placed
         here = [x.display_name for x in p.by_status("in")]

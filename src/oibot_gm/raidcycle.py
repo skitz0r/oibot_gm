@@ -5060,7 +5060,7 @@ def board_complete(reg: Registry, rs, p: RaidEvent) -> bool:
 
 # a lock as it stands with people who answered and nobody on the board: one sentence with the way out (the scheduler's
 # lock stores it as its lock_error, so it is also what the officers' line and the sheet's footer say)
-LOCK_EMPTY_BOARD = "Nobody is on the board, so place someone or lock with auto-fill to fill the empty seats."
+LOCK_EMPTY_BOARD = "Nobody is on the board, so place someone or lock with auto-fill to fill the open slots."
 LOCK_EMPTY_RAID = "Nobody is on the {raid} board, so place someone or lock with auto-fill."  # an event of several raids
 
 

@@ -186,8 +186,6 @@ async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=No
     RaidMixin.lock_run with the screen's `fill`, after the screen has acknowledged the press."""
     from .configops import report_error
     from .consequences import lock_box, lock_fill
-    from .constants import CONFIRM_WORDS
-    from .wizard import box_text
 
     wiz = wiz or officer_wizard(bot, reg, interaction, f"Lock {raid_name(reg, ev)}")
     key = ev.key
@@ -212,7 +210,7 @@ async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=No
             await wiz.finish(i, why)
             return
         try:
-            line = await bot.lock_run(reg, rs, cur, by=by, fill=f)
+            line = await bot.lock_run(reg, rs, cur, by=by, fill=f, by_person=True)
         except RegistryError as e:  # someone else is locking it (rc.SolverBusy), or it stopped being open: nothing happened
             await wiz.finish(i, str(e))
             return
@@ -253,18 +251,9 @@ async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=No
     def extras() -> list:
         return ([wiz.button(RUN_WORDS["lock_fill"], with_fill)] if two else []) + [wiz.button(RUN_WORDS["preview_lock"], preview)]
 
-    if two and b["verb"] is None:  # nobody on the board: the refusal, and the lock that fills is still there to press
-        async def nothing(i: discord.Interaction) -> None:
-            await wiz.finish(i, "Nothing was changed.")
-
-        heading, wiz.heading = wiz.heading, False  # one heading: the box's title, as decide_box shows it
-        try:
-            await wiz.show(interaction, box_text(b), wiz.button(RUN_WORDS["lock_fill"], with_fill, discord.ButtonStyle.success),
-                           wiz.button(CONFIRM_WORDS["back"], nothing, discord.ButtonStyle.secondary))
-        finally:
-            wiz.heading = heading
-        return
-    await wiz.decide_box(interaction, b, do=do, refresh=box, back=first if asked else None, extra=extras())
+    # nobody on the board: the refusal keeps Lock and auto-fill, so the lock that fills is still there to press
+    refused = [wiz.button(RUN_WORDS["lock_fill"], with_fill, discord.ButtonStyle.success)] if two else []
+    await wiz.decide_box(interaction, b, do=do, refresh=box, back=first if asked else None, extra=extras(), refused=refused)
 
 
 async def cancel_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=None) -> None:

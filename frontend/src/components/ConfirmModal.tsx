@@ -8,7 +8,7 @@ export type ConfirmResult = false | true | { note: string };
 type Pending = ConfirmOpts & { resolve: (r: ConfirmResult) => void };
 
 /** A promise-flavoured confirm dialog (Mantine Modal): `const [ask, dialog] = useConfirm(); if (!(await ask({ message }))) return;` — render `dialog` once.
- *  The message is the consequence sentence the SERVER composed (e.g. `sheet.consequences.lock`); a page never writes its own promise of what the bot will do. */
+ *  The message is the consequence sentence the SERVER composed (e.g. `sheet.consequences.cancel`); a page never writes its own promise of what the bot will do. */
 export function useConfirm(): [(o: ConfirmOpts) => Promise<ConfirmResult>, React.ReactNode] {
   const [pending, setPending] = useState<Pending | null>(null);
   const [note, setNote] = useState("");

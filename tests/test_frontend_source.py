@@ -1244,7 +1244,7 @@ def test_the_events_page_asks_with_the_servers_box_and_lives():
     assert 'useLive(load, ["run:", "member", "config"])' in page and "usePoll(load)" in page
     assert "ev.boxes.lock" in page and "lockBox(ev.key, { box: ev.boxes.lock })" in page, "the lock box with its choice (LockBox)"
     lock = _code_only((SRC / "components" / "events" / "LockBox.tsx").read_text())
-    assert "`/api/run/${encodeURIComponent(key)}/lock`" in lock and "{ seen: fp, fill: now.fill }" in lock
+    assert "`/api/run/${encodeURIComponent(key)}/lock`" in lock and "{ seen: fp, fill: fillOf() }" in lock
     assert "ev.boxes.cancel" in page and "{ seen: fp, notify: false }" in page and "{ preview: true }" in page
     assert "ev.actions.edit_lineup" in page, "Edit lineup (Task 10) only while the event may change its raids"
     assert "Show older" in page and "history_offset=" in page and 'to="/events/new"' in page

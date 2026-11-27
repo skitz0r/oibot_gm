@@ -118,9 +118,10 @@ def test_ev_json_carries_the_consequences_so_the_browser_never_composes_them(reg
     start = (reg.now_local() + timedelta(days=2, hours=3)).replace(second=0, microsecond=0)
     adhoc = rc.open_run(reg, rs, "barrow_deeps", start, by="t", schedule=rc.ADHOC_SCHEDULE)
     d = c.get(f"/api/run/{adhoc.key}", headers=bearer()).json()
-    assert d["consequences"]["lock"] == "The lock builds the roster for Barrow Deeps from those who joined. Nobody is asked to confirm. You can still move people after the lock."
-    assert "DM" not in d["consequences"]["lock"], "the old SheetCard text promised confirmation DMs on ad hoc runs (§4 item 5)"
-    assert set(d["consequences"]) == set(consequences.VERBS) | {"release_named"}
+    # the lock's sentence is the lock box's now (POST /lock preview, issue 14): ev_json no longer carries the fill rule
+    assert "lock" not in d["consequences"] and set(d["consequences"]) == (set(consequences.VERBS) - {"lock"}) | {"release_named"}
+    assert consequences.consequence("lock", reg, adhoc) == ["The lock builds the roster for Barrow Deeps from those who joined.",
+                                                          "Nobody is asked to confirm.", "You can still move people after the lock."]
     from pathlib import Path
 
     sheet = Path(__file__).resolve().parents[1] / "frontend" / "src" / "components" / "board" / "SheetCard.tsx"
@@ -341,7 +342,7 @@ def test_lock_card_button_locks_on_the_press_and_reports_a_bug_with_the_generic_
     join(reg, rs, ev, reg.test_members()[:3])
     state = {"fail": False}
 
-    async def lock_run(reg_, rs_, ev_, by="scheduler", fill=True):
+    async def lock_run(reg_, rs_, ev_, by="scheduler", fill=True, by_person=False):
         if state["fail"]:
             raise RuntimeError("solver exploded")
         ev_.state, ev_.lock_error = "locked", None

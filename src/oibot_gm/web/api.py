@@ -1041,8 +1041,10 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 "log": list(ev.log),  # the machine form; `log_rows` = the same lines with stamps in words, officer-only marked
                 "log_rows": rc.log_rows(reg, ev),
                 "health": health_json(reg, ev, t) if ev.state == "open" else None,
-                # the confirm sentences for lock / cancel / clear / release, from code (consequences.py): the browser prints, never composes
-                "consequences": consequences_json(reg, ev, rs),
+                # the confirm sentences for cancel / clear / release and the board's moves, from code (consequences.py): the browser
+                # prints, never composes. Not the lock's: a person's lock is the lock box (POST /lock preview, issue 14), and the
+                # fill rule sentence would describe a lock a person no longer gets by default
+                "consequences": {k: v for k, v in consequences_json(reg, ev, rs).items() if k != "lock"},
                 # where the run lives in Discord (sheet, updates thread, loot thread) and its loot council in one line (design §2.5)
                 "links": links_json(reg, ev), "loot": loot_json(reg, ev),
                 **night_json(reg, rs, ev, t, plan)}
@@ -1673,7 +1675,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         if not fill and (why := rc.lock_empty_refusal(v.reg, rs, ev)) is not None:  # MCP (no seen): the same refusal
             return JSONResponse({"error": why, "box": cq.lock_box(v.reg, ev, rs, fill=False)}, status_code=400)
         try:  # lock_run holds the run's solver single-flight and board lock itself
-            line = await bot.lock_run(v.reg, rs, ev, by=v.name, fill=fill)
+            line = await bot.lock_run(v.reg, rs, ev, by=v.name, fill=fill, by_person=True)
         except RegistryError as e:  # rc.SolverBusy (someone else is locking it), or no longer open
             return JSONResponse({"error": str(e)}, status_code=409)
         except RuntimeError as e:  # lock_run catches the solver itself; this is the belt to its braces

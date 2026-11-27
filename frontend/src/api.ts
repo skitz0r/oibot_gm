@@ -572,7 +572,7 @@ export interface Sheet {
   /** the confirm sentences, from the server (consequences.py) — the browser prints them, never composes its own;
    *  `release_named` and the board's moves (move / roster / swap / substitute) carry `{name}` / `{other}` / `{to}` where the
    *  names go (the board only substitutes them — shared.tsx fillNames); remind / end are whole sentences */
-  consequences?: { lock: string; cancel: string; clear: string; release: string; release_named?: string; move?: string; roster?: string; swap?: string; substitute?: string; remind?: string; end?: string };
+  consequences?: { cancel: string; clear: string; release: string; release_named?: string; move?: string; roster?: string; swap?: string; substitute?: string; remind?: string; end?: string };
   /** the run's loot council at a glance (web/api.py loot_json): `may_open` = locked with no council yet */
   loot?: { open: boolean; councils: number; thread: string | null; awards: number; pending: number; reasons: number; may_open: boolean;
     /** "Bosses 3 / 6" (design §3.5 L12): the slowest council's kills against the raid's bosses (total null while unlisted) */
