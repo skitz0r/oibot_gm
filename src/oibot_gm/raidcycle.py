@@ -7218,7 +7218,8 @@ def member_actions(reg: Registry, ev: RaidEvent, m: Member) -> list[dict]:
     site's row ⋮ menu read this one list): Confirm / Can't make it for their open Confirm ask · Confirm / No to their
     open fill ask · Record a callout (with an optional note; before lock it is No thanks + the callout) · Join (as
     <alt>) · Bench · No thanks (an answer change: no callout record) · Pin to roster / Keep off the roster / Unpin (open
-    sheet, on it). Each: {key, label, needs, characters?: [labels]}."""
+    sheet, on it). Each: {key, label, needs, characters?: [labels], respec?: True — a joined member's Join that picks
+    another spec before the lock: a surface with no spec field (a board's ⋮, which offers rc.raid_switch_options) leaves it out}."""
     if ev.state not in ("open", "locked"):
         return []
     s = ev.signups.get(str(m.discord_id))
@@ -7245,7 +7246,7 @@ def member_actions(reg: Registry, ev: RaidEvent, m: Member) -> list[dict]:
             add("join", "character" if len(chars) > 1 else None, characters=chars)
         elif respec:  # the role switch before the lock ("Plays which spec?"; issue 15: for the whole event or one raid)
             add("join", "character", label="Play another spec or character" if len(chars) > 1 else "Play another spec",
-                characters=[s.character] + [c for c in chars if c != s.character])
+                characters=[s.character] + [c for c in chars if c != s.character], respec=True)
         elif len(chars) > 1:
             add("join", "character", label="Join as another character", characters=[c for c in chars if c != s.character])
     elif len(chars) > 1:  # rostered: a character swap keeps the seat (set_answer reseats)

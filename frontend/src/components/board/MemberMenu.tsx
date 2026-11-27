@@ -152,7 +152,7 @@ export function MemberMenu({ run, uid, name, onDone, moves, onAnswer, switches, 
             <Menu.Item key={`play:${o.character}:${o.spec}`} leftSection={<GameIcon meta={meta} kind="spec" id={`${o.cls}:${o.spec}`} size={14} title={o.spec} />}
               onClick={() => playAs(uid, o)}>{o.label}</Menu.Item>
           ))}
-          {uid && list && withSwitches(items(list.actions), switches || []).map((it) => ("onPick" in it ? (
+          {uid && list && withSwitches(items(list.actions.filter((a) => onAnswer || !a.respec)), switches || []).map((it) => ("onPick" in it ? (
             <Menu.Item key={`switch:${it.key}`} leftSection={it.icon} onClick={it.onPick}>{it.label}</Menu.Item>
           ) : (
             <Menu.Item key={`${it.a.key}:${it.character || ""}`} leftSection={ICON[it.a.key]} color={DANGER.has(it.a.key) ? "red" : undefined}

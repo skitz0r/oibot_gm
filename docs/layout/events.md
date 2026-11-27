@@ -242,7 +242,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        a raid of the event by key, id or name (RAID_NOT_IN_EVENT); specs_of(reg, c) = THE specs a character plays
                        (event_view.plays_of reads it); switch_scopes + switch_box_for(scope=) + SCOPE_LABEL / SCOPE_EVENT = the Role switches
                        box's choice (a row's `scope`: "raid" when it helps fewer raids than they play). member_actions offers a joined
-                       member's join as "Play another spec (or character)" before the lock when their character plays another spec. Unlock
+                       member's join as "Play another spec (or character)" before the lock when their character plays another spec (respec True). Unlock
                        reconciles: a switch the locked seat agrees with stays (no played_as beside it); a seat changed after the lock wins
                        and the switch is dropped
                        The final fix wave (§5.67 phase 4): earlier_counts(reg, rs, ev) = a later raid's `earlier` while a raid before it is OPEN

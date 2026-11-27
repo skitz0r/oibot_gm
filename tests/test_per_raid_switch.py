@@ -490,3 +490,9 @@ def test_discord_raid_set_on_a_single_raid_event_has_no_raid_select(reg, rs, mon
         await h.pick("Plays which spec?", "Holy")
         assert h.selects() == [] and "Record answer" in h.buttons()
     asyncio.run(go())
+
+
+def test_a_joined_members_spec_switch_is_marked_for_menus_without_a_spec_field(reg, rs):
+    lead, fev, ms = evening(reg, rs)
+    join = next(a for a in rc.member_actions(reg, lead, ms[0]) if a["key"] == "join")
+    assert join["label"] == "Play another spec or character" and join["characters"] == ["Nyx", "Nyxpal"] and join["respec"] is True

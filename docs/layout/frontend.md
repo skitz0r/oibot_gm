@@ -36,7 +36,8 @@ frontend/              React + Mantine app (Vite). components/board/* (SheetCard
                        page_words.switch_item "{button}: {to}" over the row's own words, useSwitchPress — its dialog mounted on the section),
                        after Join and before Bench (MemberMenu.withSwitches); the Test bench and the members' page pass none; with `meta` (BoardView on the
                        Events page) the menu also lists GET /api/admin/actions' `raid_switches` (issue 15: a spec icon + the server's "Play as
-                       Holy in this raid") through usePlayAs = POST /api/run/{raid}/play-as preview → box → seen; board/MemberMenu's useRecord = every other ⋮ pick — callouts with a note field, pins, the confirm / fill
+                       Holy in this raid") through usePlayAs = POST /api/run/{raid}/play-as preview → box → seen; a menu with no `onAnswer` leaves out
+                       an action marked `respec` (its spec needs the answer box's field); board/MemberMenu's useRecord = every other ⋮ pick — callouts with a note field, pins, the confirm / fill
                        answers — through POST /api/admin/action preview → the server's box → seen, the Test bench's SheetCard too); EventDetails; ActivitySection; EventMore = the ⋯ More menu: Suggest… / Fill seats…, Remind, Pause / Resume, Re-post
                        the sheet…, Split strategy…, Loot, the asks out, End, Reopen, Unlock (once for the whole event, while its first raid is locked:
                        the first raid's sheet may_unlock / unlock_note — greyed with the refusal under it), Start now (right under the first raid's

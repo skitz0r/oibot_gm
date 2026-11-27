@@ -544,7 +544,9 @@ export interface MyAsk {
 export interface Notice { id: string; kind: string; text: string; run: string | null; when: string; read: boolean }
 /** What an officer may record for a member on a run (GET /api/admin/actions — rc.member_actions, the SetWizard's list), each with the
  *  consequence sentence from the server; `rev` = the member's state the list was drawn from (a stale one is a 409 naming the change). */
-export interface MemberAction { key: string; label: string; needs: "character" | "note" | null; characters?: string[]; consequence: string; by_character?: Record<string, string> }
+/** `respec`: a joined member's Join that picks another spec (it needs the answer box's spec field: a menu with no
+ *  `onAnswer` leaves it out — a raid's board offers `raid_switches` instead). */
+export interface MemberAction { key: string; label: string; needs: "character" | "note" | null; characters?: string[]; consequence: string; by_character?: Record<string, string>; respec?: boolean }
 /** A role switch for this raid alone (issue 15, rc.raid_switch_options): the board ⋮ menu's "Play as Holy in this raid". */
 export interface RaidSwitchOption { character: string; spec: string; cls: string; label: string }
 export interface MemberActions { uid: string; display_name: string; run: string; actions: MemberAction[]; rev: string; now: string; raid_switches?: RaidSwitchOption[] }
