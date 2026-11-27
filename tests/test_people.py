@@ -51,7 +51,7 @@ class PeopleBot(Bot):
         self.fills.append((ev.key, by))
         return [], {}
 
-    async def post_run_update(self, reg, ev, text):
+    async def post_run_update(self, reg, ev, text, *, whole=False):
         self.updates.append((ev.key, text))
 
     async def send_member_dm(self, reg, m, text=None, view=None, ev=None):

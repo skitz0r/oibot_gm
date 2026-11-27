@@ -76,7 +76,8 @@ def test_a_name_kept_on_off_the_board_is_named(reg, rs):
 def test_an_empty_board_warns_on_the_unticked_lock_and_keeps_the_choice(reg, rs):
     ev, ms = ten(reg, rs, placed=0)
     b = cq.lock_box(reg, ev, rs)
-    assert b["verb"] == "Lock" and b["sentences"][1] == rc.LOCK_EMPTY_WARN_ONE and b["choice"]["value"] is False
+    assert b["verb"] == "Lock" and b["sentences"][:2] == [rc.LOCK_EMPTY_WARN_ONE, f"The {len(ms)} who joined each get a Not rostered notice."]
+    assert b["choice"]["value"] is False
     assert b["title"] == cq.lock_box(reg, ev, rs, fill=True)["title"]
     f = cq.lock_box(reg, ev, rs, fill=True)
     assert f["verb"] == "Lock" and f["sentences"][0] == "The lock builds the roster for Barrow Deeps from those who joined."

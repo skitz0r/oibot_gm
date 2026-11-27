@@ -104,6 +104,10 @@ PAGE_WORDS = {
     "sheet_waits": "Posts once a signup channel is set on the Config page's Channels tab", "sheet_not_posted": "Not in Discord yet",
     # a locked Board's empty seat a minimum wants (beside its role icon)
     "open_seat": "open seat",
+    # the sheet card's Cancel box fields (the box itself is consequences.cancel_box): the reason and the members' line
+    "cancel_reason": "Why? (optional)",
+    "cancel_reason_hint": "Officers read it in the event's updates thread and the ops feed. Members never see it.",
+    "cancel_notify": "Post a line in the thread on the signup sheet, without the reason",
     # the Board's Not placed list before the lock: a name kept off through the ⋮ menu (an "out" pin) carries this word on
     # its line (the list carries no how-to sentence under its heading: issue #12, the owner, 2026-11-25)
     "kept_off": "kept off",

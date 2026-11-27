@@ -551,6 +551,11 @@ def _lock_as_it_stands(reg: Registry, ev: rc.RaidEvent, rs, parts: list[rc.RaidE
     if empty and _words(first) > 20:  # the raids' names don't fit beside the names left off: a count of the boards
         first = _with_left(rc.LOCK_EMPTY_WARN_COUNT.format(n=len(rc.lock_empty_raids(reg, rs, ev))), left)
     lines = [first, _rostered_told(reg, ev, many, names, cands, plan)]
+    joined = len(ev.by_status("in"))
+    if not many and not names and joined:  # one raid locked empty (F3): "locks empty" says the slots, so who is told takes
+        # their place — everyone who joined gets the Not rostered notice (a lineup keeps who its rostered are asked)
+        lines = [rc.LOCK_EMPTY_WARN_ONE, "The one person who joined gets a Not rostered notice." if joined == 1
+                 else f"The {joined} who joined each get a Not rostered notice."]
     if rc.run_confirms(reg, ev) and (closes := _closes(reg, plan)):
         lines.append(closes)  # after an unlock: an ask that closes surprises more than the pause or the deadline
     elif _asks_on(reg, ev):

@@ -5647,6 +5647,7 @@ UNLOCK_CANCELLED = "A cancelled event can't be unlocked."
 UNLOCK_STARTED = "This event has already started, so it can't be unlocked."
 UNLOCK_LOOT = "A loot council is open on this event, so it can't be unlocked."
 UNLOCK_SENDING = "The lock is still sending its cards and DMs, so the event can't be unlocked yet."
+LOCK_UNLOCKING = "The unlock is still tidying the event's Discord cards, so it can't lock for a few seconds."
 # the signup sources a seat freed AFTER the lock leaves (free_seat writes its `why` there) that were not the member's own
 # word: their confirmation ran out, or an officer moved them off the roster on the board. An unlock puts them back to Join
 UNLOCK_RETURNS = ("no-confirm", "moved to bench")

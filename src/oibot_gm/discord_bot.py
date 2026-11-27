@@ -722,7 +722,13 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
     async def close(self) -> None:
         """Shutdown: send the puppet digests still waiting in their quiet window (the tester's one DM per batch — lost
         at a restart otherwise), push any unpushed data-repo commits, stop the feed listener, then disconnect. Every
-        step is bounded, so a stopping bot always lets go of its ports (launchd waits ExitTimeOut, then kills it)."""
+        step is bounded, so a stopping bot always lets go of its ports (launchd waits ExitTimeOut, then kills it).
+        First the verbs' Discord edits still running behind an answer (RaidMixin.finish_later) get a few seconds; any
+        left are logged by event."""
+        try:
+            await self.finish_pending(timeout=5)
+        except Exception as e:  # noqa: BLE001 — the verbs are written; only their Discord edits are behind
+            log.warning("shutdown: pending Discord edits not awaited: %s", type(e).__name__)
         try:
             await asyncio.wait_for(self.flush_puppet_digests(), timeout=5)
         except Exception as e:  # noqa: BLE001 — the test feed still has each DM until the process ends

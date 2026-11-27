@@ -693,7 +693,7 @@ async def open_raid_loot(interaction: discord.Interaction, reg: Registry, *, key
 @flow("raid_cancel")
 async def open_raid_cancel(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
     """/raid cancel — the run picker when several are live, then THE cancel screen (raid_buttons.cancel_decide: the
-    consequence, then one Form with the optional reason and "Tell the channel?"; nobody is DMed). The card's Cancel run
+    consequence, then one Form with the optional reason and "Tell the members?" (a line in the thread on the sheet); nobody is DMed). The card's Cancel run
     shows the same screen."""
     if not await officer_only(interaction, reg):
         return

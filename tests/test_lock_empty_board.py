@@ -48,9 +48,9 @@ def test_the_box_warns_in_one_sentence_and_lock_stays_pressable(reg, rs):
     ev, _ms = empty_board(reg, rs)
     assert rc.lock_empty_refusal(reg, rs, ev) == rc.LOCK_EMPTY_BOARD, "the clock's lock still refuses it"
     b = cq.lock_box(reg, ev, rs)
-    slots = rc.lock_open_slots(reg, rs, ev)[0]
     assert b["verb"] == "Lock" and b["choice"] == {"label": b["choice"]["label"], "value": False}
-    assert b["sentences"] == [f"The roster has {slots} open slots.", rc.LOCK_EMPTY_WARN_ONE, cq.LOCK_PAUSE]
+    # "locks empty" says the slots; who is told takes their place in the three (Confirm rule order)
+    assert b["sentences"] == [rc.LOCK_EMPTY_WARN_ONE, "The 8 who joined each get a Not rostered notice.", cq.LOCK_PAUSE]
 
 
 def test_a_lineup_with_an_empty_later_board_warns_naming_the_raid(reg, rs):
@@ -121,13 +121,25 @@ def test_plain_text_locks_an_empty_board_after_its_review(reg, rs):
     assert rs.events[ev.key].state == "locked" and not rs.events[ev.key].seated()
 
 
-def test_discord_lock_as_it_stands_locks_an_empty_board():
-    """raid_buttons.lock_decide no longer refuses an empty board before lock_run (the box warns instead)."""
-    import inspect
+def test_discord_lock_as_it_stands_locks_an_empty_board(reg, rs):
+    """The /raid lock screen on an empty board: Lock as it stands goes through lock_decide to the real lock, which
+    writes the empty roster (no refusal on the way)."""
+    from test_lock_box_choice import _card
 
-    from oibot_gm import raid_buttons
+    ev, _ms = empty_board(reg, rs)
+    h, fake = _card(reg, rs, ev)
+    real = NightBot(reg, rs)
 
-    assert "lock_empty_refusal" not in inspect.getsource(raid_buttons.lock_decide)
+    async def lock_run(reg_, rs_, ev_, by="scheduler", fill=True, by_person=False):
+        fake.calls.append(("lock_run", ev_.key, by, fill, by_person))
+        return await real.lock_run(reg_, rs_, ev_, by=by, fill=fill, by_person=by_person)
+
+    fake.lock_run = lock_run
+    assert "Lock as it stands" in h.buttons() and rc.LOCK_EMPTY_WARN_ONE in h.text
+    run(h.press("Lock as it stands"))
+    assert [c for c in fake.calls if c[0] == "lock_run"] == [("lock_run", ev.key, "Tester", False, True)]
+    ev = rs.events[ev.key]
+    assert ev.state == "locked" and not ev.seated() and not ev.lock_error
 
 
 # ---------------------------------------------------------------- a deliberate empty lock is never a crashed one

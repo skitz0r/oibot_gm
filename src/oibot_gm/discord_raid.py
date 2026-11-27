@@ -25,6 +25,7 @@ from .raid_views import (CLOCK12, OUT_MARK, RELEASE_WHY, BotProto, _aura_line, _
 from .registry import Registry, RegistryError
 
 log = logging.getLogger(__name__)
+UNLOCK_WAIT_S = 20.0  # a person's lock waits this long for an unlock still editing its Discord cards (lock_run)
 
 __all__ = ["RaidContext", "RaidMixin", "RaidSchedulerMixin", "BotProto", "register_raid_commands",
            # buttons
@@ -270,14 +271,23 @@ class RaidMixin:
         return (getattr(ch, "id", None), getattr(msg, "id", None))
 
     # ---- officer cards + the event's threads
-    async def post_run_update(self, reg, ev, text: str) -> None:
+    async def post_run_update(self, reg, ev, text: str, *, whole: bool = False) -> None:
         """One officers' line about `ev` (a pause, a cancel and its reason, a failed lock, a move …) in its event's
-        updates thread (updates_thread: under the first raid's officer card, made on first use). With no card or no
+        updates thread (updates_thread: under the first raid's officer card, made on first use). The thread is the
+        whole event's, so in an event of several raids a line about one raid starts with that raid's name; `whole`
+        (an unlock, a move, Start now, a lineup edit, a pause, a cancel) says the line is the event's. With no card or no
         thread to be had, the line goes to the ops feed (officers only) — never loose in a channel, never the signup
         channel. A test run's line also goes to the test feed (the site's Test bench follows the rehearsal), which is
         where it stays when the rehearsal has no thread: a test event never writes the ops feed this way."""
         from . import testfeed
 
+        if not whole:
+            try:
+                parts = rc.event_parts(self.raids.store(reg), ev)
+            except Exception:  # noqa: BLE001 — a store-less fake: the line as it is
+                parts = [ev]
+            if len(parts) > 1:
+                text = f"{reg.raid_def(ev.instance).get('name', ev.instance)}: {text}"
         testfeed.note(reg, ev, "step", text, name_of=self._channel_name)
         thread = await self.updates_thread(reg, ev)
         if thread is not None:
@@ -343,7 +353,8 @@ class RaidMixin:
             first.updates_thread_id = thread.id
             await asyncio.to_thread(rs.save, first, "updates thread")
             return thread
-        log.warning("no updates thread for %s: no officer card to start it from", ev.key)
+        # the usual state before the reminder time (no card yet): the line goes to the ops feed, nothing failed
+        log.info("no updates thread for %s yet: no officer card to start it from", ev.key)
         return None
 
     async def sheet_thread(self, reg, ev):
@@ -369,6 +380,19 @@ class RaidMixin:
         first.sheet_thread_id = thread.id
         await asyncio.to_thread(rs.save, first, "sheet thread")
         return thread
+
+    async def rename_threads(self, reg, rs, first) -> None:
+        """The event's two threads (sheet_thread, updates_thread) renamed to its title as it is now — after a move or
+        Start now, whose title carries the start. Best effort: a thread missing is skipped, a refused rename logged."""
+        title = run_title(reg, first)
+        for tid, name in ((first.sheet_thread_id, title), (first.updates_thread_id, f"{title} · updates")):
+            th = await self._channel(tid) if tid else None
+            if th is None or not hasattr(th, "edit") or getattr(th, "name", None) == name[:100]:
+                continue
+            try:
+                await th.edit(name=name[:100])
+            except Exception as e:  # noqa: BLE001 — the event moved; only the thread's name is behind
+                log.warning("thread rename failed (%s, thread %s): %s", first.key, tid, e)
 
     async def refresh_cards(self, reg, ev) -> None:
         """Re-render the run's officer cards in place after anything that changes seats or confirmations."""
@@ -958,6 +982,18 @@ class RaidMixin:
                 return ch
         return None
 
+    def no_officer_channel_why(self, reg, ev=None) -> str:
+        """Why officer_channel found none, in a sentence naming the setting to change: none set, or the ones set are the
+        public sheet channel (the officers' channel can't be the signup channel), or the bot can't see them."""
+        cfg = reg.config
+        set_ = [int(c) for c in (cfg.roster_channel_id, cfg.ops_channel_id) if c]
+        if not set_:
+            return "No roster or ops channel is set. Set one on the Config page."
+        if all(c in self._sheet_channels(reg, ev) for c in set_):
+            return ("The officers' channel can't be the signup channel, and the channels set for roster and ops are the "
+                    "signup channel. Set the ops channel to another channel on the Config page.")
+        return "The bot can't see the roster or ops channel set. Check its permissions there, or set another on the Config page."
+
     @staticmethod
     def _sheet_channels(reg, ev=None) -> set[int]:
         """The public channels an officer line must never land in: the signup channel and the one `ev`'s sheet is in."""
@@ -1041,6 +1077,12 @@ class RaidMixin:
         rostered notice — at most one per person per raid."""
         if rc.is_follow(ev) and any(p.state == "open" for p in rc.event_parts(rs, ev) if rc.part_no(p) < rc.part_no(ev)):
             raise RegistryError(rc.LATER_PART_LOCK.format(first=run_title(reg, rc.first_part(rs, ev))))
+        if (tail := self.unlock_finishing(reg, rc.first_part(rs, ev))) is not None:
+            # an unlock still editing its Discord cards: a person's lock waits for it (bounded), the clock's tries next minute
+            if by_person:
+                await asyncio.wait({tail}, timeout=UNLOCK_WAIT_S)
+            if not tail.done():
+                raise RegistryError(rc.LOCK_UNLOCKING)
         team = rc.run_team(reg, ev)
         async with self.solving(reg, ev.key, lock=True), self.board_lock(reg, ev.key):
             if ev.state != "open":
@@ -1135,7 +1177,7 @@ class RaidMixin:
                 if ch:
                     await self.post_lock_cards(reg, rs, ev, team, ch)
                 else:
-                    await self.ops.emit(reg.config, "warn", f"{run_title(reg, ev)}: no roster/ops channel set — lock cards not posted")
+                    await self.ops.emit(reg.config, "warn", f"{run_title(reg, ev)}: lock cards not posted. {self.no_officer_channel_why(reg, ev)}")
                 dropped = await self.reconcile_asks(reg, ev, team) if ev.state == "locked" else []
                 sent = await self.send_confirmations(reg, rs, ev, team, by) if confirms and ev.state == "locked" else 0
             finally:
@@ -1148,10 +1190,16 @@ class RaidMixin:
                 await self.refresh_cards(reg, ev)  # the lock card's "confirmations not yet sent" line goes
             sig = await self.sheet_thread(reg, ev) if ev.channel_id else None  # the event's thread on its sheet, never loose
             if sig is not None:
-                then = ("Rostered? confirm in your DMs. Not rostered? nothing to do." if confirms
-                        else "Rostered? you're in — press Can't make it on the sheet if that changes. Not rostered? nothing to do.")
+                head = f"🔒 {run_label(reg, ev)}" + (f" · after {rc.lead_name_of(reg, ev)}" if rc.is_follow(ev) else "")
+                n_seated = sum(len(r.selected) for r in ev.all_rosters)
+                if not n_seated:  # an empty roster an officer locked on purpose (F3): nobody to confirm, an officer seats people
+                    text = f"{head} is locked with nobody rostered yet. An officer decides who takes a seat, and nothing is asked of you now."
+                else:
+                    then = ("Rostered? confirm in your DMs. Not rostered? nothing to do." if confirms
+                            else "Rostered? you're in — press Can't make it on the sheet if that changes. Not rostered? nothing to do.")
+                    text = f"{head} is locked: {n_seated} rostered" + (f" in {len(ev.all_rosters)} rosters" if len(ev.all_rosters) > 1 else "") + f". {then}"
                 try:
-                    line = await sig.send(f"🔒 {run_label(reg, ev)}" + (f" · after {rc.lead_name_of(reg, ev)}" if rc.is_follow(ev) else "") + f" is locked: {sum(len(r.selected) for r in ev.all_rosters)} rostered" + (f" in {len(ev.all_rosters)} rosters" if len(ev.all_rosters) > 1 else "") + f". {then}", allowed_mentions=discord.AllowedMentions.none())
+                    line = await sig.send(text, allowed_mentions=discord.AllowedMentions.none())
                     if getattr(line, "id", None):  # kept, so an unlock can take the line back
                         ev.lock_line = [sig.id, line.id]
                         await asyncio.to_thread(rs.save, ev, "lock line posted")
@@ -1725,7 +1773,7 @@ class RaidMixin:
         return ev, target
 
     async def cancel_run(self, reg, rs, ev, by: str, reason: str | None, *, notify: bool = True, by_id: int | None = None, via: str = "discord",
-                         audit: bool = True) -> str:
+                         audit: bool = True, _tally: list | None = None) -> str:
         """Cancel a run — the ONE verb behind the card's Cancel, /raid cancel, the site, plain text and MCP. Under the run's
         board lock, so a lock in progress finishes its flip first (lock_run then re-checks the state before every
         confirmation); refused when the run is already done / cancelled. Nobody is DMed (the DM rule): every open ask
@@ -1763,8 +1811,9 @@ class RaidMixin:
             await self.edit_ask_card(reg, cid, mid, f"Cancelled — {label} was cancelled.")
         await self.refresh_sheet(reg, ev)
         await self.refresh_cards(reg, ev)
-        await self.post_run_update(reg, ev, f"🛑 event cancelled by {by}" + (f": {reason}" if reason else "")
-                                   + (f" · confirmations withdrawn for {len(waiting)}" if waiting else "") + (f" · {len(fills)} fill ask(s) closed" if fills else ""))
+        if _tally is not None:  # a raid the event's cancel takes with it: its counts join the ONE line below
+            _tally.append((run_title(reg, ev), len(waiting), len(fills)))
+            return f"Cancelled {run_title(reg, ev)}."
         posted = False
         sig = await self.sheet_thread(reg, ev) if notify and ev.channel_id else None  # the sheet's thread, never loose
         if sig is not None:
@@ -1774,12 +1823,18 @@ class RaidMixin:
                 posted = True
             except Exception as e:  # noqa: BLE001
                 log.warning("cancel line failed (%s): %s", ev.key, e)
-        gone = []
+        gone, tally = [], []
         if audit:  # the cancel takes every other LIVE raid of the run with it (design §5.62) — a later raid's too, once
             for fev in rc.event_parts(rs, ev):  # the first raid has closed (it ends before raids 3–4 of a long lineup play)
                 if fev is not ev and fev.state not in ("done", "cancelled"):
-                    await self.cancel_run(reg, rs, fev, by, reason, notify=False, by_id=by_id, via=via, audit=False)
+                    await self.cancel_run(reg, rs, fev, by, reason, notify=False, by_id=by_id, via=via, audit=False, _tally=tally)
                     gone.append(run_title(reg, fev))
+        n_wait, n_fill = len(waiting) + sum(t[1] for t in tally), len(fills) + sum(t[2] for t in tally)
+        raids = [reg.raid_def(p.instance).get("name", p.instance) for p in [ev] + [p for p in rc.event_parts(rs, ev) if run_title(reg, p) in gone]]
+        await self.post_run_update(reg, ev, f"🛑 event cancelled by {by}" + (f" ({rc.join_words(raids)})" if len(raids) > 1 else "")
+                                   + (f": {reason}" if reason else "")
+                                   + (f" · confirmations withdrawn for {n_wait}" if n_wait else "") + (f" · {n_fill} fill ask(s) closed" if n_fill else ""),
+                                   whole=True)
         tail = (f" and its later raid {gone[0]}" if len(gone) == 1 else f" and its later raids {', '.join(gone)}") if gone else ""
         if audit:
             await ops_mod.audited(self.ops, reg, by, f"cancelled {run_title(reg, ev)}{tail}" + (f": {reason}" if reason else ""), via=via, level="warn", by_id=by_id)
@@ -1815,10 +1870,26 @@ class RaidMixin:
             except Exception:  # noqa: BLE001 — the verb is written; only its Discord edits are behind
                 log.warning("%s of %s/%s: its Discord edits did not all finish", what, reg.key, ev.key, exc_info=True)
 
-        task = asyncio.get_running_loop().create_task(run())
+        task = asyncio.get_running_loop().create_task(run(), name=f"{what} of {reg.key}/{ev.key}")
         tasks.add(task)
         task.add_done_callback(tasks.discard)
         return task
+
+    async def finish_pending(self, timeout: float = 5.0) -> list[str]:
+        """Shutdown: wait (at most `timeout` seconds) for every finish_later task still running; the ones left are
+        abandoned, each logged as a warning by its name (the verb and `<guild>/<event key>`). → their names."""
+        tasks = [t for t in self.__dict__.get("_finishing", set()) if not t.done()]
+        if tasks:
+            await asyncio.wait(tasks, timeout=timeout)
+        left = [t.get_name() for t in tasks if not t.done()]
+        for name in left:
+            log.warning("shutdown: %s abandoned before its Discord edits finished", name)
+        return left
+
+    def unlock_finishing(self, reg, first) -> "asyncio.Task | None":
+        """The unlock of `first`'s event whose Discord edits are still running (unlock_run's finish_later task), or None."""
+        t = self.__dict__.get("_unlock_finishing", {}).get((reg.key, first.key))
+        return t if t is not None and not t.done() else None
 
     async def unlock_run(self, reg, rs, ev, by: str, by_id: int | None = None, *, via: str = "discord", seen: str | None = None,
                          answer_within: float | None = None) -> str:
@@ -1865,38 +1936,48 @@ class RaidMixin:
             gone += [(ch_id, m) for m in cards.values()] + ([tuple(line)] if line else [])
         await ops_mod.audited(self.ops, reg, by, f"unlocked {run_title(reg, first)}", via=via, by_id=by_id)
 
+        def still_open(p) -> bool:  # each step re-reads: a lock that got in meanwhile owns the cards from then on
+            return (rs.events.get(p.key) or p).state == "open"
+
         async def discord_edits():
-            for cid, mid in gone:
-                await self._delete_message(cid, mid)
+            for cid, mid in gone:  # the OLD lock's cards and line: theirs to delete whatever happens next
+                await self._delete_message(cid, mid, key=first.key)
             label = run_label(reg, first)
-            for a in fills:
+            for a in fills:  # withdrawn for good: the card's final words stay true
                 await self.edit_ask_card(reg, a.dm_channel_id, a.dm_message_id,
                                          f"Never mind the {'swap' if a.swap else 'seat'} question for {label} — an officer unlocked the event to change the roster.")
             for m, ask in rc.open_placement_rows(reg, first):  # the Confirm / Can't cards kept open: no locked roster, no deadline
                 sg = first.signups.get(str(m.discord_id))
-                if ask.get("dm") and sg is not None:
+                if ask.get("dm") and sg is not None and still_open(first):
                     await self.edit_live_card(reg, ask["dm"][0], ask["dm"][1], confirm_open_layout(reg, first, self.ico, sg, m.discord_id))
             # the officers' open card again (rc.unlock counts the reminder as sent) — not when it was locked again meanwhile
-            if first.state == "open" and first.health_posted and "health" not in first.cards:
+            if still_open(first) and first.health_posted and "health" not in first.cards:
                 ch = self.officer_channel(reg, first)
                 if ch is not None:
                     await self.post_health(reg, rs, first, ch, nudge=False)
-            await self.refresh_sheet(reg, first)
+            await self.refresh_sheet(reg, first)  # drawn from the event as it is now, locked again or not
             for p in (x for x in parts if x.key in done.raids):
-                await self.refresh_cards(reg, p)
+                if still_open(p):
+                    await self.refresh_cards(reg, p)
+            if not still_open(first):
+                return  # locked again meanwhile: its own lines and cards stand, no "unlocked" line after them
             bits = [f"{done.asks_kept} confirmation ask(s) still open"] if done.asks_kept else []
             bits += [f"{len(fills)} fill ask(s) withdrawn"] if fills else []  # done.fills is empty: fills=False
             bits += [f"back to Join: {', '.join(done.returned)}"] if done.returned else []
             await self.post_run_update(reg, first, f"🔓 unlocked by {by}: back to open signup with the rosters on the board, Auto Lock off"
-                                       + (" · " + " · ".join(bits) if bits else ""))
+                                       + (" · " + " · ".join(bits) if bits else ""), whole=True)
 
         if answer_within is None:
             await discord_edits()
         else:
-            await asyncio.wait({self.finish_later(reg, first, "the unlock", discord_edits())}, timeout=answer_within)
+            task = self.finish_later(reg, first, "the unlock", discord_edits())
+            finishing: dict = self.__dict__.setdefault("_unlock_finishing", {})
+            finishing[(reg.key, first.key)] = task  # a lock of the event waits for it (lock_run, unlock_finishing)
+            task.add_done_callback(lambda t, k=(reg.key, first.key): finishing.pop(k, None) if finishing.get(k) is t else None)
+            await asyncio.wait({task}, timeout=answer_within)
         return f"Unlocked {run_title(reg, first)}: back to open signup with its rosters on the board. Auto Lock is off. Nobody was DMed."
 
-    async def _delete_message(self, channel_id: int | None, message_id: int | None) -> bool:
+    async def _delete_message(self, channel_id: int | None, message_id: int | None, *, key: str | None = None) -> bool:
         """Delete one message the bot posted (a lock card, the "is locked" line). An id missing, a channel or message
         gone, or Discord refusing: False, nothing raised."""
         if not channel_id or not message_id:
@@ -1905,10 +1986,12 @@ class RaidMixin:
             ch = self.get_channel(int(channel_id))
             if ch is None and hasattr(self, "fetch_channel"):
                 ch = await self.fetch_channel(int(channel_id))
+            if getattr(ch, "archived", False) and hasattr(ch, "edit"):  # Discord refuses a delete in an archived thread
+                await ch.edit(archived=False)
             await (await ch.fetch_message(int(message_id))).delete()
             return True
         except Exception as e:  # noqa: BLE001 — the unlock is written; a message left behind is cosmetic
-            log.debug("delete failed (%s/%s): %s", channel_id, message_id, e)
+            (log.warning if key else log.debug)("delete failed (%s, %s/%s): %s", key, channel_id, message_id, e)
             return False
 
     async def reschedule_event(self, reg, rs, ev, *, start: datetime | None = None, timing: dict | None = None, by: str,
@@ -1954,7 +2037,7 @@ class RaidMixin:
                                          "auto_lock", "auto_lock_fill"} and not mv.splits
         own = "sheet timing" if timing_only else "settings"
         line = (f"🕒 {name} moved by {by} to {when}" if moved else f"🕒 {name}: its own {own} set by {by}") + cards
-        await self.post_run_update(reg, first, line)
+        await self.post_run_update(reg, first, line, whole=True)
         what = f"moved {name} from {reg.local12(old)} to {when}" if moved else f"set {name}'s own {own} for {when}"
         if moved and (mv.timing or mv.splits):
             what += f" and set its own {own}"
@@ -1966,7 +2049,10 @@ class RaidMixin:
         place (same message), every live raid's officer cards, every card still in play — an open Confirm / Can't ask
         and an open fill ask — edited to the new time with its buttons (edit_live_card: the ask stands, nobody answers
         again), and the `moved` notice (Me page, /me view) to everyone in `mv.told` — `notice` its words when given (Start
-        now's: the event has started), else the new start or lock. Nobody is DMed. → cards edited."""
+        now's: the event has started), else the new start or lock. Nobody is DMed. A moved start renames the event's
+        threads to its new title (rename_threads). → cards edited."""
+        if moved:
+            await self.rename_threads(reg, rs, first)
         name = reg.raid_def(first.instance).get("name", first.instance)
         when = reg.local12(first.start)
         live = [p for p in parts if p.state in ("open", "locked")]
@@ -2016,7 +2102,7 @@ class RaidMixin:
         was = reg.local12(old)
         edited = await self._after_move(reg, rs, first, parts, mv, True, notice=rc.STARTED_NOTICE.format(raid=name, when=when, was=was))
         cards = "" if not edited else " · 1 open card shows the new time" if edited == 1 else f" · {edited} open cards show the new time"
-        await self.post_run_update(reg, first, f"▶️ {name} has started: {by} started it at {when}, earlier than its planned {was}" + cards)
+        await self.post_run_update(reg, first, f"▶️ {name} has started: {by} started it at {when}, earlier than its planned {was}" + cards, whole=True)
         await ops_mod.audited(self.ops, reg, by, f"started {name} now: moved from {reg.local12(old)} to {when}", via=via, by_id=by_id)
         told = "Everyone who answered sees a notice. " if mv.told else ""
         return f"{name} started now, at {when}. {told}Nobody was DMed."
@@ -2078,7 +2164,7 @@ class RaidMixin:
         await self.refresh_sheet(reg, first)
         now_words = lineup_words(reg, rs, first, change)
         await self.post_run_update(reg, first, f"🗂 lineup changed by {by}: {now_words}"
-                                   + (f" · {len(change.told)} who answered see a notice" if change.told else ""))
+                                   + (f" · {len(change.told)} who answered see a notice" if change.told else ""), whole=True)
         await ops_mod.audited(self.ops, reg, by, f"changed {run_title(reg, first)}'s lineup to {now_words}"
                               + (f", removing {', '.join(run_title(reg, p) for p in removed)}" if removed else ""), via=via, by_id=by_id)
         return [f"The event is now {now_words}."]
@@ -2154,7 +2240,7 @@ class RaidMixin:
             p.autofill_paused, p.autofill_paused_by = bool(paused), (by if paused else None)
             p.log.append(f"Automated Fill Requests {'paused' if paused else 'resumed'} by {by}")
             rs.save(p, f"autofill {'paused' if paused else 'resumed'} by {by}")
-        await self.post_run_update(reg, ev, f"{'⏸️' if paused else '▶️'} Automated Fill Requests {'paused' if paused else 'resumed'} by {by}")
+        await self.post_run_update(reg, ev, f"{'⏸️' if paused else '▶️'} Automated Fill Requests {'paused' if paused else 'resumed'} by {by}", whole=True)
         for p in flip:
             await self.refresh_cards(reg, p)
         await ops_mod.audited(self.ops, reg, by, f"{'paused' if paused else 'resumed'} Automated Fill Requests on {whom}", via=via, by_id=by_id)

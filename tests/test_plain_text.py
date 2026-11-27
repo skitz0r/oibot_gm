@@ -73,7 +73,7 @@ class FakeBot:
         self.calls.append(("send_plan", ev.key, by, [a.display_name for a in asks]))
         return asks, plan
 
-    async def post_run_update(self, reg, ev, text):
+    async def post_run_update(self, reg, ev, text, *, whole=False):
         self.calls.append(("post_run_update", ev.key, text))
 
     async def after_board_change(self, reg, rs, ev, team, added, removed, by, via="web"):

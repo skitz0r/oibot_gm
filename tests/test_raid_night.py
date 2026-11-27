@@ -80,7 +80,7 @@ class NightBot(RaidSchedulerMixin, Bot):
     async def fetch_user(self, uid):
         return CardUser(self, int(uid))
 
-    async def post_run_update(self, reg, ev, text):
+    async def post_run_update(self, reg, ev, text, *, whole=False):
         self.updates.append(text)
 
     def officer_channel(self, reg, ev=None):

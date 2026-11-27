@@ -122,7 +122,7 @@ class FakeBot(LootMixin):
     async def refresh_sheet(self, reg, ev):
         self.calls.append(("refresh_sheet", ev.key))
 
-    async def post_run_update(self, reg, ev, text):
+    async def post_run_update(self, reg, ev, text, *, whole=False):
         self.calls.append(("post_run_update", ev.key, text))
 
     def officer_channel(self, reg, ev=None):

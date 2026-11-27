@@ -54,7 +54,6 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
   // Lock and Preview lock open THE lock box (the Events page's too): the server's box with its choice; Preview lock opens
   // it with the roster drawn
   const [lockBox, lockDialog] = useLockBox(meta, () => { onReload().catch(fail); });
-  const [cancelOpen, setCancelOpen] = useState(false);
   const [boardOpen, setBoardOpenState] = useState<boolean>(() => { try { return localStorage.getItem(`oibot.board.${e.key}`) === "1"; } catch { return false; } });
   const setBoardOpen = (v: boolean) => { setBoardOpenState(v); try { localStorage.setItem(`oibot.board.${e.key}`, v ? "1" : "0"); } catch { /* per-viewer convenience only */ } };
   const seatsN = (e.plan?.seats || []).length;  // seats the planner works on (before lock: the tank/healer minimums)
@@ -99,6 +98,28 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
       box: first, refresh: preview,
       act: async (fp) => {
         try { said.text = (await api.post<{ message: string }>(url, { seen: fp })).message; return null; } catch (err) { const b = boxOf(err); if (b) return b; throw err; }
+      },
+    });
+    if (done) { if (said.text) ok(said.text); await onReload().catch(fail); }
+  }
+  /** Cancel: the SERVER's box (consequences.cancel_box, the Events page's too) through useConfirmBox — busy from the press,
+   *  closed when the event was already cancelled (`done`) — with the reason (officers only) and, when the event has a
+   *  sheet, whether a fixed line goes to the thread on it; the fields' words are the server's (page_words). */
+  async function cancel() {
+    const url = `/api/run/${encodeURIComponent(e.key)}/cancel`;
+    const preview = async (): Promise<ConfirmBoxT> => {
+      try { return (await api.post<{ box: ConfirmBoxT }>(url, { preview: true })).box; } catch (err) { const b = boxOf(err); if (b) return b; throw err; }
+    };
+    let first: ConfirmBoxT;
+    try { first = await preview(); } catch (err) { fail(err); return; }
+    const said = { text: "" };
+    const vals = { reason: "", notify: e.cancel_tells_channel !== false };
+    const done = await askBox({
+      box: first, refresh: preview,
+      fields: <CancelFields words={meta.page_words} tells={e.cancel_tells_channel !== false} vals={vals} />,
+      act: async (fp) => {
+        try { said.text = (await api.post<{ message: string }>(url, { seen: fp, reason: vals.reason.trim(), notify: vals.notify })).message; return null; }
+        catch (err) { const b = boxOf(err); if (b) return b; throw err; }
       },
     });
     if (done) { if (said.text) ok(said.text); await onReload().catch(fail); }
@@ -221,7 +242,7 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
           commits the work last on the right. What does not apply yet is disabled with the reason in its label. */}
       <Group justify="space-between" wrap="wrap" gap="sm" mt="md" pt="sm" style={{ borderTop: "1px solid var(--mantine-color-slate-5)" }}>
         <Group gap="xs" wrap="wrap">
-          <Button size="xs" variant="subtle" color="red" loading={busy === `cancel${e.key}`} onClick={() => setCancelOpen(true)}>{L.cancel}</Button>
+          <Button size="xs" variant="subtle" color="red" onClick={() => { cancel().catch(fail); }}>{L.cancel}</Button>
           {/* after the lock, the raid-night levers the Discord lock card's second row has — the same labels (meta.run_labels) */}
           {locked && e.live && (e.may_unlock || e.unlock_note) && <Tooltip label={e.unlock_note || ""} disabled={!e.unlock_note}><span><Button size="xs" variant="subtle" leftSection={<IconLockOpen size={13} />} disabled={!e.may_unlock} onClick={unlock}>{L.unlock}</Button></span></Tooltip>}
           {locked && e.live && <Tooltip label={e.end_note || ""} disabled={!e.end_note}><span><Button size="xs" variant="subtle" color="red" leftSection={<IconFlagCheck size={13} />} disabled={!e.may_end} loading={busy === `end${e.key}`} onClick={endNow}>{L.end}</Button></span></Tooltip>}
@@ -253,7 +274,6 @@ export function SheetCard({ e: sheet, meta, busy, onAct, onBoard, onReload, badg
       {lockDialog}
       <RepostSheetModal run={e.key} opened={repostOpen} onClose={() => setRepostOpen(false)} onDone={onReload} />
       <RescheduleModal e={e} opened={moveOpen} onClose={() => setMoveOpen(false)} onPick={reschedule} />
-      <CancelModal e={e} opened={cancelOpen} onClose={() => setCancelOpen(false)} onCancel={(reason, notify) => onAct(`cancel${e.key}`, `/api/run/${e.key}/cancel`, { reason, notify: notify && e.cancel_tells_channel !== false })} />
       {confirmDialog}
       {boxDialog}
     </Box>
@@ -367,24 +387,17 @@ function RescheduleModal({ e, opened, onClose, onPick }: { e: NightSheet; opened
   );
 }
 
-/** Cancel: one screen on every surface — the server's consequence, the optional reason (officers only: the run's thread
- *  and the ops feed), and whether a fixed line goes to the signup channel. Nobody is DMed (the DM rule). */
-function CancelModal({ e, opened, onClose, onCancel }: { e: NightSheet; opened: boolean; onClose: () => void; onCancel: (reason: string, notify: boolean) => Promise<void> }) {
-  const [reason, setReason] = useState("");
-  const [notify, setNotify] = useState(true);
-  const close = () => { setReason(""); setNotify(true); onClose(); };
+/** The Cancel box's own fields (drawn inside the server's box): the reason, officers only, and the members' line in the
+ *  thread on the sheet. `vals` is what the press sends. */
+function CancelFields({ words, tells, vals }: { words: Meta["page_words"]; tells: boolean; vals: { reason: string; notify: boolean } }) {
+  const [reason, setReason] = useState(vals.reason);
+  const [notify, setNotify] = useState(vals.notify);
   return (
-    <Modal opened={opened} onClose={close} title={`Cancel ${runName(e as unknown as Sheet)}?`} centered>
-      <Stack gap="md">
-        <Text size="sm" style={{ whiteSpace: "pre-line" }}>{e.consequences?.cancel}</Text>
-        <Textarea label="Why? (optional)" description={`officers only: the event's thread and the ops feed — never the signup channel · ${reason.length}/300`} value={reason} maxLength={300} autosize minRows={2} onChange={(ev) => setReason(ev.currentTarget.value)} />
-        {e.cancel_tells_channel !== false && <Checkbox label="Tell the channel — a fixed line, no reason" checked={notify} onChange={(ev) => setNotify(ev.currentTarget.checked)} />}
-        <Group justify="flex-end" gap="sm">
-          <Button variant="default" size="sm" onClick={close}>Back</Button>
-          <Button color="red" size="sm" onClick={async () => { const r = reason.trim(), nf = notify; close(); await onCancel(r, nf); }}>Cancel event</Button>
-        </Group>
-      </Stack>
-    </Modal>
+    <Stack gap="sm">
+      <Textarea label={words.cancel_reason} description={`${words.cancel_reason_hint} ${reason.length}/300`} value={reason} maxLength={300} autosize minRows={2}
+        onChange={(ev) => { setReason(ev.currentTarget.value); vals.reason = ev.currentTarget.value; }} />
+      {tells && <Checkbox label={words.cancel_notify} checked={notify} onChange={(ev) => { setNotify(ev.currentTarget.checked); vals.notify = ev.currentTarget.checked; }} />}
+    </Stack>
   );
 }
 

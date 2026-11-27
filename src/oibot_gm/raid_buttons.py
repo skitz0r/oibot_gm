@@ -273,7 +273,7 @@ async def cancel_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=
     (consequences.cancel_box, box 5, red) through Wizard.decide_box, then Cancel event · Cancel event with a note · Back.
     A plain press cancels with no reason and posts the channel line (D3). The note opens one Form: the optional reason
     (officers only: the run's thread and the ops feed — never the public channel) and, when rc.cancel_tells_channel,
-    "Tell the channel?". Nobody is DMed (the DM rule). The write is RaidMixin.cancel_run. A closed run is the refusal box."""
+    "Tell the members?" (a line in the thread on the sheet). Nobody is DMed (the DM rule). The write is RaidMixin.cancel_run. A closed run is the refusal box."""
     from .consequences import cancel_box
     from .wizard import Field, Opt
 

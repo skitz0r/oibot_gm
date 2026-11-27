@@ -273,7 +273,7 @@ def test_the_board_draws_no_text_beside_icons():
     assert "(max ${" not in board and "synergy" not in shared + split and "gap {" not in split
     assert "plan.still_short" not in fill and "short_after" in fill and "const KIND" not in fill
     assert '"pinned" : "bench"' not in card and "<PinMark" in card and "<PinMark" in board
-    assert "Cancel run</Button>" not in card and "Post a line in the signup channel" not in card and "Tell the channel — a fixed line, no reason" in card
+    assert "Cancel run</Button>" not in card and "Post a line in the signup channel" not in card and "words.cancel_notify" in card  # the server's words
 
 
 def test_the_event_confirms_print_only_the_servers_sentence():
@@ -1825,3 +1825,16 @@ def test_every_box_is_busy_from_the_first_press_and_closes_on_done():
               "components/loot/Tonight.tsx", "components/events/EditEvent.tsx", "components/events/RescheduleBox.tsx", "pages/Events.tsx"):
         assert "useConfirmBox(" in (SRC / f).read_text(), f"{f}: its boxes are useConfirmBox's"
     assert "if (said) ok(said)" in (SRC / "components" / "events" / "LockBox.tsx").read_text(), "no empty line after a done lock"
+
+
+def test_the_sheet_cards_cancel_is_the_servers_box_with_its_fields_in_the_servers_words():
+    """Review M3: the sheet card's Cancel was its own modal (no busy state, no `done` close) whose checkbox said "Tell the
+    channel" after the line moved to the thread on the sheet. It is the server's cancel box through useConfirmBox, the
+    reason and the members' line as its fields, their words page_words.cancel_reason / cancel_notify."""
+    card = _code_only((SRC / "components" / "board" / "SheetCard.tsx").read_text())
+    assert "CancelModal" not in card and "Tell the channel" not in card
+    body = card[card.index("async function cancel()"):]
+    body = body[:body.index("\n  }\n")]
+    assert "askBox({" in body and "seen: fp" in body and "CancelFields" in body
+    fields = card[card.index("function CancelFields"):]
+    assert "words.cancel_reason" in fields and "words.cancel_notify" in fields

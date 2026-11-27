@@ -127,7 +127,8 @@ def test_ev_json_carries_the_consequences_so_the_browser_never_composes_them(reg
     sheet = Path(__file__).resolve().parents[1] / "frontend" / "src" / "components" / "board" / "SheetCard.tsx"
     text = sheet.read_text()
     # the lock is THE lock box now (components/events/LockBox: the server's box with its choice, issue 14)
-    assert "useLockBox" in text and "e.consequences?.cancel" in text and "everyone rostered gets a confirmation DM" not in text
+    # and Cancel is the server's cancel box (POST …/cancel preview → consequences.cancel_box), never a sentence of its own
+    assert "useLockBox" in text and "/cancel`" in text and "preview: true" in text and "everyone rostered gets a confirmation DM" not in text
 
 
 def test_news_consequence_and_decision_refusal(reg):

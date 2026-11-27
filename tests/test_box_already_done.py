@@ -63,23 +63,35 @@ def test_start_now_on_a_started_event_is_done_and_on_an_open_one_is_not(reg, rs,
 
 def test_the_unlock_route_answers_while_its_discord_edits_go_on(reg, rs, web_bot):
     """The owner's unlock took 11 s: the state flipped at once, then the cards were edited and deleted. The route answers
-    once the state and the audit line are written; the edits run on (RaidMixin.finish_later)."""
+    once the state and the audit line are written; the edits run on (RaidMixin.finish_later) and then finish: the sheet
+    redrawn and the "unlocked" line posted."""
     import asyncio
+    import threading
     import time
 
     _bot, ev, _ms = locked_event(reg, rs)
-    slow = asyncio.Event()
+    bot = web_bot.bot
+    slow, redrawn = threading.Event(), []
 
     async def refresh_sheet(reg_, ev_):
-        await slow.wait()  # Discord taking its time
+        await asyncio.to_thread(slow.wait, 10)  # Discord taking its time
+        redrawn.append(ev_.key)
 
-    web_bot.bot.refresh_sheet = refresh_sheet
-    t = time.monotonic()
-    r = web_bot.c.post(f"/api/run/{ev.key}/unlock", json={"seen": cq.unlock_box(reg, ev, rs)["fp"]}, headers=H())
-    assert r.status_code == 200 and "back to open signup" in r.json()["message"], r.text
-    assert time.monotonic() - t < 5, "answered without waiting for Discord"
-    assert rs.events[ev.key].state == "open" and not any(k.startswith("lock:") for k in rs.events[ev.key].cards)
-    assert any("unlocked" in str(c) for c in web_bot.bot.ops.lines), "the audit line is written before the answer"
+    bot.refresh_sheet = refresh_sheet
+    with web_bot.c as c:  # one event loop for the whole block: the background edits keep running after the answer
+        t = time.monotonic()
+        r = c.post(f"/api/run/{ev.key}/unlock", json={"seen": cq.unlock_box(reg, ev, rs)["fp"]}, headers=H())
+        assert r.status_code == 200 and "back to open signup" in r.json()["message"], r.text
+        assert time.monotonic() - t < 5, "answered without waiting for Discord"
+        assert rs.events[ev.key].state == "open" and not any(k.startswith("lock:") for k in rs.events[ev.key].cards)
+        assert any("unlocked" in str(x) for x in bot.ops.lines), "the audit line is written before the answer"
+        assert not redrawn and not any("unlocked by" in u for u in bot.updates), "the edits are still running"
+        slow.set()
+        deadline = time.monotonic() + 10
+        while bot.__dict__.get("_finishing") and time.monotonic() < deadline:
+            time.sleep(0.05)
+    assert redrawn == [ev.key], "the sheet was redrawn behind the answer"
+    assert any("unlocked by" in u for u in bot.updates), "and the thread's line went out"
 
 
 def test_a_failing_discord_edit_after_the_unlock_is_a_warning_naming_the_event(reg, rs, caplog):

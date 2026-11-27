@@ -215,7 +215,8 @@ def test_a_lineup_uses_one_thread(reg, rs):
     lcard, fcard = card_in(bot, rs, lead, OPS), card_in(bot, rs, fev, OPS)
     run(bot.post_run_update(reg, rs.events[fev.key], "later raid first"))
     run(bot.post_run_update(reg, rs.events[lead.key], "first raid"))
-    assert fcard.thread is None and lcard.thread.lines() == ["later raid first", "first raid"]
+    lname, fname = reg.raid_def(lead.instance)["name"], reg.raid_def(fev.instance)["name"]  # one thread: each line names its raid
+    assert fcard.thread is None and lcard.thread.lines() == [f"{fname}: later raid first", f"{lname}: first raid"]
     assert rs.events[lead.key].updates_thread_id == lcard.thread.id
 
 

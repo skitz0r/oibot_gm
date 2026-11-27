@@ -660,7 +660,7 @@ def test_nobody_left_is_said_once_per_guild_even_with_one_run_key(duo):
     bot.raids = types.SimpleNamespace(store=lambda r: stores[r.key])
     posted = []
 
-    async def post_run_update(reg, ev, text):
+    async def post_run_update(reg, ev, text, *, whole=False):
         posted.append((reg.key, text))
 
     async def run_fill(reg, rs, ev, team, **kw):

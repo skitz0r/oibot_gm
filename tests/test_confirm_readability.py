@@ -930,7 +930,7 @@ def lock_choice_cases(reg, rs, add):
     b = both("every seat placed, a Bench place Auto-fill made", ev, [cq.AUTO_AGAIN, f"Everyone rostered gets {cq.CONFIRM_DM}.", cq._lock_deadline(reg, ev)])
     assert "choice" not in b, "no open slot: today's box, no choice"
     ev = night(0)
-    both("nobody placed", ev, ["The roster has 10 open slots.", rc.LOCK_EMPTY_WARN_ONE, cq.LOCK_PAUSE])  # F3: the officer's choice
+    both("nobody placed", ev, [rc.LOCK_EMPTY_WARN_ONE, "The 10 who joined each get a Not rostered notice.", cq.LOCK_PAUSE])  # F3: the officer's choice
     ev = rc.open_run(reg, rs, RID, next(nights), by="t", schedule=sid)
     both("nobody joined", ev, ["The roster has 10 open slots.", "Nobody is on the board, so the roster locks empty.", cq.LOCK_PAUSE])
     ev = night(4, joined=12)  # two rosters expected (12 joined): roster 1 part-filled, roster 2 empty is not built

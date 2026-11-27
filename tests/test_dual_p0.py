@@ -224,7 +224,7 @@ class SeatBot:
     async def refresh_sheet(self, reg, ev):
         self.calls.append("refresh_sheet")
 
-    async def post_run_update(self, reg, ev, text):
+    async def post_run_update(self, reg, ev, text, *, whole=False):
         self.calls.append(("update", text))
 
     async def seat_released(self, reg, ev, m, why):

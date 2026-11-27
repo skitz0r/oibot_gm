@@ -1783,9 +1783,11 @@ retrying"; `ev_json.lock_error` carries the same with the reason. `save_board(st
 strategy}` write a split's layout and strategy in one step (the separate `/strategy` call is no longer used by the page).
 
 **Cancel.** One screen: `raid_buttons.cancel_decide` (consequence → *Cancel the run…* → one Form: optional reason,
-"Tell the channel?" post | quiet) for the card and `/raid cancel`; the site's `CancelModal` has the same parts;
+"Tell the members?" a line in the thread on the sheet | quiet) for the card and `/raid cancel`; the site's sheet card
+prints the server's `cancel_box` through `useConfirmBox` with the same two fields (`page_words.cancel_reason`,
+`cancel_notify`: *Post a line in the thread on the signup sheet, without the reason*);
 `cancel_run(..., notify=True, by_id=, via=)` DMs nobody, closes every open placement ask (`cancelled`) and fill ask
-(`cancelled`), edits their cards to "Cancelled", posts one fixed signup-channel line when `notify` (never the reason),
+(`cancelled`), edits their cards to "Cancelled", posts one fixed line in the thread on the sheet when `notify` (never the reason),
 the reason to the thread and the audit line. `rc.cancel_effects(reg, ev)` → `{state, locked, rostered, open_asks,
 fill_asks, answered}` feeds `consequence("cancel")`. Plain text's `run_cancel` passes `via`, `by_id` and `notify`
 (`value=quiet` → no channel line) and its diff prints the consequence sentence; MCP `cancel_run(notify=)`. The verb
@@ -3531,8 +3533,8 @@ defined once in Python and reaches the site through `/api/meta` or the run's JSO
   plain-text sentence. The fill state is a sentence (`fill_state_text`: *Asking for open seats — waiting for answers.*,
   *Automatic asks paused by Jon. …*, *The run is finished.* — never *engine*, never a *fill:* prefix, on Discord too).
   The not-answered box is titled from `NOT_ANSWERED_WORDS` and tallies the regulars as *Join 3 · Bench 1 · No thanks 2*
-  (no ✓ / ✗ glyphs beside a word). Cancel's checkbox reads *Tell the channel — a fixed line, no reason* (Discord's
-  words); Regulars' Add names the character (*Add Bramblewick*); the Regulars card wears the Readiness chip
+  (no ✓ / ✗ glyphs beside a word). Cancel's checkbox reads *Post a line in the thread on the signup sheet, without the
+  reason* (`page_words.cancel_notify`); Regulars' Add names the character (*Add Bramblewick*); the Regulars card wears the Readiness chip
   (`components/LevelChip.tsx`: *ready* / *thin* / *short*, thin slate on both pages); Me's badge says *not rostered* for a
   joiner the lock left out.
 - **The board.** Its list of joiners without a place is *Not placed* / *Not rostered*; *Leftovers* head it after the
@@ -5996,7 +5998,7 @@ On Fri 27 Nov the sweep found a product breach: an absence over four events on o
 past three, always naming a released seat. Tests: `tests/test_solver_kept_answer.py`, `tests/test_schedule_night_open.py`.
 
 *Limits an operator should know.* Not on the site any more, still in Discord, plain text or MCP: a cancel's reason and
-its Tell the channel line (the site's Cancel event is the box alone); another layout, Propose and Place the rest
+its line in the thread on the sheet (the Events page's Cancel event is the box alone; the sheet card's has both fields); another layout, Propose and Place the rest
 (Undo my moves is yours only; Clear the board is in More; the Test bench card keeps Propose); opening a pickup template (Copy a
 lineup leaves templates out); one timing value back to the game's suggestion (`inherit`); start times off the 15-minute
 steps; why-notes, raid notes and the split policy on the Raids page; the regulars' level chip with its could-cover and
