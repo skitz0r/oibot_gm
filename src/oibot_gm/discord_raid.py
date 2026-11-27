@@ -269,29 +269,106 @@ class RaidMixin:
         ch = getattr(msg, "channel", None)
         return (getattr(ch, "id", None), getattr(msg, "id", None))
 
-    # ---- officer cards + the run's updates thread
+    # ---- officer cards + the event's threads
     async def post_run_update(self, reg, ev, text: str) -> None:
-        """One line in the run's thread (under its health or lock card; created on first use); falls back to the officer channel.
-        A test run's line also goes to the test feed (the site's Test bench follows the rehearsal)."""
+        """One officers' line about `ev` (a pause, a cancel and its reason, a failed lock, a move …) in its event's
+        updates thread (updates_thread: under the first raid's officer card, made on first use). With no card or no
+        thread to be had, the line goes to the ops feed (officers only) — never loose in a channel, never the signup
+        channel. A test run's line also goes to the test feed (the site's Test bench follows the rehearsal), which is
+        where it stays when the rehearsal has no thread: a test event never writes the ops feed this way."""
         from . import testfeed
 
         testfeed.note(reg, ev, "step", text, name_of=self._channel_name)
-        ch = self.officer_channel(reg, ev)
-        thread = self.get_channel(ev.updates_thread_id) if ev.updates_thread_id else None
-        if thread is None and ev.cards and ch:
-            mid = ev.cards.get("lock:0") or ev.cards.get("health")
+        thread = await self.updates_thread(reg, ev)
+        if thread is not None:
             try:
-                msg = await ch.fetch_message(mid)
-                thread = await msg.create_thread(name=f"{run_title(reg, ev)} · updates"[:100])
-                ev.updates_thread_id = thread.id
-                rs = self.raids.store(reg)
-                rs.save(ev, "updates thread")
-            except Exception:  # noqa: BLE001
-                thread = None
+                await thread.send(text, allowed_mentions=discord.AllowedMentions.none())
+                return
+            except Exception as e:  # noqa: BLE001 — the line goes to the ops feed instead
+                log.warning("updates line failed (%s): %s", ev.key, e)
+        ops = getattr(self, "ops", None)
+        if ops is not None and not ev.test:
+            await ops.emit(reg.config, "info", f"{run_title(reg, ev)}: {text}")
+
+    async def _channel(self, cid: int | None):
+        """A channel or thread by id: the cache, else fetched (an archived thread is not cached). None when it is gone."""
+        if not cid:
+            return None
+        ch = self.get_channel(int(cid))
+        if ch is None and hasattr(self, "fetch_channel"):
+            try:
+                ch = await self.fetch_channel(int(cid))
+            except Exception as e:  # noqa: BLE001
+                log.debug("channel %s not fetched: %s", cid, e)
+                return None
+        return ch
+
+    async def _thread_on(self, msg, name: str):
+        """A thread started from `msg`: made, or the one it already has (a thread started from a message has the
+        message's id, so an id lost or never stored is found again — Discord refuses a second thread on one message)."""
         try:
-            await (thread or ch).send(text, allowed_mentions=discord.AllowedMentions.none())
-        except Exception:  # noqa: BLE001
-            pass
+            return await msg.create_thread(name=name[:100])
+        except Exception as e:  # noqa: BLE001
+            thread = getattr(msg, "thread", None) or await self._channel(getattr(msg, "id", None))
+            if thread is None:
+                raise
+            log.debug("thread on %s reused: %s", getattr(msg, "id", None), e)
+            return thread
+
+    async def updates_thread(self, reg, ev):
+        """THE event's updates thread (post_run_update): one for every raid of the event, kept on its first raid
+        (rc.updates_thread_of). A stored one is fetched — archived too — and used; else it is started from the first
+        raid's officer card (lock card, else health card; a later raid's own card when the first raid has none) in
+        the channel the cards are really in (`cards_channel_id`). Never under a card in the public sheet channel
+        (a test run's own channel aside, D20). None — logged with the event — when there is no card or no thread."""
+        rs = self.raids.store(reg)
+        first = rc.first_part(rs, ev)
+        public = set() if ev.test else self._sheet_channels(reg, first)
+        for tid in [t for t in (first.updates_thread_id, ev.updates_thread_id) if t]:
+            th = await self._channel(tid)
+            if th is not None and getattr(th, "parent_id", None) not in public:
+                return th
+        for owner in [first] + ([ev] if ev is not first else []):
+            mid = owner.cards.get("lock:0") or owner.cards.get("health")
+            if not mid or not owner.cards_channel_id or int(owner.cards_channel_id) in public:
+                continue
+            try:
+                ch = await self._channel(owner.cards_channel_id)
+                if ch is None:
+                    raise LookupError(f"channel {owner.cards_channel_id} is gone")
+                thread = await self._thread_on(await ch.fetch_message(mid), f"{run_title(reg, first)} · updates")
+            except Exception as e:  # noqa: BLE001
+                log.warning("updates thread not made (%s, card %s): %s", owner.key, mid, e)
+                continue
+            first.updates_thread_id = thread.id
+            await asyncio.to_thread(rs.save, first, "updates thread")
+            return thread
+        log.warning("no updates thread for %s: no officer card to start it from", ev.key)
+        return None
+
+    async def sheet_thread(self, reg, ev):
+        """THE event's public thread on its signup sheet: the members' lines about the event (the "is locked" line,
+        the cancel line) go here, never loose in the signup channel. Kept on the first raid (`sheet_thread_id`) and
+        reused by every raid of the event and by a relock; a stored one is fetched (archived too). A thread started
+        from the sheet has the sheet's id, so after the sheet moved (a re-post) a new one starts on the new sheet.
+        None — logged — when the event has no sheet, the sheet is gone or no thread can be made."""
+        rs = self.raids.store(reg)
+        first = rc.first_part(rs, ev)
+        if not (first.channel_id and first.message_id):
+            return None
+        if first.sheet_thread_id and first.sheet_thread_id == first.message_id and (th := await self._channel(first.sheet_thread_id)) is not None:
+            return th
+        try:
+            ch = await self._channel(first.channel_id)
+            if ch is None:
+                raise LookupError(f"channel {first.channel_id} is gone")
+            thread = await self._thread_on(await ch.fetch_message(first.message_id), run_title(reg, first))
+        except Exception as e:  # noqa: BLE001
+            log.warning("sheet thread not made (%s): %s", first.key, e)
+            return None
+        first.sheet_thread_id = thread.id
+        await asyncio.to_thread(rs.save, first, "sheet thread")
+        return thread
 
     async def refresh_cards(self, reg, ev) -> None:
         """Re-render the run's officer cards in place after anything that changes seats or confirmations."""
@@ -864,15 +941,27 @@ class RaidMixin:
 
     # ---- lock → roster(s) → confirmations
     def officer_channel(self, reg, ev=None):
-        """Where officer-facing posts go: the roster channel, else the ops channel, else nowhere (never the public sheet channel).
-        A TEST run's cards go to the channel its /gm test run was used in (D20: the rehearsal stays where it was asked
-        for, with the test badge; a DM can't host the updates thread, so a run opened from a DM or the site uses the
-        officer channel as any run does)."""
+        """THE officers' channel for new officer posts (the health and lock cards, the loot council's starter): the
+        roster channel, else the ops channel, else None — never the public sheet channel: a roster or ops channel that
+        IS the signup channel (or the channel `ev`'s sheet is in) is skipped, so a guild whose roster channel is its
+        signup channel posts its cards in the ops channel. Lines about a posted card read the channel the cards are
+        really in (`ev.cards_channel_id`, updates_thread), not this. A TEST run's cards go to the channel its /gm test
+        run was used in (D20: the rehearsal stays where it was asked for, with the test badge; a DM can't host the
+        updates thread, so a run opened from a DM or the site uses the officer channel as any run does)."""
         cfg = reg.config
         own = (cfg.team(ev.team) or {}).get("test_channel") if ev is not None else None
         if own and (ch := self.get_channel(int(own))) is not None:
             return ch
-        return (self.get_channel(cfg.roster_channel_id) if cfg.roster_channel_id else None) or (self.get_channel(cfg.ops_channel_id) if cfg.ops_channel_id else None)
+        public = self._sheet_channels(reg, ev)
+        for cid in (cfg.roster_channel_id, cfg.ops_channel_id):
+            if cid and int(cid) not in public and (ch := self.get_channel(int(cid))) is not None:
+                return ch
+        return None
+
+    @staticmethod
+    def _sheet_channels(reg, ev=None) -> set[int]:
+        """The public channels an officer line must never land in: the signup channel and the one `ev`'s sheet is in."""
+        return {int(c) for c in (reg.config.signup_channel_id, getattr(ev, "channel_id", None)) if c}
 
     @contextlib.asynccontextmanager
     async def solving(self, reg, key: str, *, lock: bool = False):
@@ -1015,7 +1104,7 @@ class RaidMixin:
                     if p.state in ("done", "cancelled") or p.autofill_paused:
                         continue
                     p.autofill_paused, p.autofill_paused_by = True, by
-                    p.log.append(f"automatic asks paused by {by}: the lock left seats open for an officer to fill")
+                    p.log.append(f"Automated Fill Requests paused by {by}: the lock left seats open for an officer to fill")
                     if p is not ev:
                         paused_too.append(p)
             held = [a for a in ev.fill_asks if a.held and a.phase == "prelock"]
@@ -1057,8 +1146,8 @@ class RaidMixin:
                 return f"{run_title(reg, ev)}: locked by {by}, then {ev.state} before the confirmations finished ({sent} sent)"
             if confirms and ev.state == "locked":
                 await self.refresh_cards(reg, ev)  # the lock card's "confirmations not yet sent" line goes
-            sig = self.get_channel(ev.channel_id) if ev.channel_id else None
-            if sig and sig is not ch:
+            sig = await self.sheet_thread(reg, ev) if ev.channel_id else None  # the event's thread on its sheet, never loose
+            if sig is not None:
                 then = ("Rostered? confirm in your DMs. Not rostered? nothing to do." if confirms
                         else "Rostered? you're in — press Can't make it on the sheet if that changes. Not rostered? nothing to do.")
                 try:
@@ -1641,8 +1730,8 @@ class RaidMixin:
         board lock, so a lock in progress finishes its flip first (lock_run then re-checks the state before every
         confirmation); refused when the run is already done / cancelled. Nobody is DMed (the DM rule): every open ask
         (Confirm / Can't, fill, pre-lock) closes as `cancelled` and its DM card is EDITED to say so; the sheet is edited to
-        its final state; `notify` posts one fixed line in the signup channel (never the reason — that stays in the run's
-        thread and the ops feed, for officers); the Me page's notices are derived from the record. Returns a plain line.
+        its final state; `notify` posts one fixed line in the event's thread on its sheet (sheet_thread; never the reason
+        — that stays in the updates thread and the ops feed, for officers; never loose in the signup channel); the Me page's notices are derived from the record. Returns a plain line.
         The fill / pre-lock asks close under plan_lock (every writer of ev.fill_asks holds it), taken AFTER the state
         flip: a fan-out in flight sees the cancel before its next DM (RaidMixin._send_asks), stops, edits a card that
         went out meanwhile, and releases the lock — so the cancel waits for one DM at most, never a whole batch.
@@ -1677,7 +1766,7 @@ class RaidMixin:
         await self.post_run_update(reg, ev, f"🛑 event cancelled by {by}" + (f": {reason}" if reason else "")
                                    + (f" · confirmations withdrawn for {len(waiting)}" if waiting else "") + (f" · {len(fills)} fill ask(s) closed" if fills else ""))
         posted = False
-        sig = self.get_channel(ev.channel_id) if notify and ev.channel_id else None
+        sig = await self.sheet_thread(reg, ev) if notify and ev.channel_id else None  # the sheet's thread, never loose
         if sig is not None:
             try:  # fixed text: the reason is for officers, never echoed publicly
                 await sig.send(f"🛑 {label} is cancelled." + (" Rostered seats are released." if fx["locked"] else ""),
@@ -1698,7 +1787,7 @@ class RaidMixin:
         told = ["the sheet shows it"] if sheet else []
         told += [f"{len(cards) + len(fills)} open ask card(s) now say Cancelled"] if cards or fills else []
         if sheet:
-            told.append("a line went to the signup channel" if posted else "no line in the signup channel")
+            told.append("a line went to the thread on the sheet" if posted else "no line on the sheet's thread")
         return f"Cancelled {run_title(reg, ev)}. Nobody was DMed" + (": " + ", ".join(told) if told else "") + "."
 
     async def reopen_run(self, reg, rs, ev, *, by: str, by_id: int | None = None, via: str = "discord") -> str:
@@ -2031,12 +2120,12 @@ class RaidMixin:
             return f"Automated Fill Requests are already {'paused' if paused else 'on'} for {whom}."
         for p in flip:
             p.autofill_paused, p.autofill_paused_by = bool(paused), (by if paused else None)
-            p.log.append(f"automatic asks {'paused' if paused else 'resumed'} by {by}")
+            p.log.append(f"Automated Fill Requests {'paused' if paused else 'resumed'} by {by}")
             rs.save(p, f"autofill {'paused' if paused else 'resumed'} by {by}")
         await self.post_run_update(reg, ev, f"{'⏸️' if paused else '▶️'} Automated Fill Requests {'paused' if paused else 'resumed'} by {by}")
         for p in flip:
             await self.refresh_cards(reg, p)
-        await ops_mod.audited(self.ops, reg, by, f"{'paused' if paused else 'resumed'} automatic asks on {whom}", via=via, by_id=by_id)
+        await ops_mod.audited(self.ops, reg, by, f"{'paused' if paused else 'resumed'} Automated Fill Requests on {whom}", via=via, by_id=by_id)
         if not paused:
             for p in flip:
                 if p.state == "locked" and rc.team_setting(rc.run_team(reg, p), "autofill"):

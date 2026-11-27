@@ -214,7 +214,9 @@ class RaidEvent(BaseModel):
     split_strategy: Optional[str] = None  # balanced | first | rotation chosen for this run (default: the raid's split_policy)
     cards: dict[str, int] = Field(default_factory=dict)  # officer cards in the roster channel: "health" | "lock:<i>" -> message id
     cards_channel_id: Optional[int] = None
-    updates_thread_id: Optional[int] = None  # thread under the officer card with fill / confirmation updates
+    # the event's updates thread under its officer card (RaidMixin.updates_thread): kept on the FIRST raid, which every
+    # raid of the event posts into (updates_thread_of); a later raid's own id is from before that and is still read
+    updates_thread_id: Optional[int] = None
     rosters: list[RosterResult] = Field(default_factory=list)  # after lock: one or more rosters for this slot (roster = rosters[0])
     locked_at: Optional[str] = None
     confirm_by: Optional[str] = None  # ISO: unanswered confirmations expire here
@@ -225,6 +227,9 @@ class RaidEvent(BaseModel):
     # (channel_id / message_id stay where they are); refresh_sheet edits them too, without buttons
     mirror_messages: list[list[int]] = Field(default_factory=list)
     thread_id: Optional[int] = None
+    # the event's public thread on its signup sheet (RaidMixin.sheet_thread: the "is locked" and cancel lines), kept on
+    # the first raid; a thread started from the sheet has the sheet's id, so one the sheet moved away from is not reused
+    sheet_thread_id: Optional[int] = None
     health_posted: bool = False
     health_early: bool = False  # the early-warning health card went up when the sheet opened (the regulars can't cover a minimum)
     nudged: list[int] = Field(default_factory=list)
@@ -241,7 +246,8 @@ class RaidEvent(BaseModel):
     # as it stood. A later raid's lock (lock_parts, and the scheduler's retry of one) takes its first raid's. None = locked
     # before the choice existed (it filled)
     lock_fill: Optional[bool] = None
-    # the signup channel's "is locked" line: [channel id, message id] (None = not posted, or locked before it was kept)
+    # the "is locked" line: [channel id, message id] — the sheet's thread (RaidMixin.sheet_thread), or the signup channel
+    # for a line posted before the thread (None = not posted, or locked before it was kept)
     lock_line: Optional[list[int]] = None
     autofill_paused: bool = False  # the fill engine sends nothing on its own for this run (an officer's explicit send still works, D18)
     autofill_paused_by: Optional[str] = None
@@ -476,6 +482,13 @@ def first_part(rs: "RaidStore", ev: "RaidEvent") -> "RaidEvent":
     if first is None:
         first = next((p for p in event_parts(rs, ev) if not is_follow(p)), None)
     return first or ev
+
+
+def updates_thread_of(rs: "RaidStore", ev: "RaidEvent") -> int | None:
+    """THE id of `ev`'s event's updates thread, as stored: its first raid's (every raid of the event posts there), else
+    `ev`'s own (a later raid's thread from before one thread per event). None = none made yet. The loot log's fallback
+    and the site's thread link read it; RaidMixin.updates_thread makes and fetches it."""
+    return first_part(rs, ev).updates_thread_id or ev.updates_thread_id
 
 
 def later_parts(rs: "RaidStore", ev: "RaidEvent") -> list["RaidEvent"]:
@@ -1654,7 +1667,7 @@ def cancel_target(rs: "RaidStore", ev: "RaidEvent") -> "RaidEvent":
 
 
 def cancel_tells_channel(rs: "RaidStore", ev: "RaidEvent") -> bool:
-    """Whether a cancel pressed on `ev` can post its fixed line in the signup channel: the run's first raid owns the
+    """Whether a cancel pressed on `ev` can post its fixed line in the thread on the sheet: the run's first raid owns the
     sheet and its channel, so a later raid whose first raid has already finished has neither (its cancel takes the raids
     still to play, and nothing posts). Read for the raid the cancel acts as (cancel_target)."""
     ev = cancel_target(rs, ev)
@@ -6364,7 +6377,7 @@ def asks_on_site(reg: Registry, ev: RaidEvent) -> int:
 
 # a log line's officer-only marks: free text people wrote (a reason, a note) and planning a member never reads
 _OFFICER_LOG = ("cancelled by", "lock (", "fill", "suggestion", "pre-lock", "pin ", "pinned", "board", "proposed", "reminded",
-                "autofill", "automatic asks", "callout", "early warning", "confirmation dms")
+                "autofill", "automatic asks", "automated fill requests", "callout", "early warning", "confirmation dms")
 
 
 def log_rows(reg: Registry, ev: RaidEvent) -> list[dict]:

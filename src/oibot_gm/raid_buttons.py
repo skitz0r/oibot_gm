@@ -300,9 +300,9 @@ async def cancel_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=
         await wiz.finish(i, line)
 
     note = [Field("reason", "Why? (optional)", required=False, paragraph=True, max_length=300,
-                  description="Officers only: the event's thread and the ops feed.", placeholder="never posted in the signup channel")]
+                  description="Officers only: the event's thread and the ops feed.", placeholder="never posted where members read")]
     if rc.cancel_tells_channel(rs, rs.events.get(key) or ev):  # a later raid once its first has finished: no sheet, no channel line
-        note.append(Field("notify", "Tell the channel?", [Opt("post", "Post a line in the signup channel", "fixed text, no reason", default=True),
+        note.append(Field("notify", "Tell the members?", [Opt("post", "Post a line in the thread on the sheet", "fixed text, no reason", default=True),
                                                           Opt("quiet", "No line — the sheet and the thread show it")]))
     await wiz.decide_box(interaction, box(), do=do, refresh=box, note=note)
 

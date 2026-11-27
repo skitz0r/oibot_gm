@@ -259,7 +259,7 @@ def test_open_seats_after_a_lock_as_it_stands_pause_the_asks_and_the_notice_says
     lock(bot, reg, rs, ev, fill=False)
     ev = rs.events[ev.key]
     assert ev.autofill_paused and ev.autofill_paused_by == "Jon"
-    assert sum("automatic asks paused by Jon" in x for x in ev.log) == 1
+    assert sum("Automated Fill Requests paused by Jon" in x for x in ev.log) == 1
     left = reg.members[ms[7].discord_id]
     said = [n["text"] for n in left.notices if n.get("kind") == "not_rostered"]
     assert said and said[-1].endswith(rc.LEFTOVER_PAUSED) and "DM" not in said[-1]
@@ -274,13 +274,15 @@ def test_a_full_board_as_it_stands_leaves_the_asks_on(reg, rs):
 
 
 def test_the_lock_keeps_its_signup_line(reg, rs):
-    bot = NightBot(reg, rs)
+    from test_event_threads import ThreadBot, post_sheet
+
+    bot = ThreadBot(reg, rs)
     ev, _ms = ten_with_board(reg, rs, placed=10)
-    ev.channel_id = bot.signup.id
-    rs.save(ev, "sheet (test)")
-    lock(bot, reg, rs, rs.events[ev.key], fill=False)
+    ev = post_sheet(bot, reg, rs, ev)
+    lock(bot, reg, rs, ev, fill=False)
     ev = rs.events[ev.key]
-    assert ev.lock_line and ev.lock_line[0] == bot.signup.id and "is locked" in bot.signup.sent[-1]["content"]
+    sheet = bot.signup.msgs[ev.message_id]
+    assert ev.lock_line and ev.lock_line[0] == sheet.thread.id and "is locked" in sheet.thread.lines()[-1], "kept, in the sheet's thread"
 
 
 # ---------------------------------------------------------------- a lineup is checked whole

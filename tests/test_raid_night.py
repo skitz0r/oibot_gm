@@ -349,7 +349,7 @@ def test_cancel_sends_no_dm_edits_the_ask_cards_and_keeps_the_reason_off_the_cha
     assert sum(len(v) for v in bot.dms.values()) == dms_before, "the DM rule: a cancel DMs nobody"
     edited = [m for m in bot.cards.values() if any("Cancelled" in t for t in card_texts(m))]
     assert len(edited) == 10, "every open ask card says Cancelled"
-    assert bot.signup.sent and "cancelled" in bot.signup.sent[-1]["content"] and "tank flu" not in bot.signup.sent[-1]["content"]
+    assert not any("tank flu" in str(c["content"]) for c in bot.signup.sent), "never loose in the channel (its line: test_event_threads)"
     assert any("tank flu" in u for u in bot.updates), "the reason is the officers' (the run's thread)"
     assert all(a["answer"] == "cancelled" for m in seated for a in reg.members[m.discord_id].placement_asks if a["roster"] == ev.team)
     assert "10 open ask card(s) now say Cancelled" in line
@@ -360,7 +360,7 @@ def test_cancel_without_a_notice_posts_nothing_in_the_channel(reg, rs):
     ev = open_test_run(reg, rs)
     ev.channel_id = bot.signup.id
     line = run(bot.cancel_run(reg, rs, ev, "Kara", None, notify=False))
-    assert not bot.signup.sent and "no line in the signup channel" in line
+    assert not bot.signup.sent and "no line on the sheet's thread" in line
 
 
 # ---------------------------------------------------------------- fill vs an officer's send; pause; DM failure
@@ -409,7 +409,7 @@ def test_paused_autofill_sends_nothing_on_its_own_but_an_officers_send_goes(reg,
     assert sent, "an officer's explicit send still works"
     assert rc.fill_state_text(reg, ev).startswith("Automated Fill Requests are paused by Jon. "), "one name for the lever on every surface (design §5.56 phase 2)"
     assert "already paused" in run(bot.set_autofill_paused(reg, rs, ev, True, by="Jon"))
-    assert "autofill" not in " ".join(ev.log[-2:]).lower() and "automatic asks paused by Jon" in ev.log
+    assert "autofill" not in " ".join(ev.log[-2:]).lower() and "Automated Fill Requests paused by Jon" in ev.log
 
 
 def test_the_switch_has_one_name_wherever_a_person_reads_it(reg, rs):
@@ -939,9 +939,9 @@ def test_plain_text_cancel_keeps_its_surface_and_can_be_quiet(reg, rs):
     ev.channel_id = bot.signup.id
     owner = reg.config.owner_discord_id
     preview = configops.describe(reg, ConfigOp(op="run_cancel", target=ev.key, value="quiet"))
-    assert "nobody gets a DM" in preview and "No line goes to the signup channel." in preview
+    assert "nobody gets a DM" in preview and "No line goes to the thread on the sheet." in preview
     line = run(configops.apply_async(reg, ConfigOp(op="run_cancel", target=ev.key, value="quiet"), "Jon", True, bot=bot, by_id=owner, via="chat"))
-    assert "no line in the signup channel" in line and not bot.signup.sent
+    assert "no line on the sheet's thread" in line and not bot.signup.sent
     audits = [t for _lvl, t in bot.ops.lines if "cancelled" in t and rc.run_words(reg, ev) in t]
     assert len(audits) == 1 and audits[0].startswith("[chat]"), audits
 

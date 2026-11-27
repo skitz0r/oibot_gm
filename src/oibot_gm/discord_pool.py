@@ -1235,7 +1235,9 @@ class LootLogMixin:
             ch = get(cfg.loot_channel_id) if get else None
             return ch, False
         ev = self.raids.store(reg).events.get(run_key) if run_key and hasattr(self, "raids") else None
-        tid = getattr(ev, "updates_thread_id", None) if ev is not None else None
+        from . import raidcycle as rc
+
+        tid = rc.updates_thread_of(self.raids.store(reg), ev) if ev is not None else None  # the event's one updates thread
         return (get(tid) if get and tid else None), True
 
     async def loot_log_post(self, guild_key: str, award, run_key: str | None, was: str | None) -> bool:

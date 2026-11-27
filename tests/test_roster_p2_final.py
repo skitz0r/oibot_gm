@@ -435,5 +435,6 @@ def test_board_edit_on_a_run_without_confirmations_says_nothing_about_confirming
     bot = B(reg, rs)
     sg = ev.signups[str(people["Healb"].discord_id)]
     run(bot.after_board_change(reg, rs, ev, rc.run_team(reg, ev), [sg], [], by="Officer"))
-    line = next(s["content"] for s in ch.sent if s["content"] and "board by" in s["content"])
+    assert not ch.sent, "no card, no thread: never loose in the officers' channel"
+    line = next(t for _lvl, t in bot.ops.lines if "board by" in t)  # the ops feed carries it (post_run_update)
     assert "Healb" in line and "asked to confirm" not in line

@@ -60,7 +60,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        Companion tokens (§5.50): issue_companion(reg, label, by, by_id, via, deliver_to=) = THE issue (deliver_to → the token DMed ONCE
                        via companion_dm_text — a credential the raid leader must install, an act under the DM rule — and never returned; a refused DM
                        withdraws it; else the value in the result for the site to show once), revoke_companion (sockets closed now), companion_rows
-                       LootLogMixin: the public loot log (LEDGER_LISTENERS → one line per award in the loot channel, else the run's updates thread; never
+                       LootLogMixin: the public loot log (LEDGER_LISTENERS → one line per award in the loot channel, else the event's updates thread (rc.updates_thread_of); never
                        the signup channel; loot_log off = nothing) with LootWishButton (`lootwish.<gk>:<item key>` → /me wishlist on that item)
                        Test bench (design §5.42): Member.test puppets; SetupMixin.test_seed/test_compose/test_comp/test_answer/puppet_asks/test_bench_clear =
                        THE verbs of /gm test seed|run|answer|compose|comp|clear, /api/test/*, plain text and MCP test_bench; a test run is keyed like

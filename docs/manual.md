@@ -278,12 +278,19 @@ understands; it answers in the words below.
   1* — numbers only), current whichever way the pin was set (`/raid set`, the site, plain text or MCP). A **locked** sheet shows the roster(s) group by group,
   a **Not rostered** row (joiners the lock left off), the Bench and No thanks rows, and a single **Can't make
   it** button. A **cancelled** or **finished** sheet says so and has no buttons.
+  The bot's lines about an event — *"🔒 … is locked: 19 rostered…"* at the lock, *"🛑 … is cancelled."* at a cancel —
+  go into a thread on that event's sheet, named for the event, never loose in the channel. Every raid of the event and a
+  lock after an unlock use the same thread. When the sheet is gone or the thread can't be made, no line is posted.
   The sheet lists who joined in columns, a class per column with one character per line (spec icon + name);
   after lock the columns are the groups, with ✅ / ⏳ / ❌ for each person's confirmation.
 - **Absences channel** — a pinned card with *I'll be away*; each absence is announced there (no reason shown).
 - **Roster channel (officers)** — health cards, roster cards at lock, fill progress (🧩 lines). Here and in the ops
-  channel an event is always named by its raid and start time (*Barrow Deeps Tue 8 Dec 7:30 PM*), never by an internal id. Each event's card
-  has an **updates thread** underneath where every ask, answer, freed seat, confirmation and expiry is logged. The
+  channel an event is always named by its raid and start time (*Barrow Deeps Tue 8 Dec 7:30 PM*), never by an internal id.
+  A roster channel that is also the signup channel is never used for these: the officers' cards then go to the ops
+  channel. Each event has one **updates thread**, under its first raid's officer card, where every ask, answer, freed
+  seat, confirmation, expiry, pause, move and cancel (with its reason) is logged — every raid of the event writes there,
+  and an archived thread is opened again rather than replaced. Before the event has a card, or when its card was
+  deleted, those lines go to the ops feed instead; they never go to the signup channel. The
   **loot council's thread** lives here too (else in the ops channel), §9.
 - **Analytics channel (officers)** — one card per raid: how many could play (mains) against its size, role counts
   have/need, buffs nobody brings, and where the minimums are short. The cards are edited in place
@@ -375,7 +382,7 @@ members of the Discord server can log in; officer pages follow the same rules as
 Events page and the Raids page's Readiness view. On a phone the rail is behind the menu button at the top left.
 
 **What the raid pages leave to Discord, plain text and MCP.** A few things the older raid pages did are not on Events,
-Schedules or Raids; each still works elsewhere. A cancel's reason and its line in the signup channel: the card's
+Schedules or Raids; each still works elsewhere. A cancel's reason and its line in the thread on the sheet: the card's
 *Cancel event…* or `/raid cancel`, plain text, MCP `cancel_run`. Another layout for an event (*Propose roster*, *another
 split like this*) and **Clear** of every officer's moves on a board: plain text, MCP `propose_split` / `set_layout`, a
 test event's card on the Test bench (on the Events page **Undo my moves** takes back your own). Opening the event of a
@@ -979,8 +986,8 @@ drops go there, even while the council before it is still open; until then the e
 any raid of the event cancels the whole event in the same press, its sheet and every later raid (*"Both raids of this
 event are cancelled."*). Once the first raid has finished, a cancel takes only the raids still to play — pressed on
 any raid of the event, the finished one too (the Events page's **Cancel event**, its card in Discord, plain text, MCP):
-the finished raid stays done, and nothing goes to the signup channel — the sheet and its channel line belong to the
-first raid — so the cancel screen has no *Tell the channel?* choice then (*"The Barrow Deeps raid of this event is
+the finished raid stays done, and no line goes to the thread on the sheet — the sheet and its thread belong to the
+first raid — so the cancel screen has no *Tell the members?* choice then (*"The Barrow Deeps raid of this event is
 cancelled."*). The event then moves from *Open* to *History* as finished. Such an event can't be unlocked (*"This
 event's first raid has ended, so its roster can't be unlocked, only cancelled."*), and Reschedule and Edit event are gone. A cancelled event is never reopened. If the bot restarts while an event is opening,
 the next minute adds the later raids that didn't open yet, once, with no second sheet. Discord's `/raid open` sets a
@@ -1366,9 +1373,9 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    go, who sees it and where (*"Both raids of this event are cancelled. The 18 who joined see it on the sheet, and
    nobody gets a DM. A cancelled event cannot be reopened."*; after the lock *"The 10 rostered see it on their cards…"*)
    — then an optional **reason** (officers only: it goes to the
-   event's updates thread and the ops feed, never to the signup channel) and **Tell the channel?** (a fixed line in the
-   signup channel — "🛑 Barrow Deeps … is cancelled." (after the lock, "Rostered seats are released." too) — on by default, or
-   no line). **Nobody is DMed.** Every open ask is closed and its card in the member's DMs is edited to *Cancelled*;
+   event's updates thread, or the ops feed when the event has no officer card yet, never to the signup channel) and
+   **Tell the members?** (a fixed line in the event's thread on its sheet — "🛑 Barrow Deeps … is cancelled." (after the
+   lock, "Rostered seats are released." too) — on by default, or no line). **Nobody is DMed.** Every open ask is closed and its card in the member's DMs is edited to *Cancelled*;
    the sheet changes to *Cancelled*; the Me page shows it. In Discord the card's **Cancel event…** and `/raid cancel` show
    the same box as the Events page with **Cancel event** (red: no reason, and the channel line is posted), **Cancel event
    with a note** (the form with the reason and the channel choice) and **Back**; a test event's card on the Test bench has
@@ -1377,7 +1384,7 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    line (use Discord, plain text or MCP for either). A cancel waits for a lock that is being built and then cancels the locked event — the lock
    stops asking people the moment the event is cancelled, and so do fill asks, suggestions and a Remind that are going
    out: nobody after the cancel is DMed, and a card that arrived just as it happened is edited to *Cancelled* at once.
-   Clearing the test bench cancels its test events without a line in the signup channel. A cancelled event is final: it
+   Clearing the test bench cancels its test events without a line on the sheet's thread. A cancelled event is final: it
    can't be reopened, and opening an event at the same time is refused ("That time's event was cancelled, and a
    cancelled event isn't opened again. Pick another time."; the open screen and the site say so before you press
    anything). A test event opened in the same minute as one
@@ -1510,7 +1517,7 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    - **Auto Lock goes off** for this event, so the clock does not lock it again; an officer locks it, or switches Auto
      Lock back on in **Edit event**. Automated Fill Requests paused at the lock are no longer paused. The sheet's reminder
      counts as sent: an unlock never brings a reminder DM, even past the reminder time.
-   - The lock cards in the officer channel and the *"🔒 … is locked"* line in the signup channel are deleted (an event
+   - The lock cards in the officer channel and the *"🔒 … is locked"* line in the sheet's thread are deleted (an event
      locked before the bot kept that line's id keeps the line); the health card comes back if the event had one. The
      lock's *Not rostered* notices are taken off the Me page, and so is the *seat released* notice of anyone put back to
      Join. Nobody gets a DM. One line in the event's thread and one
@@ -2686,7 +2693,8 @@ theirs or clear it" — and nothing is opened for them.
 
 **Where its traffic goes.** The test event's officer cards (health, lock, the updates thread) post in **the channel you
 opened it from**, marked 🧪 *Test event* — not in the roster channel (an event opened from the site or MCP uses the roster
-channel, as any event does, still marked). The puppets never get DMs of their own: what each would have got (open, nudge,
+channel, as any event does, still marked). Its lines go into a thread under its card; before it has a card they reach
+only the Test bench's feed, never the ops feed. The puppets never get DMs of their own: what each would have got (open, nudge,
 Confirm / Can't make it, fill asks) is collected into **one DM per batch** to the officer running *that* test event —
 "12 Confirm asks sent to puppets · 3 fill asks", the puppets' names, and an **Answer as puppets…** button that opens
 the answer screen on that event. Two officers rehearsing at once each get their own.
@@ -2789,7 +2797,7 @@ news post says can make the review read or write another server.
 | `member_inbox` | a member's open asks (where each waits: DM or the site, its deadline) and notices, as their Me page shows them |
 | `propose_split` · `set_strategy` · `autofill` · `set_layout` | preview a split (nothing saved; says why there can't be more rosters and who is left over) · remember the strategy · the bot builds the groups on the board · set the groups (pass `rev` from `get_run`: a board someone changed since is refused, not overwritten) |
 | `remind_unconfirmed` · `pause_autofill` · `withdraw_ask` · `reopen_run` · `unlock_run` · `start_now` | the Confirm / Can't DM again to the unconfirmed (once an hour per event) · pause (`paused=true`) or resume the fill engine for every raid of one event · close an ask already sent to a member (their card says never mind) · undo an end by mistake within the hour (never a cancelled event) · a locked event back to open signup with its rosters on the board, before its start (nobody is DMed; fill asks withdrawn; Auto Lock off) · a locked event starts this minute, before its start (confirmation deadlines stay; nobody is DMed) |
-| `lock_run` · `fill_seats` · `cancel_run` · `repost_sheet` | lock now (`autofill=false`, the default: exactly the board, refused with nobody on it; `autofill=true`: fill the empty slots) · preview who would be asked (before lock the suggestions, after lock the seats to fill — `plan.seats` with alternates and a `why`, `plan.lines`, `plan.batch_lines` = exactly what a send DMs, `plan.rev`), then `send=true` with the preview's `rev` sends exactly that batch (`picks` {seat: option} for an alternate; a changed plan is refused; without a `rev` a send is refused before lock, and after lock whenever the batch holds a role swap) · cancel with a reason (nobody is DMed: every open ask card says Cancelled and a fixed line goes to the signup channel unless `notify=false`; the reason stays with officers) · post a fresh copy of the sheet (the signup channel, or a channel you name) |
+| `lock_run` · `fill_seats` · `cancel_run` · `repost_sheet` | lock now (`autofill=false`, the default: exactly the board, refused with nobody on it; `autofill=true`: fill the empty slots) · preview who would be asked (before lock the suggestions, after lock the seats to fill — `plan.seats` with alternates and a `why`, `plan.lines`, `plan.batch_lines` = exactly what a send DMs, `plan.rev`), then `send=true` with the preview's `rev` sends exactly that batch (`picks` {seat: option} for an alternate; a changed plan is refused; without a `rev` a send is refused before lock, and after lock whenever the batch holds a role swap) · cancel with a reason (nobody is DMed: every open ask card says Cancelled and a fixed line goes to the event's thread on its sheet unless `notify=false`; the reason stays with officers) · post a fresh copy of the sheet (the signup channel, or a channel you name) |
 | `raid_set` · `raid_reset` | a raid's own settings — one, or several as `fields` in one write (slots, weights, lockout and length, split policy, notes, first open; sheet timing is `schedule_set`'s, a minimum `set_minimum`'s) · back to defaults — the raid's schedules go too, so pass the preview's `revs` back: a schedule added or changed since is refused, never removed unseen |
 | `aura_set` · `family_set` · `aura_reset` | what the guild learns about buffs (one field, or several as `fields` in one write; `family_new` = a new family by name) and stacking families (`value` = the whole map as an object, `value:<key>` = one beneficiary; no `family` + a `name` = a new family, its id made from the name) |
 | `add_absence` · `clear_absence` | away dates for someone (sheets answered / re-opened); `preview=true` writes nothing and names the live sheets it would touch and how · someone is back early |

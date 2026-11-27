@@ -193,7 +193,10 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        → LOCK_EMPTY_BOARD / LOCK_EMPTY_RAID (names the raid) for the WHOLE event from ev on, before any raid locks
                        (a raid with Join/Bench answers and nobody placed; nobody answered still locks); LEFTOVER_PAUSED = the Not rostered
                        notice's second sentence while Automated Fill Requests are paused (no DM promised). RaidEvent.lock_fill (the choice, on
-                       each part it locked) and lock_line ([channel, message] of the signup channel's "is locked" line). The lock: lock_forces(reg, rs, ev, players) → LockForces = THE builder of who is kept on and
+                       each part it locked) and lock_line ([channel, message] of the "is locked" line: the sheet's thread, or the signup channel
+                       for a line from before). sheet_thread_id (first raid: the public thread on the sheet, RaidMixin.sheet_thread);
+                       updates_thread_id read through updates_thread_of(rs, ev) = THE stored id of the event's ONE updates thread (the
+                       first raid's, else a later raid's own from before; the loot log's fallback and the site's thread link). The lock: lock_forces(reg, rs, ev, players) → LockForces = THE builder of who is kept on and
                        off (_solve_run's force_in / force_out, the lock box's count, kept_off_ids — role_plan never asks a kept-off name);
                        a Bench answer AUTO-FILL placed (ev.auto_placed) is not on the lock's board — not kept on, no group pin, not
                        first_come_bench_out's `fixed`: the solve decides again, so a Join after the Auto-fill comes first; one an officer placed
@@ -235,6 +238,14 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        lock_preview, cancel_run(notify) under board_lock (no DMs), reopen_run, remind (the older card goes dead), set_autofill_paused, withdraw_sent_ask;
                        sheets_restore = on_ready's first boot redraws every live sheet in place (refresh_sheet), so a look change reaches posted sheets;
                        every writer of ev.fill_asks holds plan_lock (_send_asks is the one sender)
+                       No event line is posted loose in a channel. officer_channel = THE officers' channel for new officer posts
+                       (roster, else ops; never the signup channel or the sheet's channel — a test run's own channel aside, D20).
+                       post_run_update → updates_thread (the event's one thread under the FIRST raid's officer card, fetched from
+                       ev.cards_channel_id, an archived one fetched not re-made, never under a card in the sheet channel) → else
+                       the ops feed (a test run: its test feed only), failures logged with the event key. sheet_thread = the
+                       event's public thread on its sheet (sheet_thread_id on the first raid; a re-posted sheet starts a new one):
+                       the lock line and the cancel line go there. _thread_on reuses a message's existing thread; _channel
+                       fetches what the cache lacks.
                        lock_run(…, fill=True) / lock_parts(…, fill=) / lock_preview(…, fill=) (issue 14): fill=False = the board as it stands
                        (rc.board_as_it_stands; LOCK_EMPTY_BOARD is a failed lock: lock_error, the scheduler's 15-minute back-off); seats left open
                        with Automated Fill Requests on pause them on every raid of the event (autofill_paused, by = the locker, one log line

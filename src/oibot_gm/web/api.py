@@ -1112,10 +1112,11 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         sessions = run_sessions(reg, ev)
         thread = next((s.raid_thread_id for s in sessions if s.raid_thread_id), None)
         card = ev.cards.get("lock:0") or ev.cards.get("health")
+        updates = rc.updates_thread_of(bot.raids.store(reg), ev)  # one thread for every raid of the event (its first raid's)
         return {"sheet": discord_url(reg, ev.channel_id, ev.message_id) if ev.message_id else None,
                 "card": discord_url(reg, ev.cards_channel_id, card) if card and ev.cards_channel_id else None,  # the lock card (the raid-night hub), else the health card
-                "thread": discord_url(reg, ev.updates_thread_id),  # the run's updates thread (design §2.5 links{sheet,card,thread})
-                "updates": discord_url(reg, ev.updates_thread_id), "loot": discord_url(reg, thread)}
+                "thread": discord_url(reg, updates),  # the event's updates thread (design §2.5 links{sheet,card,thread})
+                "updates": discord_url(reg, updates), "loot": discord_url(reg, thread)}
 
     def loot_json(reg, ev) -> dict:
         """The run's loot council at a glance (the SheetCard / lock card hub): open or not, its thread, awards recorded,
@@ -1769,7 +1770,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     async def run_cancel(request: Request, key: str):
         """Cancel the run — the one verb every surface calls (RaidMixin.cancel_run): {reason?, notify?}. Nobody is DMed
         (the DM rule): the sheet is edited to its final state, every open ask card says Cancelled, `notify` (default true)
-        posts one fixed line in the signup channel (never the reason, which stays in the run's thread and the ops feed).
+        posts one fixed line in the event's thread on the sheet (never the reason, which stays in the updates thread and the ops feed).
         A done / cancelled run is refused. The returned line says what was done."""
         v, d = await body(request, officer=True)
         rs = bot.raids.store(v.reg)

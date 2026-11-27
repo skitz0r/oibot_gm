@@ -655,8 +655,8 @@ def cancel_run(run: str, reason: str | None = None, notify: bool = True, guild: 
     """Cancel a live run the way /raid cancel does. Nobody is DMed: the sheet and officer cards show it cancelled, every
     open ask (confirmation, fill, pre-lock) closes and its DM card is edited to say Cancelled, everyone on the run gets a
     notice on their Me page, and with `notify` (default
-    true) one fixed line goes to the signup channel — never the reason, which stays in the run's thread and the ops
-    feed. `notify=false` posts no channel line. A done or cancelled run is refused."""
+    true) one fixed line goes to the event's thread on its signup sheet — never the reason, which stays in the updates
+    thread and the ops feed. `notify=false` posts no line there. A done or cancelled run is refused."""
     return msg(api(guild).post(f"/api/run/{run}/cancel", {"reason": reason or "", "notify": bool(notify)}))
 
 

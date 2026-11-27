@@ -178,8 +178,8 @@ Runs (officer; target = the event key like bd-k7m2qx from the live-events list, 
   run_lock: target, value=fill when they ask the lock to fill the empty roster slots ("lock and fill …", "lock and auto-fill …");
     empty = lock exactly as the board stands ("lock …": only the names placed on the board are rostered) — confirmation DMs
     to everyone rostered.
-  run_cancel: target, reason=<optional, for the officers only>, value=quiet when they ask for no line in the signup channel
-    (default: one fixed line there; nobody is DMed either way — the sheet and every open ask card say Cancelled).
+  run_cancel: target, reason=<optional, for the officers only>, value=quiet when they ask for no line on the sheet's thread
+    (default: one fixed line in the event's thread on its signup sheet; nobody is DMed either way — the sheet and every open ask card say Cancelled).
   run_remind: target — after lock: the Confirm / Can't DM again to everyone rostered who hasn't answered (their existing ask;
     at most once an hour per run).
   run_pause: target, value=pause|resume — stop / restart the fill engine for this run (an officer's own fill send still goes).
@@ -2195,7 +2195,7 @@ CANCEL_QUIET = {"quiet", "silent", "no line", "no notice", "no announcement", "n
 
 
 def _cancel_notify(op: ConfigOp) -> bool:
-    """run_cancel: whether the fixed line goes to the signup channel (value=quiet → none). The same choice the cancel
+    """run_cancel: whether the fixed line goes to the event's thread on its sheet (value=quiet → none). The same choice the cancel
     screen's notify toggle makes on Discord and the site."""
     return (op.value or "").strip().lower() not in CANCEL_QUIET
 
@@ -3164,7 +3164,7 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         quiet = not _cancel_notify(op)
         lines = consequence("cancel", reg, ev, rs=rs)  # who it touches and how they hear, from code (the confirm screen's own sentences)
         tail = ("" if not rc.cancel_tells_channel(rs, ev)  # a later raid once the first has finished: no sheet, no channel line
-                else " No line goes to the signup channel." if quiet else " One fixed line goes to the signup channel, never the reason.")
+                else " No line goes to the thread on the sheet." if quiet else " One fixed line goes to the thread on the sheet, never the reason.")
         return f"cancel {label}" + (f": {op.reason}" if op.reason else "") + ". " + " ".join(lines) + tail
     if op.op == "run_fill":
         v = (op.value or "preview").strip().lower()
