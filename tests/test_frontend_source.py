@@ -1299,7 +1299,7 @@ def test_a_signups_row_menu_offers_that_members_role_switch():
     sw = _code_only((SRC / "components" / "events" / "RoleSwitches.tsx").read_text())
     assert "export function useSwitchPress(" in sw and "useSwitchPress(view, onReload)" in sw, "the section's button presses through the shared hook"
     sec = _code_only((SRC / "components" / "events" / "SignupsSection.tsx").read_text())
-    assert "useSwitchPress(ev, onDone)" in sec and "switchPress(r)" in sec and "{switchDialog}" in sec, "the menu item takes the same press; its box lives on the section"
+    assert "useSwitchPress(ev, onDone)" in sec and "switchPress(r, { scope: \"event\" })" in sec and "{switchDialog}" in sec, "the menu item takes the same press; its box lives on the section, the whole event (issue 15)"
     assert "page_words.switch_item" in sec and "r.button" in sec and "r.to" in sec and 'kind="spec"' in sec and "r.uid === p.uid" in sec
     assert not re.search(r"[\"'`>]\s*(Switch|Answer for them|Ask)\b", sec), "the item's words are the server's"
     menu = _code_only((SRC / "components" / "board" / "MemberMenu.tsx").read_text())

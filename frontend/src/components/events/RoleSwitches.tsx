@@ -30,15 +30,16 @@ function ScopeField({ scope, onPick }: { scope: NonNullable<Box["scope"]>; onPic
  *  box's fp as `seen`: a box that changed comes back fresh, a list that changed brings the row's fresh box (or, when the
  *  row is gone, says so in the server's words and the page reloads). `dialog` is mounted by the caller, which stays
  *  mounted while the box is open (a menu that closes never takes the box with it). */
-export function useSwitchPress(view: EventView, onReload: () => void): [(row: SwitchRow) => Promise<void>, React.ReactNode] {
+export function useSwitchPress(view: EventView, onReload: () => void): [(row: SwitchRow, opts?: { scope?: string }) => Promise<void>, React.ReactNode] {
   const [ask, dialog, replace] = useConfirmBox(["run:", "member"]);
   const switches = view.switches;
-  async function press(first: SwitchRow) {
+  /** `opts.scope` fixes the reach (the Signups ⋮ "Switch: Holy" = the whole event, issue 15): no choice is drawn. */
+  async function press(first: SwitchRow, opts: { scope?: string } = {}) {
     let row = first;
     let said = "";
     let gone = "";
     let revs: Record<string, string> | null = null;  // the plan revs a 409 brought, once one did
-    let scope = row.box.scope?.value || null;  // the box's choice on screen (issue 15): sent with every preview and the press
+    let scope = (row.box.scope ? opts.scope : null) || row.box.scope?.value || null;  // the box's choice on screen (issue 15): sent with every preview and the press
     let seq = 0;
     const url = () => `/api/run/${encodeURIComponent(row.part)}/switch`;
     const body = (extra: object) => ({ uid: row.uid, character: row.character, spec: row.spec, part: row.part, seat: row.seat, option: row.option, rev: revs ? revs[row.part] : switches.revs[row.part], ...(scope ? { scope } : {}), ...extra });
@@ -58,9 +59,10 @@ export function useSwitchPress(view: EventView, onReload: () => void): [(row: Sw
       gone = b.error || "";
       return null;
     };
+    const fixed = !!(opts.scope && row.box.scope);
     const done = await ask({
-      box: row.box,
-      fields: row.box.scope ? <ScopeField scope={row.box.scope} onPick={pick} /> : undefined,
+      box: fixed && row.box.scope?.value !== opts.scope ? await preview() : row.box,
+      fields: row.box.scope && !fixed ? <ScopeField scope={row.box.scope} onPick={pick} /> : undefined,
       refresh: preview,
       act: async (fp) => {
         try { said = (await api.post<{ message: string }>(url(), body({ seen: fp }))).message; return null; }

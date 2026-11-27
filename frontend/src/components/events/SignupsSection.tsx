@@ -33,7 +33,7 @@ export function SignupsSection({ ev, meta, onDone }: { ev: EventView; meta: Meta
     return { key: `${r.character}:${r.spec}:${r.part}`,
       icon: cls ? <GameIcon meta={meta} kind="spec" id={`${cls}:${r.spec}`} size={16} title={`${r.spec} ${cls}`} /> : undefined,
       label: meta.page_words.switch_item.split("{button}").join(r.button).split("{to}").join(r.to),
-      onPick: () => { switchPress(r).catch(fail); } };
+      onPick: () => { switchPress(r, { scope: "event" }).catch(fail); } };  // a Signups row's switch is the whole event (issue 15)
   });
   return (
     <ViewSection title="Signups" action={live ? <SomeoneElse run={ev.key} people={ev.people} onDone={onDone} /> : undefined}>
