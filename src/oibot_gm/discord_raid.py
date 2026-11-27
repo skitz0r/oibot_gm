@@ -1124,7 +1124,7 @@ class RaidMixin:
         roster_i = seat[0]
         group_i = next((k for k, g in enumerate(ev.all_rosters[roster_i].groups)
                         if seat[1].signup_name in g or sg.display_name in g), group_i)
-        if any(a["roster"] == ev.team and a.get("answer") is None for a in m.placement_asks):
+        if rc.open_ask(m, ev) is not None:
             return False  # already asked and not answered: the card they hold still works (a re-ask would reset it)
         # the seat itself is in the run file (ev.rosters); the member file only gets the confirmation ask
         ask = reg.add_placement_ask(m.discord_id, ev.team, sg.character, by, channel="web" if m.dm_opt_out else "dm")
@@ -1232,6 +1232,15 @@ class RaidMixin:
         asked) while the confirmation deadline is ahead. Returns how many were asked."""
         if ev.state != "locked" or not ev.all_rosters or (reg.key, ev.key) in self._confirming():
             return 0
+        posting = self._lock_posting()  # the resumed fan-out is the lock's: an unlock waits for it (rc.UNLOCK_SENDING)
+        posting.add((reg.key, ev.key))
+        try:
+            return await self._recover_lock(reg, rs, ev)
+        finally:
+            posting.discard((reg.key, ev.key))
+
+    async def _recover_lock(self, reg, rs, ev) -> int:
+        """recover_lock's work, inside the lock's still-posting guard."""
         team = rc.run_team(reg, ev)
         ch = self.officer_channel(reg, ev)
         if ch is not None and any(f"lock:{i}" not in ev.cards for i in range(len(ev.all_rosters))):

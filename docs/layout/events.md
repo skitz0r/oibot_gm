@@ -81,6 +81,10 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        notices; unlock(…, fills=False) leaves the fill asks to the caller's plan_lock. UNLOCK_SENDING (unlock_refusal's
                        `sending`). pause_scope(rs, ev, paused) → (parts, flip) = THE reach of pause / resume (set_autofill_paused and
                        plain text's run_pause review).
+                       Fix round 2: open_ask(m, ev) = THE "holds an open Confirm ask on the event" (latest since it opened), read by
+                       confirm_plan, unasked_seats and RaidMixin.confirm_one; prune_board keeps a played_as seat whose member signs up for
+                       that very spec (same character) and drops the mark; recover_lock runs inside _lock_posting (an unlock is refused
+                       during a recovery too); confirm_open_layout draws the played_as spec.
                        Start now (issue 14, Task 6): start_now_refusal(reg, rs, ev, at=None) (START_NOW_OPEN/DONE/CANCELLED/STARTED; the first
                        raid decides; rs None = the card renderer, `ev` answers for itself) and start_now(reg, rs, ev, by, save=True) → Moved:
                        the start becomes this minute through reschedule(…, keep_confirm=True) — every confirm-by stays (the owner's ruling:

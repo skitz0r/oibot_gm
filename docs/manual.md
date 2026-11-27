@@ -1485,7 +1485,8 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    - **The board is the locked roster.** Every rostered name stays in the group the lock, a later drag or a fill put it in,
      and counts as placed by hand: the next lock keeps it there, and nobody's **Undo my moves** takes it off. Joiners who
      weren't rostered are in *Not placed*, Bench answers in *Bench*. Someone the lock rostered on their offspec (a
-     Retribution paladin rostered as Holy) stays on the board as that spec. Locking again as it stands with nothing changed
+     Retribution paladin rostered as Holy) stays on the board as that spec; if they then switch to that spec themselves
+     they keep their place, and any other change of spec or character takes them off the board as usual. Locking again as it stands with nothing changed
      rosters exactly the same people in the same groups, as the same characters and specs.
    - **Who comes back.** Someone whose seat went after the lock without them saying so — their confirmation ran out, or an
      officer dragged them off the roster — is a joiner again, in *Not placed*. Someone who pressed *Can't make it*,

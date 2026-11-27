@@ -495,3 +495,88 @@ def test_an_unlock_while_the_lock_is_still_sending_is_refused(reg, rs):
     bot._lock_posting().discard((reg.key, ev.key))
     run(bot.unlock_run(reg, rs, rs.events[ev.key], "Jon"))
     assert rs.events[ev.key].state == "open"
+
+
+# ---------------------------------------------------------------- fix round 2
+
+def _paladins_unlocked(reg, rs):
+    """P5 again: the fill lock rosters two Retribution / Holy paladins as Holy; then unlocked. → bot, event, a Holy-seated name."""
+    bot = NightBot(reg, rs)
+    ev = schedule_event(reg, rs)
+    ms = people(reg, 2, TANK) + people(reg, 8, ("Paladin", "Retribution"), off="Holy")
+    join(reg, rs, ev, ms)
+    lock(bot, reg, rs, rs.events[ev.key], fill=True)
+    ev = rs.events[ev.key]
+    holy = next(p.signup_name for r in ev.all_rosters for p in r.selected if p.spec == "Holy")
+    rc.unlock(reg, rs, ev, "Jon")
+    return bot, rs.events[ev.key], holy
+
+
+def test_an_offspec_seat_whose_member_now_signs_up_for_that_spec_keeps_its_place(reg, rs):
+    bot, ev, holy = _paladins_unlocked(reg, rs)
+    sg = rc.signup_by_name(ev, holy)
+    sg.spec, sg.offspec, sg.role = "Holy", "Retribution", "healer"  # their own spec for the night is now the seat's
+    rs.save(ev, "respec (test)")
+    ev = rs.events[ev.key]
+    assert holy in {n for g in ev.layout for n in g}, "agrees with the seat: the place stands"
+    assert holy not in ev.played_as, "their own spec plays it now"
+    lock(bot, reg, rs, ev, fill=False)
+    seat = next(p for r in rs.events[ev.key].all_rosters for p in r.selected if p.signup_name == holy)
+    assert seat.spec == "Holy" and seat.role == "healer"
+
+
+def test_an_offspec_seat_whose_member_changes_to_another_spec_leaves_the_board(reg, rs):
+    bot, ev, holy = _paladins_unlocked(reg, rs)
+    sg = rc.signup_by_name(ev, holy)
+    sg.spec, sg.offspec, sg.role = "Protection", "Retribution", "tank"
+    rs.save(ev, "respec (test)")
+    ev = rs.events[ev.key]
+    assert holy not in {n for g in ev.layout or [] for n in g} and holy not in ev.played_as, "a different spec: Not placed, as now"
+
+
+def test_the_kept_confirm_card_shows_the_spec_they_were_rostered_on(reg, rs):
+    from oibot_gm.raid_views import confirm_open_layout
+
+    bot, ev, holy = _paladins_unlocked(reg, rs)
+    sg = rc.signup_by_name(ev, holy)
+    asked = []
+    confirm_open_layout(reg, ev, lambda kind, key, *a, **k: asked.append(key) or "", sg, sg.discord_id)
+    assert asked == ["Paladin:Holy"], asked
+
+
+def test_an_unlock_during_a_lock_recovery_is_refused(reg, rs, monkeypatch):
+    bot, ev, _ms = locked_event(reg, rs)
+    ev.cards.pop("lock:0", None)  # a lock card the interrupted lock never posted: the recovery re-posts it
+    rs.save(ev, "card missing (test)")
+    refused = []
+
+    async def post_lock_cards(reg_, rs_, ev_, team, ch, only_missing=False):
+        try:
+            await bot.unlock_run(reg_, rs_, ev_, "Jon")
+        except RegistryError as e:
+            refused.append(str(e))
+        return 0
+    monkeypatch.setattr(bot, "officer_channel", lambda reg_, ev_=None: object())
+    monkeypatch.setattr(bot, "post_lock_cards", post_lock_cards)
+    run(bot.recover_lock(reg, rs, rs.events[ev.key]))
+    assert refused == [rc.UNLOCK_SENDING] and rs.events[ev.key].state == "locked"
+    assert (reg.key, ev.key) not in bot._lock_posting(), "the guard ends with the recovery"
+
+
+def test_a_stale_open_ask_from_before_the_event_opened_reads_the_same_in_the_box_and_the_sends(reg, rs):
+    bot = NightBot(reg, rs)
+    ev = schedule_event(reg, rs)
+    ms = base_eight(reg)
+    join(reg, rs, ev, ms)
+    ev = rs.events[ev.key]
+    ev.layout = [[m.display_name for m in ms[:5]]]
+    rs.save(ev, "board (test)")
+    stale = reg.members[ms[0].discord_id]
+    stale.placement_asks.append({"roster": ev.team, "character": stale.main.label, "asked_at": "2000-01-01T00:00:00+00:00",
+                                 "answer": None, "answered_at": None, "by": "lock", "channel": "dm"})
+    plan = rc.confirm_plan(reg, ev, [m.discord_id for m in ms[:5]])
+    assert stale.discord_id in plan.asked and not plan.earlier, "the box: asked, as on a first lock"
+    dms = len(bot.dms.get(stale.discord_id, []))
+    lock(bot, reg, rs, ev, fill=False)
+    assert len(bot.dms.get(stale.discord_id, [])) == dms + 1, "the sends agree: asked"
+    assert rc.open_ask(reg.members[stale.discord_id], rs.events[ev.key]) is not None

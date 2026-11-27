@@ -761,11 +761,13 @@ CONFIRM_OPEN = ("An officer unlocked the event to change the roster, so it is op
 def confirm_open_layout(reg: Registry, ev: rc.RaidEvent, ico, sg, uid: int) -> discord.ui.LayoutView:
     """A Confirm / Can't DM kept open by an unlock (issue 14), edited in place: the roster is open again, their answer
     still counts, nothing runs out while it is open — no group and no deadline (neither exists now). The same buttons
-    answer the same ask; the next lock redraws it with its seat (RaidMixin.reconcile_asks)."""
+    answer the same ask; the next lock redraws it with its seat (RaidMixin.reconcile_asks). The spec is the one they were
+    rostered on (an offspec seat's played_as), as the board shows it."""
     ui = discord.ui
     rd = reg.raid_def(ev.instance)
+    spec = ev.played_as.get(sg.display_name) or sg.spec
     head = _header(reg, ev, f"The roster is open again · {rd.get('name', ev.instance)}",
-                   [f"{ico('spec', f'{sg.cls}:{sg.spec}')} **{sg.character}**", CONFIRM_OPEN])
+                   [f"{ico('spec', f'{sg.cls}:{spec}')} **{sg.character}**", CONFIRM_OPEN])
     view = ui.LayoutView(timeout=None)
     view.add_item(ui.Container(head, ui.ActionRow(PlaceButton(reg.key, ev.team, uid, "yes"), PlaceButton(reg.key, ev.team, uid, "no")),
                                accent_colour=TEAL))

@@ -4930,7 +4930,11 @@ def prune_board(ev: RaidEvent) -> list[str]:
         for n in g:
             sg = signup_by_name(ev, n)
             what = f"{sg.character}|{sg.spec}" if sg is not None else ""
-            if sg is None or sg.status not in ("in", "sub") or str(sg.discord_id) in out or ev.placed_as.get(n, what) != what:
+            was = ev.placed_as.get(n, what)
+            # an unlocked offspec seat (played_as) whose member now signs up for that very spec, same character: they agree
+            # with the seat, so the place stands (their own spec then plays it; the played-as mark is no longer needed)
+            agrees = sg is not None and ev.played_as.get(n) == sg.spec and was.split("|", 1)[0] == sg.character
+            if sg is None or sg.status not in ("in", "sub") or str(sg.discord_id) in out or (was != what and not agrees):
                 gone.append(n)
                 continue
             keep[n] = what
@@ -4942,7 +4946,8 @@ def prune_board(ev: RaidEvent) -> list[str]:
         ev.auto_placed = [n for n in ev.auto_placed if n not in gone]
         ev.log.append("off the board: " + ", ".join(gone))
     ev.placed_as = keep
-    ev.played_as = {n: v for n, v in ev.played_as.items() if n in keep}  # a name off the board plays as they signed
+    # a name off the board plays as they signed; one whose own spec is now the seat's needs no mark
+    ev.played_as = {n: v for n, v in ev.played_as.items() if n in keep and keep[n] != f"{keep[n].split('|', 1)[0]}|{v}"}
     return gone
 
 
@@ -5631,6 +5636,14 @@ def _event_asks(m: Member, ev: RaidEvent) -> list[dict]:
     return [a for a in m.placement_asks if a["roster"] == ev.team and (a.get("asked_at") or "") >= since]
 
 
+def open_ask(m: Member | None, ev: RaidEvent) -> dict | None:
+    """THE "holds an open Confirm ask on `ev`": their latest ask on the event (_event_asks: since it opened) is unanswered.
+    confirm_plan (the lock box and the relock) and RaidMixin.confirm_one (who is not asked again) both read it, so a stale
+    open ask from before the event opened never makes them disagree."""
+    asks = _event_asks(m, ev) if m is not None else []
+    return asks[-1] if asks and asks[-1].get("answer") is None else None
+
+
 def standing_yes(m: Member | None, ev: RaidEvent) -> dict | None:
     """`m`'s Confirm on `ev` that still holds: their latest ask on the event answered yes, and no seat they held has gone
     since (lapse_yes). A lock after an unlock does not ask them again."""
@@ -5673,18 +5686,16 @@ def confirm_plan(reg: Registry, ev: RaidEvent, rostered) -> ConfirmPlan:
     on = {int(u) for u in rostered}
     for uid in dict.fromkeys(int(u) for u in rostered):
         m = reg.members.get(uid)
-        asks = _event_asks(m, ev) if m is not None else []
         if standing_yes(m, ev) is not None:
             plan.confirmed.append(uid)
-        elif asks and asks[-1].get("answer") is None:
+        elif open_ask(m, ev) is not None:
             plan.waiting.append(uid)
         else:
             plan.asked.append(uid)
     for m in reg.members.values():
         if m.discord_id in on:
             continue
-        asks = _event_asks(m, ev)
-        if asks and (asks[-1].get("answer") is None or standing_yes(m, ev) is not None):
+        if open_ask(m, ev) is not None or standing_yes(m, ev) is not None:
             plan.closed.append(m.discord_id)
     return plan
 
@@ -5873,7 +5884,7 @@ def unasked_seats(reg: Registry, ev: RaidEvent) -> list[tuple[int, int, Signup]]
                     continue
                 if any(a["roster"] == ev.team and (a.get("asked_at") or "") >= since for a in m.placement_asks):
                     continue
-                if standing_yes(m, ev) is not None or any(a.get("answer") is None for a in _event_asks(m, ev)):
+                if standing_yes(m, ev) is not None or open_ask(m, ev) is not None:
                     continue  # a lock after an unlock: a yes or an ask still open from before it is not "unasked"
                 out.append((i, gi, sg))
     return out
