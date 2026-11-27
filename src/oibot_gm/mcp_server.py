@@ -617,8 +617,8 @@ def lock_run(run: str, autofill: bool = False, guild: Guild = None) -> str:
     """Lock an open run now: roster cards are posted, and everyone rostered who hasn't been asked yet gets a Confirm /
     Can't make it DM — someone who already confirmed, or whose ask is still open (a lock after an unlock), is not asked
     again; someone with an ask or a yes who is no longer rostered has it closed. autofill=false (the default, as the site's unticked "Auto-fill empty roster slots"): exactly the names on the board
-    are rostered, nobody added, and Automated Fill Requests pause when slots stay open; refused when people answered
-    and nobody is on the board. autofill=true: the lock fills the empty slots from those who joined, as the scheduled
+    are rostered, nobody added, and Automated Fill Requests pause when slots stay open; with nobody on a raid's board,
+    that raid's roster locks empty (the officer's choice: say so first). autofill=true: the lock fills the empty slots from those who joined, as the scheduled
     lock does. Look first (get_run) and say which you will do."""
     return msg(api(guild).post(f"/api/run/{run}/lock", {"fill": bool(autofill)}))
 

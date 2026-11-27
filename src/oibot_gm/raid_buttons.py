@@ -220,10 +220,7 @@ async def lock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=No
         if cur.state != "open":
             await wiz.finish(i, f"{rc.run_words(reg, cur)} was already locked, so nothing was changed.")
             return
-        by, f = i.user.display_name, lock_fill(reg, cur, rs, asked)
-        if not f and (why := rc.lock_empty_refusal(reg, rs, cur)) is not None:  # refused here: never the lock's failure path
-            await wiz.finish(i, why)
-            return
+        by, f = i.user.display_name, lock_fill(reg, cur, rs, asked)  # an empty board locks empty: the box said so (F3)
         try:
             line = await bot.lock_run(reg, rs, cur, by=by, fill=f, by_person=True)
         except RegistryError as e:  # someone else is locking it (rc.SolverBusy), or it stopped being open: nothing happened

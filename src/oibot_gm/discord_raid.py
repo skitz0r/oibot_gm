@@ -996,13 +996,11 @@ class RaidMixin:
         Nothing about the run changes but `ev.last_proposal` (the layout shown, with who saw it: the same officer's plain
         text "use it" puts it on the board, also after a restart — configops._propose). RegistryError (SolverBusy, or the
         solver's own sentence) when no preview can be made. `fill=False`: the lock as it stands (rc.board_as_it_stands,
-        no solve) — refused with rc.LOCK_EMPTY_BOARD as that lock is."""
+        no solve) — an empty board previews as the empty roster a person's lock writes (F3)."""
         if ev.state != "open":
             raise RegistryError(f"{run_title(reg, ev)} is already {rc.RUN_STATE_WORDS.get(ev.state, ev.state).split(' — ')[0]}, and the preview is for an open sheet.")
         strategy = rc.run_strategy(reg, ev)  # the lock's own strategy and budget: the preview is the roster the lock builds
         if not fill:  # exactly the board: nothing to solve
-            if (why := rc.lock_empty_refusal(reg, rs, ev)) is not None:
-                raise RegistryError(why)
             rosters = rc.board_as_it_stands(reg, rs, ev)
             ev.last_proposal = {"layout": [list(g) for r in rosters for g in r.groups], "strategy": strategy, "rev": rc.board_rev(reg, ev),
                                 "by": by, "by_id": by_id, "at": rc.now(), "kind": "lock preview"}
@@ -1027,14 +1025,16 @@ class RaidMixin:
         the lock solve again on the live run (rc.solve_inputs), up to rc.LOCK_SOLVES times; still moving after that,
         the lock fails and the sheet stays open — nobody is rostered from answers they already changed.
         `fill` (issue 14): True fills the open seats with the solver (the board's places kept, the Bench last); False locks
-        the board AS IT STANDS (rc.board_as_it_stands: exactly the placed names in their groups, nobody added), fails
-        with rc.LOCK_EMPTY_BOARD when people answered and nobody is placed, and — seats left open with Automated Fill
-        Requests on — pauses those asks for the event. Every later raid of the event locks with the same choice
+        the board AS IT STANDS (rc.board_as_it_stands: exactly the placed names in their groups, nobody added) — the
+        clock's lock fails with rc.LOCK_EMPTY_BOARD when people answered and nobody is placed, a person's writes that
+        raid's roster empty (F3: the owner's choice) — and, seats left open with Automated Fill Requests on, pauses those
+        asks for the event. Every later raid of the event locks with the same choice
         (lock_parts; stored as `ev.lock_fill`). A confirm deadline already past at the lock becomes rc.late_confirm_by's.
-        `by_person` (a lock a person pressed: the site, Discord, plain text, MCP): a lock the board can't make — as it
-        stands with nobody placed (rc.lock_empty_refusal), or everyone who joined kept off (rc.lock_all_off) — raises
-        RegistryError with that sentence and writes nothing (no lock_error, no "lock failed" line): the box refused it a
-        moment ago or the board changed since. The scheduler keeps the failure path (its retry and back-off read it).
+        `by_person` (a lock a person pressed: the site, Discord, plain text, MCP): a lock the board can't make — everyone
+        who joined kept off (rc.lock_all_off) — raises RegistryError with that sentence and writes nothing (no lock_error,
+        no "lock failed" line): the box refused it a moment ago or the board changed since; an empty board locks empty
+        (every later raid of the event too, lock_parts carrying `by_person`). The scheduler keeps the failure path for
+        an empty board (its retry and back-off read it).
         A lock after an unlock reconciles the Confirm asks: a rostered person with a yes on the event is not asked again,
         one with an ask still open keeps it (its card redrawn with the new group), a newly rostered one is asked, and one
         who held an ask or a yes and is off the roster now has it closed (`unrostered`, the card edited) and gets the Not
@@ -1046,8 +1046,6 @@ class RaidMixin:
             if ev.state != "open":
                 raise RegistryError(f"{run_title(reg, ev)} is already {ev.state}.")
             if by_person:  # read under board_lock: the board can't change between this and the lock
-                if not fill and (why := rc.lock_empty_refusal(reg, rs, ev)) is not None:
-                    raise RegistryError(why)
                 if fill and rc.lock_all_off(reg, rs, ev):
                     raise RegistryError(rc.SOLVER_WORDS["all_off"])
             # solve on a copy first: the run only becomes locked once a roster exists, so a failed solve (or a crash
@@ -1057,7 +1055,9 @@ class RaidMixin:
                 seen, inputs = len(trial.log), rc.solve_inputs(trial)
                 ev.lock_tried_at = rc.now()
                 if not fill:  # as it stands: read from the board under board_lock, so nothing moves meanwhile
-                    why = rc.lock_empty_refusal(reg, rs, trial)  # the whole event, before any raid of it locks
+                    # the clock's lock: an empty board anywhere in the event fails it whole, before any raid locks; a
+                    # person's lock writes an empty raid's roster empty (F3)
+                    why = None if by_person else rc.lock_empty_refusal(reg, rs, trial)
                     if why is None:
                         trial.rosters = rc.board_as_it_stands(reg, rs, trial)
                     break
@@ -1161,10 +1161,10 @@ class RaidMixin:
             posting.discard((reg.key, ev.key))
         first = rc.first_part(rs, ev)
         chaining: set = self.__dict__.setdefault("_parts_locking", set())
-        tail = None if (reg.key, first.key) in chaining else await self.lock_parts(reg, rs, first, by, fill=fill)
+        tail = None if (reg.key, first.key) in chaining else await self.lock_parts(reg, rs, first, by, fill=fill, by_person=by_person)
         return f"{run_title(reg, ev)}: locked by {by}, {len(ev.all_rosters)} roster(s), {sent} confirmation DM(s)" + (f" · {tail}" if tail else "")
 
-    async def lock_parts(self, reg, rs, first, by: str, fill: bool = True) -> str | None:
+    async def lock_parts(self, reg, rs, first, by: str, fill: bool = True, by_person: bool = False) -> str | None:
         """The first raid's lock builds every later raid of the run (design §5.62), in order: each solves from the run's
         answers with the people rostered on the raids before it preferred (rc.LEAD_SEAT_BONUS), flips to locked and posts
         its own lock cards; it never confirms. A short role never stops one (the solver rosters whoever can play and the
@@ -1173,8 +1173,8 @@ class RaidMixin:
         rest). Anything a part's lock raises (rc.SolverBusy, a cancel between the state check and the lock, a Discord
         error) never turns an earlier lock into a failure: one ops warn per part and the tail "follow-on not locked:
         <why>". Also called after a later part's own lock (the scheduler's retry) to carry on down the chain. None when
-        nothing was tried. `fill`: the first raid's lock choice (issue 14), every later raid locks with it. → the parts'
-        lines, joined."""
+        nothing was tried. `fill`: the first raid's lock choice (issue 14), every later raid locks with it; `by_person`
+        too (a person's lock writes an empty later raid empty, F3). → the parts' lines, joined."""
         if first.state != "locked":
             return None
         chaining: set = self.__dict__.setdefault("_parts_locking", set())
@@ -1187,7 +1187,7 @@ class RaidMixin:
                 if fev.state != "open":  # a later part cancelled or ended on its own (older runs): nothing after it is built
                     break
                 try:
-                    line = await self.lock_run(reg, rs, fev, by=by, fill=fill)
+                    line = await self.lock_run(reg, rs, fev, by=by, fill=fill, by_person=by_person)
                 except Exception as e:  # noqa: BLE001 — an earlier part stays locked whatever happens to a later one
                     why = str(e) or type(e).__name__
                     log.warning("later raid lock failed (%s after %s): %s", fev.key, first.key, why)
@@ -1325,8 +1325,8 @@ class RaidMixin:
         missing lock cards; and for a locked run whose fan-out never finished (no `confirmations_sent_at`) and is not
         running in this process, ask exactly the seats nobody asked (rc.unasked_seats; confirm_one skips anyone already
         asked) while the confirmation deadline is ahead. Returns how many were asked."""
-        if ev.state != "locked" or not ev.all_rosters or (reg.key, ev.key) in self._confirming():
-            return 0
+        if ev.state != "locked" or rc.lock_unfinished(ev) or (reg.key, ev.key) in self._confirming():
+            return 0  # (an empty roster a person locked on purpose is finished: its card is checked, nobody is asked)
         posting = self._lock_posting()  # the resumed fan-out is the lock's: an unlock waits for it (rc.UNLOCK_SENDING)
         posting.add((reg.key, ev.key))
         try:

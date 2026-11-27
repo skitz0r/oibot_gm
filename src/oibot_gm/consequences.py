@@ -505,7 +505,7 @@ def _rostered_told(reg: Registry, ev: rc.RaidEvent, many: bool, names: list[str]
     newly rostered are counted as asked (_newly_told)."""
     n = len(names)
     if not many and not n:
-        return "Nobody is on the board, so the roster locks empty."
+        return rc.LOCK_EMPTY_WARN_ONE
     earlier = plan is not None and plan.earlier and rc.run_confirms(reg, ev)
     if many:
         base = "Only the people on each raid's board are rostered"
@@ -544,7 +544,13 @@ def _lock_as_it_stands(reg: Registry, ev: rc.RaidEvent, rs, parts: list[rc.RaidE
     left = list(dict.fromkeys(n for p in parts for n in rc.lock_left_out(reg, rs, p)))
     cands = [s.discord_id for s in ev.signups.values() if s.status in ("in", "sub")]
     plan = _confirm_plan(reg, ev, names)  # who this lock asks: the first raid's board (the raid the lock confirms on)
-    lines = [_with_left(slots, left), _rostered_told(reg, ev, many, names, cands, plan)]
+    # a raid of a lineup nobody is placed on (F3): its empty roster is the bigger change, said first in place of the
+    # slots (one raid: _rostered_told says it, after the slots)
+    empty = rc.lock_empty_warning(reg, rs, ev) if many else None
+    first = _with_left(empty or slots, left)
+    if empty and _words(first) > 20:  # the raids' names don't fit beside the names left off: a count of the boards
+        first = _with_left(rc.LOCK_EMPTY_WARN_COUNT.format(n=len(rc.lock_empty_raids(reg, rs, ev))), left)
+    lines = [first, _rostered_told(reg, ev, many, names, cands, plan)]
     if rc.run_confirms(reg, ev) and (closes := _closes(reg, plan)):
         lines.append(closes)  # after an unlock: an ask that closes surprises more than the pause or the deadline
     elif _asks_on(reg, ev):
@@ -602,8 +608,8 @@ def lock_box(reg: Registry, ev: rc.RaidEvent, rs=None, fill: bool = False) -> di
     already locked, finished or cancelled answers with a refusal box; so does one whose every joiner is kept off. A
     board with no open slot (lock_choice False) is today's box. Otherwise the box carries `choice` {label, value} —
     PAGE_WORDS["lock_fill"], `value` = `fill` — and its fingerprint covers `fill`: `fill` False (a person's default) is
-    _lock_as_it_stands, or refuses in rc.lock_empty_refusal's one sentence (verb None, the choice still there to tick);
-    `fill` True is _lock_ticked."""
+    _lock_as_it_stands — a raid nobody is placed on locks empty, and the box says so in one sentence
+    (rc.lock_empty_warning; F3: the officer's choice, Lock stays pressable); `fill` True is _lock_ticked."""
     from .constants import PAGE_WORDS
 
     if ev.state != "open":
@@ -617,8 +623,6 @@ def lock_box(reg: Registry, ev: rc.RaidEvent, rs=None, fill: bool = False) -> di
     rev += f"|fill={int(fill)}"
     choice = {"label": PAGE_WORDS["lock_fill"], "value": fill}
     parts = _open_parts(rs, ev)
-    if not fill and (why := rc.lock_empty_refusal(reg, rs, ev)) is not None:
-        return {**box(title, [why], None, rev=rev), "choice": choice}
     slots = _slots_sentence([(_raid(reg, p.instance), rc.lock_open_slots(reg, rs, p)) for p in parts])
     lines = (_lock_ticked if fill else _lock_as_it_stands)(reg, ev, rs, parts, slots)
     return {**box(title, lines[:3], "Lock", rev=rev), "choice": choice}

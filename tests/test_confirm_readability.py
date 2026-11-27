@@ -930,7 +930,7 @@ def lock_choice_cases(reg, rs, add):
     b = both("every seat placed, a Bench place Auto-fill made", ev, [cq.AUTO_AGAIN, f"Everyone rostered gets {cq.CONFIRM_DM}.", cq._lock_deadline(reg, ev)])
     assert "choice" not in b, "no open slot: today's box, no choice"
     ev = night(0)
-    both("nobody placed", ev, [rc.LOCK_EMPTY_BOARD])
+    both("nobody placed", ev, ["The roster has 10 open slots.", rc.LOCK_EMPTY_WARN_ONE, cq.LOCK_PAUSE])  # F3: the officer's choice
     ev = rc.open_run(reg, rs, RID, next(nights), by="t", schedule=sid)
     both("nobody joined", ev, ["The roster has 10 open slots.", "Nobody is on the board, so the roster locks empty.", cq.LOCK_PAUSE])
     ev = night(4, joined=12)  # two rosters expected (12 joined): roster 1 part-filled, roster 2 empty is not built
@@ -958,7 +958,15 @@ def lock_choice_cases(reg, rs, add):
     join(reg, rs, lead, ms)
     fev = rs.events[lead.followed_by]
     lead.layout = [names[:5]]
-    both("two raids, the later board empty", lead, [rc.LOCK_EMPTY_RAID.format(raid="Barrow Deeps")])
+    both("two raids, the later board empty", lead, [rc.LOCK_EMPTY_WARN.format(raid="Barrow Deeps"),
+                                                    "Only the people on each raid's board are rostered, and nobody is asked to confirm.", cq.LOCK_PAUSE])
+    lead.layout = None
+    both("two raids, both boards empty", lead, [rc.LOCK_EMPTY_WARN_MANY.format(raids="Hyjal Summit and Barrow Deeps"),
+                                                "Only the people on each raid's board are rostered, and nobody is asked to confirm.", cq.LOCK_PAUSE])
+    lead.layout = [names[:5]]
+    fev.pins[str(ms[11].discord_id)] = "in"
+    both("two raids, the later board empty, one pinned in off it", lead)
+    fev.pins.pop(str(ms[11].discord_id))
     fev.layout = [names[:5], names[5:10]]
     both("two raids, open slots on the first", lead, ["The Hyjal Summit roster has 15 open slots.",
                                                       "Only the people on each raid's board are rostered, and nobody is asked to confirm.", cq.LOCK_PAUSE])

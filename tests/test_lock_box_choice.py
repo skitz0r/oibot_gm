@@ -73,10 +73,10 @@ def test_a_name_kept_on_off_the_board_is_named(reg, rs):
     assert b["sentences"][0] == f"The roster has 4 open slots, and {ms[8].display_name} is not rostered."
 
 
-def test_an_empty_board_refuses_the_unticked_lock_and_keeps_the_choice(reg, rs):
+def test_an_empty_board_warns_on_the_unticked_lock_and_keeps_the_choice(reg, rs):
     ev, ms = ten(reg, rs, placed=0)
     b = cq.lock_box(reg, ev, rs)
-    assert b["verb"] is None and b["sentences"] == [rc.LOCK_EMPTY_BOARD] and b["choice"]["value"] is False
+    assert b["verb"] == "Lock" and b["sentences"][1] == rc.LOCK_EMPTY_WARN_ONE and b["choice"]["value"] is False
     assert b["title"] == cq.lock_box(reg, ev, rs, fill=True)["title"]
     f = cq.lock_box(reg, ev, rs, fill=True)
     assert f["verb"] == "Lock" and f["sentences"][0] == "The lock builds the roster for Barrow Deeps from those who joined."
@@ -120,7 +120,7 @@ def test_two_raids_lead_with_the_raid_that_has_open_slots(reg, rs):
     lead, fev, ms = _pair_with_lead_board(reg, rs)  # Hyjal Summit (20) with 5 placed, then Barrow Deeps × 2 (10 each)
     name = cq._raid(reg, fev.instance)
     b = cq.lock_box(reg, lead, rs)
-    assert b["verb"] is None and b["sentences"] == [rc.LOCK_EMPTY_RAID.format(raid=name)], "the whole event is checked first"
+    assert b["verb"] == "Lock" and b["sentences"][0] == rc.LOCK_EMPTY_WARN.format(raid=name), "the empty raid is said first"
     fev.layout = [[m.display_name for m in ms[5:10]], [m.display_name for m in ms[10:15]]]
     b = cq.lock_box(reg, lead, rs)
     assert b["choice"]["value"] is False
@@ -163,14 +163,16 @@ def test_the_route_locks_as_it_stands_by_default(reg, rs, web_bot):  # noqa: F81
     assert ev.autofill_paused, "slots left open: the asks pause"
 
 
-def test_the_route_refuses_an_empty_board_before_the_engine(reg, rs, web_bot):  # noqa: F811
+def test_the_route_locks_an_empty_board_as_it_stands(reg, rs, web_bot):  # noqa: F811
+    """F3: an empty board is the officer's choice — the box warns, Lock stays pressable, the roster locks empty."""
     ev, ms = ten(reg, rs, placed=0)
     r = web_bot.c.post(f"/api/run/{ev.key}/lock", json={"preview": True}, headers=H())
-    assert r.status_code == 200 and r.json()["box"]["verb"] is None and r.json()["box"]["choice"]["value"] is False
+    b = r.json()["box"]
+    assert r.status_code == 200 and b["verb"] == "Lock" and b["choice"]["value"] is False and rc.LOCK_EMPTY_WARN_ONE in b["sentences"]
     r = web_bot.c.post(f"/api/run/{ev.key}/lock", json={}, headers=H())
-    assert r.status_code == 400 and r.json()["error"] == rc.LOCK_EMPTY_BOARD
+    assert r.status_code == 200, r.text
     ev = rs.events[ev.key]
-    assert ev.state == "open" and not ev.lock_error and not ev.lock_tried_at, "never the engine's failure path"
+    assert ev.state == "locked" and not ev.seated() and not ev.lock_error
 
 
 def test_preview_lock_shows_the_roster_for_the_choice(reg, rs, web_bot):  # noqa: F811
@@ -180,9 +182,9 @@ def test_preview_lock_shows_the_roster_for_the_choice(reg, rs, web_bot):  # noqa
     j = r.json()
     assert sum(len(g) for ro in j["board"]["rosters"] for g in ro["groups"]) == 6
     assert j["box"] == cq.lock_box(reg, ev, rs)
-    ev.layout = None
+    ev.layout = None  # an empty board previews as the empty roster it locks (F3)
     r = web_bot.c.post(f"/api/run/{ev.key}/lock/preview", json={}, headers=H())
-    assert r.status_code == 409 and r.json()["error"] == rc.LOCK_EMPTY_BOARD
+    assert r.status_code == 200 and not any(g for ro in r.json()["board"]["rosters"] for g in ro["groups"]), r.text
 
 
 # ---------------------------------------------------------------- Discord: two verbs in place of the checkbox
@@ -216,13 +218,12 @@ def test_discord_offers_both_locks_when_the_board_has_open_slots(reg, rs):
     assert [c[3:] for c in bot.calls if c[0] == "lock_run"] == [("as it stands",)]
 
 
-def test_discord_refuses_an_empty_board_and_offers_the_fill(reg, rs):
+def test_discord_offers_both_locks_on_an_empty_board_and_warns(reg, rs):
     ev, ms = ten(reg, rs, placed=0)
     h, bot = _card(reg, rs, ev)
-    assert h.buttons() == ["Lock and auto-fill", "Back"] and rc.LOCK_EMPTY_BOARD in h.text
-    run(h.press("Lock and auto-fill"))
-    run(h.press("Lock and auto-fill"))
-    assert [c[3:] for c in bot.calls if c[0] == "lock_run"] == [()], "the lock that fills"
+    assert h.buttons() == ["Lock as it stands", "Lock and auto-fill", "Preview lock", "Back"] and rc.LOCK_EMPTY_WARN_ONE in h.text
+    run(h.press("Lock as it stands"))
+    assert [c[3:] for c in bot.calls if c[0] == "lock_run"] == [("as it stands",)], "the officer's choice: it locks empty"
 
 
 def test_discord_a_complete_board_has_one_lock(reg, rs):
@@ -260,13 +261,12 @@ def test_plain_text_locks_as_it_stands_unless_asked_to_fill(reg, rs):
     assert "lock and fill" in configops.SCHEMA_TEXT
 
 
-def test_plain_text_refuses_an_empty_board_before_the_engine(reg, rs):
+def test_plain_text_locks_an_empty_board_as_it_stands_and_its_review_says_so(reg, rs):
     ev, ms = ten(reg, rs, placed=0)
+    assert rc.LOCK_EMPTY_WARN_ONE in configops.describe(reg, ConfigOp(op="run_lock", target=ev.key)), "the review warns"
     bot = LockBot(rs)
-    with pytest.raises(configops.RegistryError, match="^Nobody is on the board"):
-        run(configops.apply_async(reg, ConfigOp(op="run_lock", target=ev.key), "Officer", False, bot=bot))
-    assert bot.calls == []
-    assert rc.LOCK_EMPTY_BOARD in configops.describe(reg, ConfigOp(op="run_lock", target=ev.key)), "refused at the review"
+    run(configops.apply_async(reg, ConfigOp(op="run_lock", target=ev.key), "Officer", False, bot=bot))
+    assert bot.calls == [("lock_run", ev.key, "Officer", False)]
 
 
 def test_mcp_lock_run_takes_autofill(monkeypatch):

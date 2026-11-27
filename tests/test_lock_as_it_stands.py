@@ -92,13 +92,10 @@ def test_a_name_placed_then_answering_no_thanks_is_not_rostered(reg, rs):
     assert gone.display_name not in seated and seated == names(ms[1:6])
 
 
-def test_preview_lock_as_it_stands_is_the_board_and_refuses_an_empty_one(reg, rs):
+def test_preview_lock_as_it_stands_is_the_board_and_an_empty_one_is_empty(reg, rs):
     from contextlib import asynccontextmanager
 
-    import pytest as _pt
-
     from oibot_gm.discord_raid import RaidMixin
-    from oibot_gm.registry import RegistryError
 
     class Bare:
         lock_preview = RaidMixin.lock_preview
@@ -114,8 +111,8 @@ def test_preview_lock_as_it_stands_is_the_board_and_refuses_an_empty_one(reg, rs
     assert [sorted(g) for r in shown for g in r.groups] == board_of(layout, 2)
     empty = schedule_event(reg, rs)
     join(reg, rs, empty, people(reg, 2, DPS))
-    with _pt.raises(RegistryError, match="Nobody is on the board"):
-        run(Bare().lock_preview(reg, rs, rs.events[empty.key], by="t", fill=False))
+    shown = run(Bare().lock_preview(reg, rs, rs.events[empty.key], by="t", fill=False))  # F3: what a person's lock writes
+    assert len(shown) == 1 and not shown[0].selected
 
 
 def test_two_rosters_as_they_stand(reg, rs):

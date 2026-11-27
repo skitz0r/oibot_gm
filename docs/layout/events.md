@@ -189,9 +189,13 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        run_rosters. The lock as it stands (issue 14, lock_run(fill=False)): board_as_it_stands(reg, rs, ev) = THE roster it
                        writes, built from the board (board_rosters on board_layout, trailing empty rosters dropped; explain.annotate, no what-if;
                        group reports), never a solve — exactly the placed names, an Auto-fill Bench place too; lock_open_slots(reg, rs, ev) → open
-                       seats per roster it builds; lock_left_out(reg, rs, ev) → kept-on names (pin in, never_bench) not on the board; lock_empty_refusal(reg, rs, ev)
-                       → LOCK_EMPTY_BOARD / LOCK_EMPTY_RAID (names the raid) for the WHOLE event from ev on, before any raid locks
-                       (a raid with Join/Bench answers and nobody placed; nobody answered still locks); LEFTOVER_PAUSED = the Not rostered
+                       seats per roster it builds; lock_left_out(reg, rs, ev) → kept-on names (pin in, never_bench) not on the board; lock_empty_raids(reg, rs, ev)
+                       → the raids a lock as it stands writes EMPTY, for the WHOLE event from ev on (Join/Bench answers and nobody
+                       placed; nobody answered is not counted); lock_empty_refusal → LOCK_EMPTY_BOARD / LOCK_EMPTY_RAID (names the raid)
+                       = the CLOCK's refusal, before any raid locks; lock_empty_warning → LOCK_EMPTY_WARN_ONE / LOCK_EMPTY_WARN /
+                       LOCK_EMPTY_WARN_MANY (LOCK_EMPTY_WARN_COUNT when the names don't fit) = a PERSON's lock box saying a roster locks
+                       empty (F3: the officer's choice, never refused); lock_unfinished(ev) = THE crash test (locked, no roster list
+                       written — the lock writes one roster even when empty, so a deliberately empty raid is never reopened); LEFTOVER_PAUSED = the Not rostered
                        notice's second sentence while Automated Fill Requests are paused (no DM promised). RaidEvent.lock_fill (the choice, on
                        each part it locked) and lock_line ([channel, message] of the "is locked" line: the sheet's thread, or the signup channel
                        for a line from before). sheet_thread_id (first raid: the public thread on the sheet, RaidMixin.sheet_thread);
@@ -247,14 +251,15 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        the lock line and the cancel line go there. _thread_on reuses a message's existing thread; _channel
                        fetches what the cache lacks.
                        lock_run(…, fill=True) / lock_parts(…, fill=) / lock_preview(…, fill=) (issue 14): fill=False = the board as it stands
-                       (rc.board_as_it_stands; LOCK_EMPTY_BOARD is a failed lock: lock_error, the scheduler's 15-minute back-off); seats left open
+                       (rc.board_as_it_stands; for the clock LOCK_EMPTY_BOARD is a failed lock: lock_error, the scheduler's 15-minute
+                       back-off; a person's lock writes an empty raid empty, lock_parts carrying by_person; lock_preview previews it); seats left open
                        with Automated Fill Requests on pause them on every raid of the event (autofill_paused, by = the locker, one log line
                        each); set_autofill_paused (every surface's pause / resume) acts on every live raid of the event too; every later raid locks
                        with the first's choice; confirm_by = rc.late_confirm_by. The scheduler passes fill = auto_lock_fill (a later raid's retry:
                        its first raid's lock_fill). Surfaces a person presses (POST /api/run/{key}/lock `fill`, lock_decide, configops
-                       run_lock, MCP lock_run `autofill`) pass consequences.lock_fill(…, their choice) — default False — and refuse
-                       rc.lock_empty_refusal themselves, so a person's lock never takes the failure path; and pass by_person=True, so lock_run
-                       re-checks under board_lock and RAISES the refusal (lock_empty_refusal, lock_all_off) instead of recording a failed lock.
+                       run_lock, MCP lock_run `autofill`) pass consequences.lock_fill(…, their choice) — default False — and
+                       by_person=True, so lock_run re-checks under board_lock and RAISES lock_all_off's refusal instead of recording a
+                       failed lock, and locks an empty board empty (F3). The scheduler's crash recovery and recover_lock read rc.lock_unfinished.
                        A relock (after an unlock) reconciles in reconcile_asks: left off → ask closed `unrostered` / yes lapsed, card edited,
                        Not rostered notice; kept open ask → card redrawn (edit_live_card); send_confirmations skips a standing yes.
                        unlock_run(reg, rs, ev, by, by_id=None, *, via, seen=None) = THE unlock verb (seen = a reviewed box's fp, re-checked under the locks → RUN_CHANGED): solving + every raid's board_lock, rc.unlock, late fill

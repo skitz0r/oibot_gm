@@ -147,11 +147,11 @@ def test_describe_run_ops(reg, rs):
     join(reg, rs, ev, ms[:6])
     d = lambda **kw: configops.describe(reg, ConfigOp(**kw))  # noqa: E731
     title = f"Barrow Deeps {reg.local12(ev.start)}"  # a person reads the run's name and time, never its key (phase 3)
-    # "lock and fill …" (issue 14): nobody is on the board, so a plain "lock …" is refused at the review
+    # "lock and fill …" (issue 14): nobody is on the board, so a plain "lock …" says its roster locks empty (F3)
     fl = d(op="run_lock", target=ev.key, value="fill")  # the review line reads the lock box (fix round 1)
     assert fl.startswith(f"lock {title} now and auto-fill the empty roster slots. ") and ev.key not in fl
     assert "The lock builds the roster for Barrow Deeps from those who joined." in fl
-    assert d(op="run_lock", target=ev.key).endswith(f": {rc.LOCK_EMPTY_BOARD}")
+    assert rc.LOCK_EMPTY_WARN_ONE in d(op="run_lock", target=ev.key)
     assert d(op="run_answer", target=ev.team, member=ms[0].display_name, value="bench").endswith(f"{ms[0].display_name} → Bench (now Join as {ms[0].main.label})")
     assert "hasn't answered" in d(op="run_answer", target=ev.key, member=ms[9].display_name, value="join")
     assert "join | bench | no thanks" in d(op="run_answer", target=ev.key, member=ms[0].display_name, value="maybe")
@@ -222,8 +222,7 @@ def test_run_lock_and_cancel(reg, rs):
     bot = FakeBot(rs)
     with pytest.raises(RegistryError, match="needs the bot"):
         configops.apply(reg, ConfigOp(op="run_lock", target=ev.key), "officer", is_owner=False, raids=rs)
-    with pytest.raises(RegistryError, match=f"^{rc.LOCK_EMPTY_BOARD}$"):  # nobody on the board: refused before the lock
-        run(configops.apply_async(reg, ConfigOp(op="run_lock", target=ev.team), "Officer", False, bot=bot))
+    # nobody on the board (F3): the officer's choice — a plain "lock" locks it as it stands, the review said so
     assert run(configops.apply_async(reg, ConfigOp(op="run_lock", target=ev.team, value="fill"), "Officer", False, bot=bot)) == f"{ev.key}: locked by Officer"
     assert bot.calls == [("lock_run", ev.key, "Officer")]
     with pytest.raises(RegistryError, match="already locked"):

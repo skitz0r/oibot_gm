@@ -60,8 +60,8 @@ function LockFields({ url, meta, store, startPreview, onFill }: { url: string; m
 /** Lock (boxes 1–2, issue 14): ONE box for the Events page's Lock now and the sheet card's Lock / Preview lock — the
  *  SERVER's box (POST /api/run/{key}/lock `preview`, consequences.lock_box) with its choice inside it (RescheduleBox's
  *  fields + replace). Unticked, the lock rosters the board as it stands; ticking it asks the box again for `fill: true`
- *  (two quick toggles: only the last answer lands). A refusal (nobody on the board) is the box with Back alone, the
- *  choice still there to tick. Lock sends the choice of the box on screen with its fp as `seen`: a 409 brings the
+ *  (two quick toggles: only the last answer lands). An empty board is the officer's choice: its box says the roster
+ *  locks empty and Lock stays pressable; a refusal (everyone kept off) is the box with Back alone. Lock sends the choice of the box on screen with its fp as `seen`: a 409 brings the
  *  fresh box under the "changed" line. */
 export function useLockBox(meta: Meta, onDone: () => void): [(key: string, opts?: { box?: Box | null; preview?: boolean }) => void, React.ReactNode] {
   const [ask, dialog, replace] = useConfirmBox(["run:", "member"]);

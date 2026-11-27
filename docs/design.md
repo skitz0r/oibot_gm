@@ -6209,8 +6209,9 @@ and editable through Edit event until the lock (`rc.AUTO_LOCK_LOCKED` after it);
 locks nor closes the pre-lock asks, which run to the start (`rc.restamp_prelock_asks` re-stamps their deadline whenever the
 start, the lock time or Auto Lock moves; none goes out after the start, `rc.PRELOCK_STARTED`). *The lock's fill choice*
 (Task 2): `RaidMixin.lock_run(..., fill=True)` — `fill=False` rosters the board **as it stands** (`rc.board_as_it_stands`,
-name for name, group for group, every raid of a lineup with the first's choice), refuses an empty board up front
-(`rc.LOCK_EMPTY_BOARD`, a lineup whole), pauses Automated Fill Requests when slots stay open, and every lock's confirm-by
+name for name, group for group, every raid of a lineup with the first's choice) — the clock's lock refuses an empty board
+up front (`rc.LOCK_EMPTY_BOARD`, a lineup whole); a person's lock writes that raid's roster empty, its box warning in one
+sentence (`rc.lock_empty_warning`; follow-up F3, the owner's ruling 2026-11-27) —, pauses Automated Fill Requests when slots stay open, and every lock's confirm-by
 goes through `rc.late_confirm_by` (one rule with Reschedule; a lock at or after the start gets an hour). The clock passes
 `rc.auto_lock_fill`; a person's surface passes the choice and defaults it to False. *The lock box* (Task 3):
 `consequences.lock_box(..., fill)` leads with the open slots whenever a roster has some and carries the checkbox *Auto-fill

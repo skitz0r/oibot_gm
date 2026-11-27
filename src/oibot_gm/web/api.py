@@ -1672,8 +1672,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         board stands); `preview` → {box} (consequences.lock_box for that `fill`), nothing written; `seen` = the box's fp
         the officer pressed on — when the box built now differs (someone joined, the run changed, the other choice)
         nothing is locked and the fresh box comes back (409). A run that ended or was cancelled, named by its key,
-        answers with its refusal box (400), so a Lock box left open on it says so instead of failing; so does a lock as
-        it stands with nobody on the board (rc.lock_empty_refusal) — refused here, never the lock's failure path."""
+        answers with its refusal box (400), so a Lock box left open on it says so instead of failing. A lock as it stands
+        with nobody on a raid's board goes through (F3): the box warned, and that raid's roster locks empty."""
         v, d = await body(request, officer=True)
         rs = bot.raids.store(v.reg)
         ev = rs.events.get(key) or find_live(v.reg, rs, key)
@@ -1686,8 +1686,6 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         if (r := box_stale(d, fresh)) is not None:
             return r
         fill = cq.lock_fill(v.reg, ev, rs, asked)
-        if not fill and (why := rc.lock_empty_refusal(v.reg, rs, ev)) is not None:  # MCP (no seen): the same refusal
-            return JSONResponse({"error": why, "box": cq.lock_box(v.reg, ev, rs, fill=False)}, status_code=400)
         try:  # lock_run holds the run's solver single-flight and board lock itself
             line = await bot.lock_run(v.reg, rs, ev, by=v.name, fill=fill, by_person=True)
         except RegistryError as e:  # rc.SolverBusy (someone else is locking it), or no longer open
@@ -1706,8 +1704,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         """The lock box's Preview lock (design B6): the roster(s) the lock would build NOW for the box's choice `fill`
         (default False: the board as it stands, no solve; True: RaidMixin.lock_preview's solve — rc.split_preview with
         the run's strategy, the board and the pins; nothing saved but ev.last_proposal), as the board shows it, plus the
-        box for that choice and the leftovers. 409 when the solver is busy on this run, no roster satisfies the rules,
-        or a lock as it stands has nobody on the board (the sentence says which)."""
+        box for that choice and the leftovers. 409 when the solver is busy on this run or no roster satisfies the rules
+        (the sentence says which); an empty board as it stands previews as the empty roster it locks."""
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         if ev.state != "open":

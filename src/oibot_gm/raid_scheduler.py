@@ -241,7 +241,8 @@ class RaidSchedulerMixin:
             if state == "open" and not ev.health_posted and now >= soft:
                 await self.post_health(reg, rs, ev, officer_ch, nudge=True)
                 await self.ops.emit(cfg, "info", f"{rc.run_words(reg, ev)}: health check posted, nudged {len(ev.nudged)}")
-            if state == "locked" and not ev.all_rosters:  # a lock that never finished (old code path / crash): back to open, retry below
+            if state == "locked" and rc.lock_unfinished(ev):  # a lock that never wrote its roster (old code path / crash): back to open, retry below
+                # (a raid a person locked EMPTY holds one empty roster the lock wrote: it is never this)
                 ev.state, ev.locked_at, ev.confirm_by = "open", None, None
                 rs.save(ev, "lock recovered")
                 state = "open"

@@ -327,23 +327,30 @@ def test_unlock_run_takes_down_the_lock_cards_and_line_withdraws_fill_asks_and_d
 
 # ---------------------------------------------------------------- a person's lock refuses instead of failing
 
-def test_a_persons_lock_on_a_board_emptied_since_the_box_is_refused_not_failed(reg, rs):
+def test_a_persons_lock_on_a_board_emptied_since_locks_it_empty_and_the_clocks_fails(reg, rs):
+    """F3: an empty board is the officer's choice. A board emptied between the box and the press: the site's `seen`
+    refuses the changed box (409); the engine itself locks a person's lock empty, and the clock's lock still fails."""
     bot = NightBot(reg, rs)
     ev = schedule_event(reg, rs)
     ms = base_eight(reg)
     join(reg, rs, ev, ms)
     ev.layout = [[ms[0].display_name]]
     rs.save(ev, "board (test)")
-    assert rc.lock_empty_refusal(reg, rs, rs.events[ev.key]) is None  # the box offered the lock as it stands
     ev = rs.events[ev.key]
     ev.layout = None  # the placement is removed before the press lands
     rs.save(ev, "board emptied (test)")
-    with pytest.raises(RegistryError, match="Nobody is on the board"):
-        lock(bot, reg, rs, rs.events[ev.key], fill=False, by_person=True)
+    lock(bot, reg, rs, rs.events[ev.key], fill=False, by_person=True)
     ev = rs.events[ev.key]
-    assert ev.state == "open" and ev.lock_error is None and not bot.updates, "no failed lock, no footer, no thread line"
-    lock(bot, reg, rs, ev, fill=False)  # the scheduler keeps the failure path
-    assert rs.events[ev.key].lock_error == rc.LOCK_EMPTY_BOARD
+    assert ev.state == "locked" and not ev.seated() and ev.lock_error is None and not bot.updates, "locked empty, no failure"
+    lead, _fev, _ms = _pair_empty_later(reg, rs)  # the clock: a lineup whose later board is empty
+    lock(bot, reg, rs, lead, fill=False)  # the scheduler keeps the failure path
+    assert rs.events[lead.key].state == "open" and rs.events[lead.key].lock_error.startswith("Nobody is on the")
+
+
+def _pair_empty_later(reg, rs):
+    from test_lock_as_it_stands import _pair_with_lead_board
+
+    return _pair_with_lead_board(reg, rs)
 
 
 # ---------------------------------------------------------------- fix round 1: specs, the box, the reminder, cards

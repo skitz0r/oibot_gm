@@ -5145,10 +5145,15 @@ def board_complete(reg: Registry, rs, p: RaidEvent) -> bool:
 
 # ---------------------------------------------------------------- the lock as the board stands (issue 14: fill=False)
 
-# a lock as it stands with people who answered and nobody on the board: one sentence with the way out (the scheduler's
-# lock stores it as its lock_error, so it is also what the officers' line and the sheet's footer say)
+# the CLOCK's lock as it stands with people who answered and nobody on the board: one sentence with the way out (it is
+# stored as its lock_error, so it is also what the officers' line and the sheet's footer say). A PERSON's lock is not
+# refused (F3, the owner: "if I want to lock with a not-full roster that is my choice"): its box warns instead
 LOCK_EMPTY_BOARD = "Nobody is on the board, so place someone or lock with auto-fill to fill the open slots."
 LOCK_EMPTY_RAID = "Nobody is on the {raid} board, so place someone or lock with auto-fill."  # an event of several raids
+LOCK_EMPTY_WARN_ONE = "Nobody is on the board, so the roster locks empty."  # a person's lock box: one raid
+LOCK_EMPTY_WARN = "Nobody is on the {raid} board, so its roster locks empty."  # an event of several raids, one empty
+LOCK_EMPTY_WARN_MANY = "Nobody is on the {raids} boards, so those rosters lock empty."  # two or more empty
+LOCK_EMPTY_WARN_COUNT = "Nobody is on {n} boards, so those rosters lock empty."  # the names don't fit in the box's sentence
 
 
 def _board_stands(reg: Registry, ev: RaidEvent) -> list[RosterResult]:
@@ -5206,21 +5211,48 @@ def _raid_board_empty(reg: Registry, p: RaidEvent) -> bool:
     return answered and not any(r.selected for r in _board_stands(reg, p))
 
 
-def lock_empty_refusal(reg: Registry, rs, ev: RaidEvent) -> str | None:
-    """Why a lock as it stands can't go, for the WHOLE event, before any raid of it locks (None: it can): a raid still
-    open from `ev` on (ev and every later raid) that someone answered and whose board has nobody placed. A one-raid
-    event says LOCK_EMPTY_BOARD; an event of several raids names the raid (LOCK_EMPTY_RAID). An event nobody answered
-    still locks (its roster is the empty board). `rs` None: `ev` alone. The lock (RaidMixin.lock_run / lock_preview
-    with fill=False) and the lock box read it, so the box refuses first and a lineup never half-locks."""
+def lock_empty_raids(reg: Registry, rs, ev: RaidEvent) -> list[RaidEvent]:
+    """The raids a lock as it stands writes EMPTY, for the WHOLE event, before any raid of it locks: every raid still
+    open from `ev` on (ev and every later raid) that someone answered and whose board has nobody placed. An event
+    nobody answered is not counted (its roster is the empty board, as it always was). `rs` None: `ev` alone."""
     parts = event_parts(rs, ev) if rs is not None else [ev]
     no = part_no(ev)
     todo = [ev if p.key == ev.key else p for p in parts if p.key == ev.key or (p.state == "open" and part_no(p) > no)]
-    for p in todo:
-        if _raid_board_empty(reg, p):
-            if len(parts) == 1:
-                return LOCK_EMPTY_BOARD
-            return LOCK_EMPTY_RAID.format(raid=reg.raid_def(p.instance).get("name", p.instance))
-    return None
+    return [p for p in todo if _raid_board_empty(reg, p)]
+
+
+def lock_empty_refusal(reg: Registry, rs, ev: RaidEvent) -> str | None:
+    """Why the CLOCK's lock as it stands can't go (None: it can): lock_empty_raids' first raid. A one-raid event says
+    LOCK_EMPTY_BOARD; an event of several raids names the raid (LOCK_EMPTY_RAID). RaidMixin.lock_run reads it for a lock
+    no person pressed (the scheduler), so the clock never locks an empty board and a lineup never half-locks; a
+    person's lock goes through and its box says so (lock_empty_warning)."""
+    empty = lock_empty_raids(reg, rs, ev)
+    if not empty:
+        return None
+    if len(event_parts(rs, ev) if rs is not None else [ev]) == 1:
+        return LOCK_EMPTY_BOARD
+    return LOCK_EMPTY_RAID.format(raid=reg.raid_def(empty[0].instance).get("name", empty[0].instance))
+
+
+def lock_empty_warning(reg: Registry, rs, ev: RaidEvent) -> str | None:
+    """A person's lock box, as it stands (F3): the one sentence saying which raid's roster locks empty, or None.
+    LOCK_EMPTY_WARN_ONE for a one-raid event, LOCK_EMPTY_WARN naming the raid in an event of several raids,
+    LOCK_EMPTY_WARN_MANY naming each when two or more are empty."""
+    empty = lock_empty_raids(reg, rs, ev)
+    if not empty:
+        return None
+    if len(event_parts(rs, ev) if rs is not None else [ev]) == 1:
+        return LOCK_EMPTY_WARN_ONE
+    names = [reg.raid_def(p.instance).get("name", p.instance) for p in empty]
+    return LOCK_EMPTY_WARN.format(raid=names[0]) if len(names) == 1 else LOCK_EMPTY_WARN_MANY.format(raids=join_words(names))
+
+
+def lock_unfinished(ev: RaidEvent) -> bool:
+    """A lock that flipped the raid to locked and never wrote its roster (an old code path, a crash): the scheduler
+    reopens it and locks it again. The lock writes its roster list in the same save as the flip — one RosterResult per
+    roster, kept even when nobody is on it (board_rosters, _board_stands) —, so a raid a person locked EMPTY on purpose
+    (F3) holds one empty roster and is never mistaken for this."""
+    return ev.state == "locked" and not ev.all_rosters
 
 
 def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: list[RaidEvent] | None = None, stop=None,

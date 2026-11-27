@@ -42,8 +42,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        surface reads it); fill=False = _lock_as_it_stands: S1 _slots_sentence (rc.lock_open_slots per open raid; several
                        raids: the raid named only when one has them, else the total) + _with_left (", and X is not rostered"), S2
                        _rostered_told (only the board rostered + who is told: DMs off, a test event, no confirmation, several raids), S3
-                       LOCK_PAUSE while Automated Fill Requests are on and not paused, else the deadline — or rc.lock_empty_refusal's
-                       sentence with verb None and the choice still there; fill=True = _lock_ticked: where the lock places nobody
+                       LOCK_PAUSE while Automated Fill Requests are on and not paused, else the deadline; an empty board is the officer's
+                       choice (F3): one raid → S2 is rc.LOCK_EMPTY_WARN_ONE, a lineup → S1 is rc.lock_empty_warning (in place of the slots), Lock
+                       pressable; fill=True = _lock_ticked: where the lock places nobody
                        (every raid full, or nobody answered) slots + who is told + LOCK_ASKS (asks on) or the deadline, else the slots
                        sentence (only when every raid has someone on every roster it expects) + _lock; no open slot = _lock, no choice. _lock_told /
                        _lock_deadline (rc.late_confirm_by, as the lock) are shared by both. After an unlock (issue 14 Task 4 fix round 1)

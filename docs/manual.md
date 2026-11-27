@@ -108,7 +108,7 @@ understands; it answers in the words below.
     Everyone left under *Not placed* gets the usual *Not rostered* notice. If seats stay open and Automated Fill
     Requests are on, the lock pauses them on every raid of that event, so nobody is DMed for those seats; the notice
     then says *"An officer decides who takes an open seat."* One press of **Resume Automated Fill Requests** — on any
-    raid of the event, on the site, the lock card, plain text or MCP — resumes every raid of it. With people signed up and nobody on the board, that lock fails: the sheet stays open, the
+    raid of the event, on the site, the lock card, plain text or MCP — resumes every raid of it. With people signed up and nobody on the board, this lock (the clock's) fails: the sheet stays open, the
     officers get one line (*"Nobody is on the board, so place someone or lock with auto-fill to fill the open
     slots."*) and the bot tries again after 15 minutes, not every minute. An event of several raids is checked as a
     whole before any raid of it locks: if any of its raids has people signed up and nobody on its board, nothing locks
@@ -1410,8 +1410,12 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    those asks off or already paused, the last sentence is the confirm deadline instead). The open slots are per roster
    (*"Roster 1 has 3 open slots and roster 2 has 1."*); an event of several raids names the raid when only one has them
    (*"The Barrow Deeps roster has 5 open slots."*), else the total (*"The rosters have 11 open slots across 2 raids."*).
-   With people signed up and nobody on the board the unticked lock can't be pressed: the box says *"Nobody is on the board,
-   so place someone or lock with auto-fill to fill the open slots."* and the choice stays there to tick. Ticked, the lock
+   With people signed up and nobody on the board the unticked lock is still yours to press — a roster short of full,
+   even empty, is the officer's choice: the box says *"Nobody is on the board, so the roster locks empty."* (in an event
+   of several raids, first: *"Nobody is on the Barrow Deeps board, so its roster locks empty."*), and Lock locks it.
+   Everyone who joined gets the usual *Not rostered* notice and Automated Fill Requests pause for the event, as for any
+   lock that leaves seats open; Unlock brings back the empty board. An event of several raids locks whole: a raid with
+   people placed rosters them, an empty one locks empty. Ticked, the lock
    fills as described below, and the box leads with the open slots when every roster has someone on it; where ticking
    places nobody (everyone who answered is already placed) it says what follows: *"Automated Fill Requests then ask
    others to take the open slots."* Changing the choice redraws the box, and **Preview lock** shows the roster for the
@@ -1474,10 +1478,10 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    Automated Fill Requests are on (paused or off, the sentence says the seat waits for **Fill seats**). A
    drag started on the open board and dropped after the event locked is refused ("The event locked while you were
    dragging") and the board shows the roster — it is never applied as a change to the locked roster.
-   A lock a person presses that the board can no longer make — the last placed name taken off after the box was
-   shown, or everyone who joined kept off — is refused with the box's sentence (*"Nobody is on the board, so place
-   someone or lock with auto-fill to fill the open slots."*); nothing is recorded as a failed lock and the sheet's footer
-   stays as it was. Only the scheduled lock records a failure and tries again 15 minutes later.
+   A lock a person presses on a board that changed after the box was shown gets the new box first (*"This changed
+   while the box was open…"*); everyone who joined kept off is refused with the box's sentence; nothing is recorded as
+   a failed lock and the sheet's footer stays as it was. Only the scheduled lock records a failure (an empty board
+   among them) and tries again 15 minutes later.
    **Unlock** puts a locked event back into open signup with its rosters still on the board, so it can be changed and
    locked again. It works for any event, test or not, while it is locked and before its start; it is refused, one sentence
    each, once the event has started (*"This event has already started, so it can't be unlocked."*), while a loot council

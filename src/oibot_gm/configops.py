@@ -3149,9 +3149,7 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         from .consequences import lock_box
 
         asked = _lock_fill_value(op)
-        fill = lock_fill(reg, ev, rs, asked)
-        if not fill and (why := rc.lock_empty_refusal(reg, rs, ev)) is not None:
-            raise RegistryError(why)  # as the board stands with nobody on it: refused here, at the review, never at the lock
+        fill = lock_fill(reg, ev, rs, asked)  # an empty board locks empty: the box's sentences say so (F3)
         b = lock_box(reg, ev, rs, fill=asked)  # the box's own sentences: the same facts the site and Discord print
         if b.get("choice"):
             return f"lock {label} now {'and auto-fill the empty roster slots' if fill else 'as the board stands'}. " + " ".join(b["sentences"])
@@ -3942,8 +3940,6 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         if ev.state != "open":
             raise RegistryError(f"{run_words(reg, ev)} is already {ev.state}")
         fill = lock_fill(reg, ev, rs, _lock_fill_value(op))  # a person's lock: as the board stands unless "lock and fill"
-        if not fill and (why := rc.lock_empty_refusal(reg, rs, ev)) is not None:
-            raise RegistryError(why)  # refused before the lock: never its failure path
         line = await bot.lock_run(reg, rs, ev, by=by, fill=fill, by_person=True)
         if ev.lock_error:
             raise RegistryError(ev.lock_error)

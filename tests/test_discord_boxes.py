@@ -40,9 +40,9 @@ def test_lock_screen_is_the_lock_box(reg, rs, officer, channel):  # noqa: F811
     ev = joined_run(reg, rs, 6)
     h = Harness(reg, rs, client=bot_for(reg, rs))
     run(FLOWS["raid_lock"](h.command(), reg))
-    box = cq.lock_box(reg, ev, rs)  # nobody on the board: the lock as it stands refuses, the lock that fills is offered
-    assert box["title"] in h.text and box["sentences"] == [rc.LOCK_EMPTY_BOARD] and rc.LOCK_EMPTY_BOARD in h.text
-    assert h.buttons() == ["Lock and auto-fill", "Back"]
+    box = cq.lock_box(reg, ev, rs)  # nobody on the board: the lock as it stands warns its roster locks empty (F3), both offered
+    assert box["title"] in h.text and rc.LOCK_EMPTY_WARN_ONE in box["sentences"] and rc.LOCK_EMPTY_WARN_ONE in h.text
+    assert h.buttons() == ["Lock as it stands", "Lock and auto-fill", "Preview lock", "Back"]
     run(h.press("Lock and auto-fill"))
     box = cq.lock_box(reg, ev, rs, fill=True)
     assert box["title"] in h.text and all(s in h.text for s in box["sentences"])

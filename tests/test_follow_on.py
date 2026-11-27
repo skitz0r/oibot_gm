@@ -217,10 +217,10 @@ def test_a_follow_on_whose_lock_raises_leaves_the_lead_locked(reg, rs, monkeypat
     monkeypatch.setattr(rc, "propose", seat_by_name({LEAD: names[:20], FOLLOW: names[:20]}))
     orig = bot.lock_run
 
-    async def lock_run(reg, rs, ev, by="scheduler", fill=True):
+    async def lock_run(reg, rs, ev, by="scheduler", fill=True, by_person=False):
         if ev.key == fev.key:
             raise err
-        return await orig(reg, rs, ev, by=by, fill=fill)
+        return await orig(reg, rs, ev, by=by, fill=fill, by_person=by_person)
 
     monkeypatch.setattr(bot, "lock_run", lock_run)
     line = run(bot.lock_run(reg, rs, lead, by="Jon"))
