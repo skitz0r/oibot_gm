@@ -53,7 +53,9 @@ OLD_WORDS_PROMPT = "run, ad hoc and follow-on are older words for event, one-off
 
 # the confirmation box's fixed words (design §7b, D18): the site's ConfirmBox and the leave guard print these, never their own
 CONFIRM_WORDS = {"back": "Back", "keep": "Keep editing", "discard": "Discard edits", "leave_title": "Leave without saving?",
-                 "changed": "This changed while the box was open. Read it again before you press."}
+                 "changed": "This changed while the box was open. Read it again before you press.",
+                 # every box from the first press until the answer comes (F5): the verb greyed, these words under it
+                 "working": "Working on it. The box closes by itself when it is done."}
 
 # a priority weight as a short phrase (rc.priority_words: "Regulars first, then rank")
 PRIORITY_SHORT = {"regular": "Regulars", "rank": "rank", "main": "main characters", "sat_out": "who sat out last time",

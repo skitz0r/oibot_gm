@@ -1802,7 +1802,26 @@ class RaidMixin:
         await ops_mod.audited(self.ops, reg, by, f"reopened {run_title(reg, ev)} ({back})", via=via, by_id=by_id)
         return f"Reopened {run_title(reg, ev)} — {'locked, roster as it was' if back == 'locked' else 'the sheet is open again'}."
 
-    async def unlock_run(self, reg, rs, ev, by: str, by_id: int | None = None, *, via: str = "discord", seen: str | None = None) -> str:
+    def finish_later(self, reg, ev, what: str, work) -> asyncio.Task:
+        """Run `work` (a coroutine: a verb's Discord edits, after its state and audit line are written) as a task the
+        process keeps a reference to, so it is never collected mid-way; a failure is logged as a warning naming the
+        event, never raised (the verb is done; a card left stale is redrawn by the event's next refresh). F5: a route
+        answers once the state is written, and the cards follow."""
+        tasks: set = self.__dict__.setdefault("_finishing", set())
+
+        async def run():
+            try:
+                await work
+            except Exception:  # noqa: BLE001 — the verb is written; only its Discord edits are behind
+                log.warning("%s of %s/%s: its Discord edits did not all finish", what, reg.key, ev.key, exc_info=True)
+
+        task = asyncio.get_running_loop().create_task(run())
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+        return task
+
+    async def unlock_run(self, reg, rs, ev, by: str, by_id: int | None = None, *, via: str = "discord", seen: str | None = None,
+                         answer_within: float | None = None) -> str:
         """THE unlock (issue 14) behind every surface: the event `ev` belongs to goes back to open signup with its rosters
         on the board (rc.unlock — every locked raid, any raid of it standing for its first). Under the first raid's solver
         single flight and every raid's board lock (one order, as reschedule takes them), so a lock, a cancel or a board
@@ -1810,7 +1829,10 @@ class RaidMixin:
         does: fill asks a fan-out added meanwhile close under plan_lock and every withdrawn fill ask's DM card is edited
         to its final state; the officer channel's lock cards and the signup channel's "is locked" line are deleted (an id
         missing or a message gone fails nothing); a fresh health card goes up when the event had one; the sheet and the
-        cards are redrawn. Confirmation asks stay as they are. One thread line, one audit line. Nobody is DMed."""
+        cards are redrawn. Confirmation asks stay as they are. One thread line, one audit line. Nobody is DMed.
+        `answer_within` (the site's route, F5): the state, the cards' bookkeeping and the audit line are written first;
+        the Discord edits (deletes, card edits, the health card, the sheet, the thread line) then run as finish_later's
+        task and this returns after at most that many seconds, the edits going on behind it. None: they are awaited."""
         first = rc.first_part(rs, ev)
         parts = rc.event_parts(rs, first)
 
@@ -1830,6 +1852,7 @@ class RaidMixin:
             had = {p.key: ({k: v for k, v in p.cards.items() if k.startswith("lock:")}, p.cards_channel_id, p.lock_line) for p in parts}
             done = rc.unlock(reg, rs, first, by, fills=False)  # the fill asks close below, under plan_lock
         fills: list = []
+        gone: list[tuple] = []  # (channel id, message id) of the lock cards and the "is locked" line, taken off the files
         for p in (x for x in parts if x.key in done.raids):
             async with self.plan_lock(reg, p.key):  # an ask a fan-out in flight added after the flip closes too
                 late = rc.withdraw_fill_asks(p, by)
@@ -1839,29 +1862,38 @@ class RaidMixin:
                 p.lock_line = None
                 await asyncio.to_thread(rs.save, p, "unlock: lock cards taken down" + (f", {len(late)} ask(s) withdrawn" if late else ""))
             fills += late
-            for cid, mid in [(ch_id, m) for m in cards.values()] + ([tuple(line)] if line else []):
-                await self._delete_message(cid, mid)
-        label = run_label(reg, first)
-        for a in fills:
-            await self.edit_ask_card(reg, a.dm_channel_id, a.dm_message_id,
-                                     f"Never mind the {'swap' if a.swap else 'seat'} question for {label} — an officer unlocked the event to change the roster.")
-        for m, ask in rc.open_placement_rows(reg, first):  # the Confirm / Can't cards kept open: no locked roster, no deadline
-            sg = first.signups.get(str(m.discord_id))
-            if ask.get("dm") and sg is not None:
-                await self.edit_live_card(reg, ask["dm"][0], ask["dm"][1], confirm_open_layout(reg, first, self.ico, sg, m.discord_id))
-        if first.health_posted and "health" not in first.cards:  # the officers' open card again (rc.unlock counts the reminder as sent)
-            ch = self.officer_channel(reg, first)
-            if ch is not None:
-                await self.post_health(reg, rs, first, ch, nudge=False)
-        await self.refresh_sheet(reg, first)
-        for p in (x for x in parts if x.key in done.raids):
-            await self.refresh_cards(reg, p)
-        bits = [f"{done.asks_kept} confirmation ask(s) still open"] if done.asks_kept else []
-        bits += [f"{len(fills)} fill ask(s) withdrawn"] if fills else []  # done.fills is empty: fills=False
-        bits += [f"back to Join: {', '.join(done.returned)}"] if done.returned else []
-        await self.post_run_update(reg, first, f"🔓 unlocked by {by}: back to open signup with the rosters on the board, Auto Lock off"
-                                   + (" · " + " · ".join(bits) if bits else ""))
+            gone += [(ch_id, m) for m in cards.values()] + ([tuple(line)] if line else [])
         await ops_mod.audited(self.ops, reg, by, f"unlocked {run_title(reg, first)}", via=via, by_id=by_id)
+
+        async def discord_edits():
+            for cid, mid in gone:
+                await self._delete_message(cid, mid)
+            label = run_label(reg, first)
+            for a in fills:
+                await self.edit_ask_card(reg, a.dm_channel_id, a.dm_message_id,
+                                         f"Never mind the {'swap' if a.swap else 'seat'} question for {label} — an officer unlocked the event to change the roster.")
+            for m, ask in rc.open_placement_rows(reg, first):  # the Confirm / Can't cards kept open: no locked roster, no deadline
+                sg = first.signups.get(str(m.discord_id))
+                if ask.get("dm") and sg is not None:
+                    await self.edit_live_card(reg, ask["dm"][0], ask["dm"][1], confirm_open_layout(reg, first, self.ico, sg, m.discord_id))
+            # the officers' open card again (rc.unlock counts the reminder as sent) — not when it was locked again meanwhile
+            if first.state == "open" and first.health_posted and "health" not in first.cards:
+                ch = self.officer_channel(reg, first)
+                if ch is not None:
+                    await self.post_health(reg, rs, first, ch, nudge=False)
+            await self.refresh_sheet(reg, first)
+            for p in (x for x in parts if x.key in done.raids):
+                await self.refresh_cards(reg, p)
+            bits = [f"{done.asks_kept} confirmation ask(s) still open"] if done.asks_kept else []
+            bits += [f"{len(fills)} fill ask(s) withdrawn"] if fills else []  # done.fills is empty: fills=False
+            bits += [f"back to Join: {', '.join(done.returned)}"] if done.returned else []
+            await self.post_run_update(reg, first, f"🔓 unlocked by {by}: back to open signup with the rosters on the board, Auto Lock off"
+                                       + (" · " + " · ".join(bits) if bits else ""))
+
+        if answer_within is None:
+            await discord_edits()
+        else:
+            await asyncio.wait({self.finish_later(reg, first, "the unlock", discord_edits())}, timeout=answer_within)
         return f"Unlocked {run_title(reg, first)}: back to open signup with its rosters on the board. Auto Lock is off. Nobody was DMed."
 
     async def _delete_message(self, channel_id: int | None, message_id: int | None) -> bool:

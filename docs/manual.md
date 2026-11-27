@@ -1439,7 +1439,11 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    the lock."* On the site every such confirm is one box: a title naming the action (*Lock Tue 15 Dec 6:30 PM?*), at
    most three sentences, **Back** and the action's own verb (red only when it can't be undone). If what the box said
    changed while it was open — someone joined, the event moved — pressing the verb changes nothing and the box shows the
-   new sentences under *"This changed while the box was open. Read it again before you press."* The sheet switches to its locked form (groups, Not rostered, Bench, No thanks, one *Can't
+   new sentences under *"This changed while the box was open. Read it again before you press."* Once you press, the
+   verb greys out and the box says *"Working on it. The box closes by itself when it is done."* until the answer comes;
+   a second press does nothing. If the action had already happened — the event is already unlocked, locked, cancelled
+   or started, by you or another officer — the box just closes and the page shows the event as it is now. An Unlock
+   answers as soon as the event is open again; its Discord cards are tidied a few seconds later. The sheet switches to its locked form (groups, Not rostered, Bench, No thanks, one *Can't
    make it* button); the officer channel gets the roster cards. A roster that came out under its tank/healer minimum
    (nobody else could fill it) says **Locked short** with the role icons and a number, instead of locking quietly; the
    card also lists who the lock moved to an offspec (*Playing an offspec*, one per line) and, on a recurring schedule,

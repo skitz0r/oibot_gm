@@ -260,7 +260,10 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        unlock_run(reg, rs, ev, by, by_id=None, *, via, seen=None) = THE unlock verb (seen = a reviewed box's fp, re-checked under the locks → RUN_CHANGED): solving + every raid's board_lock, rc.unlock, late fill
                        asks closed under plan_lock, fill cards edited, lock cards and lock_line deleted (_delete_message, failure-quiet), a fresh
                        health card when the event had one, refresh_sheet / refresh_cards, one thread line, one audit line, no DM.
-                       Every surface calls it after the box (Task 5): POST /api/run/{key}/unlock, raid_buttons.unlock_decide (the lock
+                       `answer_within` (the site's route, F5): the state, the cards' bookkeeping and the audit line first, then the
+                       Discord edits run as finish_later(reg, ev, what, coro) = THE kept task for a verb's Discord edits after its
+                       write (referenced until done; a failure a warning naming the event, never raised) and the call returns
+                       after at most that many seconds. Every surface calls it after the box (Task 5): POST /api/run/{key}/unlock, raid_buttons.unlock_decide (the lock
                        card's Unlock, /raid unlock), configops run_unlock, MCP unlock_run.
                        start_now(reg, rs, ev, by, by_id=None, *, via, seen=None) = THE Start now verb (seen as unlock_run's): every raid's board_lock, rc.start_now, then
                        _after_move (shared with reschedule_event: refresh_sheet, every live raid's cards, open Confirm / fill-ask cards via

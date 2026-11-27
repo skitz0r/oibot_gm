@@ -1321,12 +1321,16 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         ev = find_live(reg, rs, key)
         return rs, ev, (rc.run_team(reg, ev))
 
-    def box_refused(why, status: int = 400):
+    def box_refused(why, status: int = 400, *, box: dict | None = None, done: bool = False):
         """A refusal as the confirmation box shows it (design §7b): the verb's own sentence, its title, only Back. `why`:
-        the sentence or the RegistryError carrying it (its first argument keeps an rc.Refusal's kind)."""
+        the sentence or the RegistryError carrying it (its first argument keeps an rc.Refusal's kind); `box` = the
+        verb's own refusal box when it has one. `done` (F5): the refusal says only that the verb's outcome is already
+        true (Unlock on an open event, Lock on a locked one, Cancel on a cancelled one, Start now on a started one) —
+        `done: true` on the answer and its box, and the page closes the box and reloads instead of showing it."""
         if isinstance(why, BaseException):
             why = why.args[0] if why.args and isinstance(why.args[0], str) else str(why)
-        return JSONResponse({"error": str(why), "box": cq.refusal_box_for(why)}, status_code=status)
+        b = dict(box) if box is not None else cq.refusal_box_for(why)
+        return JSONResponse({"error": str(why), "box": {**b, "done": True} if done else b, **({"done": True} if done else {})}, status_code=status)
 
     def box_stale(d: dict, fresh: dict):
         """`seen` (a box's fp) carried by a write: when the box built NOW differs, nothing is written and the fresh box
@@ -1676,7 +1680,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         asked = lock_fill_asked(d)
         fresh = cq.lock_box(v.reg, ev, rs, fill=asked)
         if fresh["verb"] is None and not (d.get("preview") and fresh.get("choice")):  # closed, kept off, or an empty board
-            return JSONResponse({"error": fresh["sentences"][0], "box": fresh}, status_code=400)
+            return box_refused(fresh["sentences"][0], box=fresh, done=ev.state == "locked")
         if d.get("preview"):
             return {"box": fresh}
         if (r := box_stale(d, fresh)) is not None:
@@ -1687,6 +1691,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         try:  # lock_run holds the run's solver single-flight and board lock itself
             line = await bot.lock_run(v.reg, rs, ev, by=v.name, fill=fill, by_person=True)
         except RegistryError as e:  # rc.SolverBusy (someone else is locking it), or no longer open
+            if ev.state == "locked":  # another press or the clock locked it meanwhile: the lock happened
+                return box_refused(cq.lock_box(v.reg, ev, rs)["sentences"][0], 409, done=True)
             return JSONResponse({"error": str(e)}, status_code=409)
         except RuntimeError as e:  # lock_run catches the solver itself; this is the belt to its braces
             return JSONResponse({"error": solver_text(e)}, status_code=409)
@@ -1779,7 +1785,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         if d.get("preview") or d.get("seen"):  # {preview} → the box; {seen} → refused with the fresh box when it changed
             fresh = cq.cancel_box(v.reg, ev, rs)
             if fresh["verb"] is None:  # finished or cancelled
-                return JSONResponse({"error": fresh["sentences"][0], "box": fresh}, status_code=400)
+                return box_refused(fresh["sentences"][0], box=fresh, done=ev.state == "cancelled")
             if d.get("preview"):
                 return {"box": fresh}
             if (r := box_stale(d, fresh)) is not None:
@@ -1787,7 +1793,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         try:  # cancel_run re-renders the sheet and cards, closes every open ask and writes the audit line itself
             line = await maybe_await(bot.cancel_run(v.reg, rs, ev, v.name, (d.get("reason") or "").strip()[:300] or None, notify=notify, by_id=v.uid, via=v.via))
         except (RegistryError, ValueError) as e:
-            return box_refused(e)
+            return box_refused(e, done=ev.state == "cancelled")
         return {"message": rc.site_words(v.reg, line)}
 
     def event_of(reg, rs, key: str):
@@ -1909,6 +1915,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             raise HTTPException(403, "Officers only.")
         return v, d
 
+    ANSWER_WITHIN_S = 1.5  # F5: the unlock answers once its state is written; its Discord edits go on behind the answer
+
     @app.post("/api/run/{key}/unlock")
     async def run_unlock(request: Request, key: str):
         """Unlock a locked event (issue 14; RaidMixin.unlock_run): back to open signup with its rosters on the board,
@@ -1921,15 +1929,15 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         ev = rs.events.get(key) or find_live(v.reg, rs, key)  # an ended event, named by its key, answers with its refusal box
         fresh = cq.unlock_box(v.reg, ev, rs)
         if fresh["verb"] is None:
-            return box_refused(fresh["sentences"][0])
+            return box_refused(fresh["sentences"][0], done=fresh["sentences"][0] == rc.UNLOCK_OPEN)
         if d.get("preview"):
             return {"box": fresh}
         if (r := box_stale(d, fresh)) is not None:
             return r
         try:
-            line = await bot.unlock_run(v.reg, rs, ev, by=v.name, by_id=v.uid, via=v.via)
+            line = await bot.unlock_run(v.reg, rs, ev, by=v.name, by_id=v.uid, via=v.via, answer_within=ANSWER_WITHIN_S)
         except RegistryError as e:
-            return box_refused(e, 409)
+            return box_refused(e, 409, done=bool(e.args) and e.args[0] == rc.UNLOCK_OPEN)
         return {"message": rc.site_words(v.reg, line)}
 
     @app.post("/api/run/{key}/start")
@@ -1944,7 +1952,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         ev = rs.events.get(key) or find_live(v.reg, rs, key)  # an ended event, named by its key, answers with its refusal box
         fresh = cq.start_now_box(v.reg, ev, rs)
         if fresh["verb"] is None:
-            return box_refused(fresh["sentences"][0])
+            return box_refused(fresh["sentences"][0], done=fresh["sentences"][0] == rc.START_NOW_STARTED)
         if d.get("preview"):
             return {"box": fresh}
         if (r := box_stale(d, fresh)) is not None:
@@ -1952,7 +1960,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         try:
             line = await bot.start_now(v.reg, rs, ev, by=v.name, by_id=v.uid, via=v.via)
         except RegistryError as e:
-            return box_refused(e, 409)
+            return box_refused(e, 409, done=bool(e.args) and e.args[0] == rc.START_NOW_STARTED)
         return {"message": rc.site_words(v.reg, line)}
 
     @app.post("/api/run/{key}/pause")

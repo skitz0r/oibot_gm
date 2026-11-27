@@ -86,7 +86,7 @@ export function useLockBox(meta: Meta, onDone: () => void): [(key: string, opts?
         catch (x) { const b = boxOf(x); if (b) { store.set(b); return b; } throw x; }
       },
     });
-    if (done) { ok(said); onDone(); }
+    if (done) { if (said) ok(said); onDone(); }  // no line: the lock had already happened (`done`), the page reloads
   }
   return [(key, opts) => { open(key, opts).catch(fail); }, dialog];
 }

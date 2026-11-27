@@ -83,16 +83,23 @@ export function useConfirmBox(topics: string[] = []): [(o: AskBox) => Promise<bo
   const [box, setBox] = useState<Box | null>(null);
   const [changed, setChanged] = useState(false);
   const [busy, setBusy] = useState(false);
+  const pressed = useRef(false);  // from the first press until the answer: a second press (even in the same tick) does nothing
   const current = useRef<Box | null>(null);
   useEffect(() => { current.current = box; }, [box]);
 
+  // a box whose verb has already happened (`done`: Unlock on an open event …) is never shown: the caller reloads
   const ask = useCallback((o: AskBox) => new Promise<boolean>((resolve) => {
+    if (o.box.done) { resolve(true); return; }
+    pressed.current = false;
     setBox(o.box); setChanged(false); setBusy(false); setOpen({ ...o, resolve });
   }), []);
 
   const replace = useCallback((fresh: Box) => { current.current = fresh; setBox(fresh); setChanged(false); }, []);
 
+  // while a press is being answered the box waits for that answer: what the write itself changed never swaps it
   const swap = (fresh: Box) => {
+    if (pressed.current) return;
+    if (fresh.done) { close(true); return; }
     if (current.current && fresh.fp === current.current.fp) return;
     setBox(fresh); setChanged(true);
   };
@@ -116,15 +123,17 @@ export function useConfirmBox(topics: string[] = []): [(o: AskBox) => Promise<bo
   const close = (done: boolean) => { open?.resolve(done); setOpen(null); setBox(null); setChanged(false); };
 
   const go = async () => {
-    if (!open || !box) return;
+    if (!open || !box || pressed.current) return;
     if (!open.act) { close(true); return; }
+    pressed.current = true;
     setBusy(true);
     try {
       const fresh = await open.act(box.fp);
       // a 409's fresh box (it has a verb: the action still stands, its facts moved) says it changed; a refusal (verb
-      // null — the 400's box) is the verb's own sentence, never "This changed while the box was open"
-      if (fresh) { current.current = fresh; setBox(fresh); setChanged(fresh.verb !== null); } else close(true);
-    } catch (e) { fail(e); } finally { setBusy(false); }
+      // null — the 400's box) is the verb's own sentence, never "This changed while the box was open"; a refusal that
+      // says it already happened (`done`) closes the box like the write's own answer
+      if (fresh && !fresh.done) { current.current = fresh; setBox(fresh); setChanged(fresh.verb !== null); } else close(true);
+    } catch (e) { fail(e); } finally { pressed.current = false; setBusy(false); }
   };
 
   const dialog = (
@@ -132,6 +141,7 @@ export function useConfirmBox(topics: string[] = []): [(o: AskBox) => Promise<bo
       {box && (
         <Stack gap="md">
           <BoxBody box={box} fields={open?.fields} changed={changed} />
+          {busy && <Text size="sm" c="dimmed" role="status">{meta!.confirm_words.working}</Text>}
           <BoxButtons box={box} busy={busy} back={open?.back} onBack={() => close(false)} onGo={go} />
         </Stack>
       )}

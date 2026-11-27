@@ -1802,3 +1802,26 @@ def test_an_open_event_board_never_draws_open_seats():
     at = view[view.index("const openAt = "):]
     at = at[:at.index("\n  };\n")]
     assert re.search(r"const roles = event && locked && r\.open \?", at), "open seats only on a locked event board"
+
+
+def test_every_box_is_busy_from_the_first_press_and_closes_on_done():
+    """F5 (2026-11-27): the owner pressed Unlock, the write took 11 seconds, and the box showed no working state while the
+    live refresh swapped in the refusal the write itself caused ("still open for signup") under the orange line. Every
+    event box is useConfirmBox: from the first press until the answer the verb is greyed (a ref, so two presses in one
+    tick send one write), the server's working words show, and no live refresh swaps the box; an answer or a box that
+    says the verb already happened (`done`) closes it and the caller reloads, with no refusal and no orange line."""
+    box = _code_only((SRC / "components" / "ConfirmBox.tsx").read_text())
+    go = box[box.index("const go = async"):]
+    go = go[:go.index("\n  };\n")]
+    assert "pressed.current) return" in go and "pressed.current = true" in go and "pressed.current = false" in go
+    assert "fresh && !fresh.done" in go, "a done answer closes the box"
+    swap = box[box.index("const swap = "):]
+    swap = swap[:swap.index("\n  };\n")]
+    assert "if (pressed.current) return;" in swap and "if (fresh.done) { close(true); return; }" in swap
+    ask = box[box.index("const ask = useCallback"):]
+    assert "if (o.box.done) { resolve(true); return; }" in ask[:400], "a box already done never opens"
+    assert "{busy && <Text" in box and "confirm_words.working" in box, "the working words while the answer is awaited"
+    for f in ("components/events/EventMore.tsx", "components/board/SheetCard.tsx", "components/events/LockBox.tsx",
+              "components/loot/Tonight.tsx", "components/events/EditEvent.tsx", "components/events/RescheduleBox.tsx", "pages/Events.tsx"):
+        assert "useConfirmBox(" in (SRC / f).read_text(), f"{f}: its boxes are useConfirmBox's"
+    assert "if (said) ok(said)" in (SRC / "components" / "events" / "LockBox.tsx").read_text(), "no empty line after a done lock"

@@ -136,7 +136,7 @@ export interface Meta {
    *  leave guard's sentence templates ({name}, {n}) — a page prints these, never its own copy */
   page_words: PageWords;
   /** `refused` = the title of a refusal the server sent no box for (consequences.REFUSAL_TITLES["other"]) */
-  confirm_words: { back: string; keep: string; discard: string; leave_title: string; changed: string; refused: string };
+  confirm_words: { back: string; keep: string; discard: string; leave_title: string; changed: string; refused: string; working: string };
   leave: { one: string; many: string; page: string };
   /** registry.RESERVED_SCHEDULE_IDS: the ids no new schedule takes (a schedule editor never holds its own copy) */
   reserved_schedule_ids?: string[];
@@ -200,7 +200,9 @@ export interface MemberEventView {
 /** The confirmation box (design §7b, consequences.box): printed as it comes, Back then the verb; `verb` null = a refusal
  *  (only Back); `fp` goes back as `seen` with the press. */
 /** `choice`: the lock box's one choice (consequences.lock_box, issue 14) — its label and whether it is ticked; absent elsewhere */
-export interface Box { title: string; sentences: string[]; verb: string | null; danger: boolean; diff: string[]; fp: string; choice?: { label: string; value: boolean } }
+/** `done` (a refusal only): the verb's outcome is already true (Unlock on an open event, Lock on a locked one, Cancel on a
+ *  cancelled one, Start now on a started one) — useConfirmBox closes the box and the page reloads, no refusal shown. */
+export interface Box { title: string; sentences: string[]; verb: string | null; danger: boolean; diff: string[]; fp: string; choice?: { label: string; value: boolean }; done?: boolean }
 /** A Details line (event_view): the label, its value in words, and where it links (a site path or a Discord jump link).
  *  `links` = several places at once (the Raids page's Played in: each schedule with its href); `level` = a chip's level. */
 /** a Details row; `help` = the editors' (?) for the setting it names (constants.field_help: key, the sentence, its screen-reader name) */

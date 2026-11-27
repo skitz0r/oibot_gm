@@ -135,7 +135,8 @@ function LiveEvent({ ev, meta, onChanged, sentAt }: { ev: EventView; meta: Meta;
     if (!ev.boxes.cancel) return;
     const said = { text: "" };
     if (await ask({ box: ev.boxes.cancel, refresh: fresh("cancel"), act: press(`${run}/cancel`, (fp) => ({ seen: fp, notify: false }), said) })) {
-      ok(said.text); onChanged();
+      if (said.text) ok(said.text);  // no line: the event was already cancelled (`done`), the page reloads
+      onChanged();
     }
   }
 
