@@ -238,6 +238,18 @@ class RaidSchedulerMixin:
                 rs.save(ev, "lock recovered")
                 state = "open"
                 await self.ops.emit(cfg, "warn", f"{rc.run_words(reg, ev)}: locked without a roster — reopened, retrying the lock")
+            if state == "open" and now >= hard and not rc.is_follow(ev) and not rc.auto_lock(reg, ev):
+                # Auto Lock off (issue 14): no lock by the clock and its pre-lock asks run on; an officer locks it. A later
+                # raid reaches here only once every raid before it is locked: it follows its first raid's lock as ever.
+                # An ask past its own deadline counts as no, its card edited as a locked event's is (never a new DM)
+                expired, released = rc.expire_fill_asks(reg, rs, ev)
+                for a in expired:
+                    await self.close_ask_card(reg, ev, a, f"it closed <t:{int(now.timestamp())}:t> without an answer")
+                for a in released:
+                    await self.withdraw_ask(reg, ev, a, "the other half of the question timed out")
+                if expired:
+                    await self.refresh_cards(reg, ev)
+                continue
             if state == "open" and now >= hard:
                 await self.close_prelock_asks(reg, rs, ev)  # pre-lock asks close at lock time ("released", as lock_run does)
                 tried = datetime.fromisoformat(ev.lock_tried_at) if ev.lock_tried_at else None

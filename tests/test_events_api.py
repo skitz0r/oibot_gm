@@ -176,11 +176,12 @@ def test_an_open_event_reads_by_its_sections(officer_client, reg, rs):
     join(reg, rs, ev, people(reg)[:18])
     j = officer_client.get(f"/api/event/{rc.event_parts(rs, ev)[1].key}").json()
     assert j["key"] == ev.key and [f["label"] for f in j["details"]] == ["Lineup", "Schedule", "Priority", "Lock Confirmation", "Sheet opened", "Locks",
-                                                                        "Automated Fill Requests", "Signup sheet"]
+                                                                        "Auto Lock", "Auto-fill on Auto Lock", "Automated Fill Requests", "Signup sheet"]
     facts = {f["label"]: f["value"] for f in j["details"]}
     assert facts["Schedule"] == "N/A" and facts["Lineup"] == "Hyjal Summit, then Barrow Deeps × 2"
     assert (facts["Priority"], facts["Lock Confirmation"], facts["Automated Fill Requests"]) == ("First to join", "No", "On")
-    assert {f["label"]: f["help"]["key"] for f in j["details"] if "help" in f} == {"Lock Confirmation": "confirm", "Automated Fill Requests": "autofill"}, \
+    assert {f["label"]: f["help"]["key"] for f in j["details"] if "help" in f} == {"Lock Confirmation": "confirm", "Automated Fill Requests": "autofill",
+                                                                                   "Auto Lock": "auto_lock", "Auto-fill on Auto Lock": "auto_lock_fill"}, \
         "the editor's (?) key on the rows the editor has one for, and on no other row"
     assert facts["Signup sheet"] == PAGE_WORDS["sheet_waits"], "no signup channel here: the fact says what it waits for"
     assert j["signups"]["joined"] == 18 and [p["label"] for p in j["parts"]][0].endswith("· Hyjal Summit")
@@ -257,7 +258,8 @@ def test_an_events_raid_night_facts_come_from_its_runs(officer_client, reg, rs, 
     soft, _hard, confirm = run_times(reg, ev, rc.run_team(reg, ev))
     assert facts["Reminder"] == reg.local12(soft) and facts["Confirm by"] == reg.local12(confirm)
     helps = {f["label"]: f["help"]["key"] for f in j["details"] if "help" in f}
-    assert helps == {"Lock Confirmation": "confirm", "Reminder": "nudge", "Automated Fill Requests": "autofill"}, \
+    assert helps == {"Lock Confirmation": "confirm", "Reminder": "nudge", "Automated Fill Requests": "autofill", "Auto Lock": "auto_lock",
+                     "Auto-fill on Auto Lock": "auto_lock_fill"}, \
         "the editor's (?) on Reminder too; Confirm by and the raid-night rows have no editor hint"
     assert facts["Away that day"] == f"{ms[11].display_name} (work trip)"
     other = rc.open_run(reg, rs, RID, night, by="t")  # another event that same night, one of ours joined there too
@@ -395,7 +397,8 @@ def test_a_coming_up_event_opens_by_hand_however_far_ahead(officer_client, reg, 
     r = officer_client.get(f"/api/event/coming/{sid}/{rc.occurrence_stamp(reg, far)}")
     assert r.status_code == 200, r.text
     j = r.json()
-    assert [f["label"] for f in j["details"]] == ["Lineup", "Schedule", "Priority", "Lock Confirmation", "Sheet opens", "Locks"]
+    assert [f["label"] for f in j["details"]] == ["Lineup", "Schedule", "Priority", "Lock Confirmation", "Sheet opens", "Locks",
+                                                  "Auto Lock", "Auto-fill on Auto Lock"]
     assert {f["label"]: f.get("help") for f in j["details"]}["Lock Confirmation"] == {
         "key": "confirm", "text": PAGE_WORDS["schedule_field_help"]["confirm"], "about": "What Lock Confirmation does"}
     facts = {f["label"]: f["value"] for f in j["details"]}

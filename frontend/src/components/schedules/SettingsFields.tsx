@@ -10,7 +10,8 @@ export type TimingDraft = Record<string, number | boolean>;
 const SAME = "same";  // a select's "the raid's" choice: the draft holds "" (nothing of its own)
 
 /** The Sheet timing pieces the schedule editor and Edit event share (one component, two editors): an optional preset,
- *  then — as `shown(setting)` allows — when the sheet opens and locks, the reminder switch and its time, the lock's
+ *  then — as `shown(setting)` allows — when the sheet opens and locks, Auto Lock with its auto-fill under it (greyed
+ *  while Auto Lock is off), the reminder switch and its time, the lock's
  *  confirmation and Confirm by, the automatic asks and how long an ask waits, and the open DM. Every label is the
  *  server's word for the setting (PAGE_WORDS schedule_fields), so the Save box's diff lines say the same; each switch's
  *  (?) is the server's sentence (PAGE_WORDS schedule_field_help); every choice is the server's (`hours`). Pickers
@@ -29,9 +30,9 @@ export function TimingFields({ words, values, hours, shown, onChange, presets, o
   );
   const help = (words.schedule_field_help || {}) as Record<string, string>;
   /** a switch, then its (?) with the server's sentence on what it does (who is sent what, when) */
-  const toggle = (k: string) => (
+  const toggle = (k: string, disabled = false) => (
     <Group key={k} gap={2} wrap="nowrap" align="center">
-      <Switch label={F[k]} checked={values[k] === true} onChange={(e) => onChange(k, e.currentTarget.checked)} />
+      <Switch label={F[k]} checked={values[k] === true} disabled={disabled} onChange={(e) => onChange(k, e.currentTarget.checked)} />
       {help[k] && <FieldHelp label={(words.help_about || "{name}").replace("{name}", F[k])} text={help[k]} />}
     </Group>
   );
@@ -47,6 +48,13 @@ export function TimingFields({ words, values, hours, shown, onChange, presets, o
           }} />
       )}
       {row(shown("signup_lead_hours") && hourSelect("signup_lead_hours"), shown("lock_hours_before") && hourSelect("lock_hours_before"))}
+      {/* Auto Lock, and under it its auto-fill — which means nothing while Auto Lock is off, so it greys out (issue 14) */}
+      {(shown("auto_lock") || shown("auto_lock_fill")) && (
+        <Stack gap={4}>
+          {shown("auto_lock") && toggle("auto_lock")}
+          {shown("auto_lock_fill") && <div style={{ paddingLeft: 24 }}>{toggle("auto_lock_fill", values.auto_lock === false)}</div>}
+        </Stack>
+      )}
       {row(shown("nudge") && toggle("nudge"), shown("nudge_hours_before") && values.nudge === true && hourSelect("nudge_hours_before"))}
       {row(shown("confirm") && toggle("confirm"), shown("confirm_hours_before") && values.confirm === true && hourSelect("confirm_hours_before"))}
       {row(shown("autofill") && toggle("autofill"), shown("fill_ask_hours") && hourSelect("fill_ask_hours"))}

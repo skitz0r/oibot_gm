@@ -339,12 +339,26 @@ def run_settings(rd: dict) -> dict:
     nudge = float(rd["nudge_hours_before"]) if rd.get("nudge_hours_before") is not None else (lead + lock) / 2  # registry: halfway between open and lock
     return {"cutoff_soft_hours": nudge, "cutoff_hard_hours": lock, "open_days_before": lead / 24,
             "reminders": "dm" if rd.get("nudge", RAID_DEFAULTS["nudge"]) else OFF,
-            "open_dm": bool(rd.get("open_dm", RAID_DEFAULTS["open_dm"])), "autofill": bool(rd.get("autofill", RAID_DEFAULTS["autofill"]))}
+            "open_dm": bool(rd.get("open_dm", RAID_DEFAULTS["open_dm"])), "autofill": bool(rd.get("autofill", RAID_DEFAULTS["autofill"])),
+            "auto_lock": bool(rd.get("auto_lock", RAID_DEFAULTS["auto_lock"])),
+            "auto_lock_fill": bool(rd.get("auto_lock_fill", RAID_DEFAULTS["auto_lock_fill"]))}
 
 
 def team_setting(team: dict, key: str):
     """A run's setting: the run dict's own value, else the guild-wide RAID_DEFAULTS in the run dict's words."""
     return team[key] if key in team else run_settings(RAID_DEFAULTS).get(key)
+
+
+def auto_lock(reg: Registry, ev: "RaidEvent") -> bool:
+    """Auto Lock (issue 14): the scheduler locks `ev` at its lock time. Off, it stays open until an officer locks it.
+    Stamped on the run dict at open from its schedule (a one-off: the open form's); a dict without it reads True."""
+    return bool(team_setting(run_team(reg, ev), "auto_lock"))
+
+
+def auto_lock_fill(reg: Registry, ev: "RaidEvent") -> bool:
+    """Auto-fill on Auto Lock (issue 14): the clock's lock fills the open seats with the solver. Off, it rosters the
+    board as it stands. Meaningful only while auto_lock is on; a dict without it reads True."""
+    return bool(team_setting(run_team(reg, ev), "auto_lock_fill"))
 
 
 def run_team(reg: Registry, ev: "RaidEvent") -> dict:
@@ -1115,7 +1129,8 @@ def fit_cutoffs(available_h: float, nudge_h: float, lock_h: float, confirm_h: fl
 
 def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None, schedule: str | None = None,
                follow: dict | None = None, *, occurrence: str | None = None, rs: "RaidStore | None" = None,
-               lineup: list[dict] | None = None, lock_hours: float | None = None, first_rosters: int | None = None) -> dict:
+               lineup: list[dict] | None = None, lock_hours: float | None = None, first_rosters: int | None = None,
+               auto_lock: bool | None = None, auto_lock_fill: bool | None = None) -> dict:
     """CREATE the run dicts of one run — one per raid of its lineup — that carry its settings (size, cutoffs from its
     schedule's cadence, how many rosters it expects) under new keys (new_run_key; finding an existing run is the
     caller's: find_run). `schedule` = the schedule id it comes from (None: the schedule with a run at exactly `start`,
@@ -1132,7 +1147,9 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
     `followed_by`. Every dict is checked before a key is drawn and all are saved in ONE config write, so a refused
     lineup (LINEUP_MAX_WORDS, a raid twice, an unknown raid, LINEUP_ORDER) writes nothing. `rs`: the store whose run
     files a new key must not meet. `lock_hours` / `first_rosters` (a one-off from the New event page, never a test run):
-    the lock this many hours before the start instead of the schedule's, and the first raid's rosters. → part 0's dict."""
+    the lock this many hours before the start instead of the schedule's, and the first raid's rosters. `auto_lock` /
+    `auto_lock_fill` (the one-off's open form): its Auto Lock and auto-fill instead of the schedule's (None = the
+    schedule's, stamped like the rest of its sheet timing). → part 0's dict."""
     from .registry import parse_lineup
 
     test = bool(cutoffs)
@@ -1165,7 +1182,9 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
         rd = {**rd, "nudge_hours_before": nudge_h}
     t = {"key": key, "name": f"{rd.get('name', instance)} {reg.local12(start)}", "size": int(rd.get("size") or DEFAULT_RAID_SIZE), "schedule": start.strftime("%a %H:%M"), "instance": instance,
          "cutoff_soft_hours": c.get("soft", float(rd["nudge_hours_before"])), "cutoff_hard_hours": c.get("hard", lock), "confirm_hours": c.get("confirm", confirm), "open_days_before": lead / 24,
-         "reminders": "dm" if c.get("nudge", rd["nudge"]) else OFF, "open_dm": bool(c.get("open_dm", rd["open_dm"])), "autofill": bool(rd["autofill"]), "ephemeral": True,
+         "reminders": "dm" if c.get("nudge", rd["nudge"]) else OFF, "open_dm": bool(c.get("open_dm", rd["open_dm"])), "autofill": bool(rd["autofill"]),
+         "auto_lock": bool(rd.get("auto_lock", True) if auto_lock is None else auto_lock),
+         "auto_lock_fill": bool(rd.get("auto_lock_fill", True) if auto_lock_fill is None else auto_lock_fill), "ephemeral": True,
          "created_at": now()}  # cleanup_ephemeral drops a dict whose open was cut off before its run file (DICT_WITHOUT_RUN_HOURS)
     # every run carries its class and series (roster redesign Phase 1): a one-off (ADHOC_SCHEDULE) and a pickup template
     # are ad hoc; anything else is a run of a recurring series whose regulars it expects
@@ -1241,14 +1260,15 @@ def closed_run_refusal(rs: "RaidStore", ev: "RaidEvent | None") -> str | None:
 
 def open_run(reg: Registry, rs: "RaidStore", instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None,
              schedule: str | None = None, follow: dict | None = None, lineup: list[dict] | None = None,
-             lock_hours: float | None = None, first_rosters: int | None = None) -> "RaidEvent":
+             lock_hours: float | None = None, first_rosters: int | None = None, auto_lock: bool | None = None,
+             auto_lock_fill: bool | None = None) -> "RaidEvent":
     """Open (or find the live) run for `instance` at `start`: a schedule's run is found by its occurrence (live: handed
     back, its missing later raids completed — complete_parts; closed: RegistryError with closed_run_refusal's sentence,
     nothing written), a one-off or a test run by a live run at that minute (live_at); else a new run (ensure_run, then
     open_event for part 0 and complete_parts for the rest). A rehearsal at that minute that another tester opened is
     refused. `lineup` = the LATER raids [{raid, rosters[, starts]}] (None = the schedule's own; `follow` = a one-entry
     alias): each opens as a part of the same run (design §5.62) — no sheet, its answers the first part's. `lock_hours` /
-    `first_rosters`: ensure_run's (a new one-off only; a run found keeps its own)."""
+    `first_rosters` / `auto_lock` / `auto_lock_fill`: ensure_run's (a new one-off only; a run found keeps its own)."""
     test = bool(cutoffs)
     if not schedule and not test:  # none named: the schedule that runs at that start, else a one-off (open_schedule)
         schedule = open_schedule(reg, instance, start, None)
@@ -1266,7 +1286,8 @@ def open_run(reg: Registry, rs: "RaidStore", instance: str, start: datetime, by:
         complete_parts(reg, rs, have)  # an open cut off between its parts (a restart) is finished, once
         return have
     with reg.config_lock:  # one step for a box re-described under the lock (configops.apply_ops `expect`): never half an open
-        t = ensure_run(reg, instance, start, by, cutoffs, schedule, follow=follow, rs=rs, lineup=lineup, lock_hours=lock_hours, first_rosters=first_rosters)
+        t = ensure_run(reg, instance, start, by, cutoffs, schedule, follow=follow, rs=rs, lineup=lineup, lock_hours=lock_hours, first_rosters=first_rosters,
+                       auto_lock=auto_lock, auto_lock_fill=auto_lock_fill)
         ev = open_event(reg, rs, t, start)
         complete_parts(reg, rs, ev)
     return ev
@@ -1481,6 +1502,8 @@ def place_run(reg: Registry, ev: "RaidEvent", start: datetime, team: dict | None
 EVENT_TIMING = {"nudge_hours_before": "cutoff_soft_hours", "lock_hours_before": "cutoff_hard_hours",
                 "confirm_hours_before": "confirm_hours", "fill_ask_hours": "fill_ask_hours", "nudge": "reminders",
                 "autofill": "autofill",
+                # issue 14: whether the clock locks the event, and whether that lock fills the open seats (switches)
+                "auto_lock": "auto_lock", "auto_lock_fill": "auto_lock_fill",
                 # the owner's tweaks (2026-11-24, B: one event, every field): whether the rostered confirm, the priority
                 # (first to join or by the weights, and the five weights) — on the first raid's dict, the weights on every
                 # live raid's — and `split_policy`, each raid's split (the run FILE's split_strategy: a value for the raid
@@ -1507,10 +1530,11 @@ MOVE_CLASH = "{raid} already has an event at {when}. Pick another time."
 MOVE_SAME = "The event already starts then."
 TIMING_LOCKED = "The sheet timing is fixed once the roster locks. Move the start instead."
 CONFIRM_LOCKED = "Asking the rostered to confirm is fixed once the roster locks."
+AUTO_LOCK_LOCKED = "Auto Lock and its auto-fill are fixed once the roster locks."
 SWITCH_EMPTY = "Say on or off for that setting."
 PRIORITY_LOCKED = "The priority is fixed once the roster locks, because the roster is already chosen."
 TIMING_ORDER = "The Signup Reminder must go out before Locks, and Confirm by can't come before Locks."
-TIMING_UNKNOWN = ("An event's own settings are its reminder, lock, confirm-by, asks, confirmation, priority and split.")
+TIMING_UNKNOWN = ("An event's own settings are its reminder, lock, Auto Lock, confirm-by, asks, confirmation, priority and split.")
 MOVE_OFFICER_ONLY = "Only an officer moves an event or changes its timing."
 MOVE_CONFIRM_GRACE = timedelta(hours=1)  # a confirm-by the move leaves in the past: within the hour instead (never past the start)
 
@@ -1603,7 +1627,8 @@ def run_timing(reg: Registry, first: "RaidEvent") -> dict:
     team = run_team(reg, first)
     out = {k: team_setting(team, v) for k, v in EVENT_TIMING.items() if v not in _OWN_READ}
     out["nudge"] = out["nudge"] not in (None, OFF, False)
-    out["autofill"] = bool(out["autofill"])
+    for k in ("autofill", "auto_lock", "auto_lock_fill"):
+        out[k] = bool(out[k])
     out.update({"confirm": run_confirms(reg, first), "first_come": run_first_come(reg, first), "weights": run_weights(reg, first)})
     return out
 
@@ -1676,11 +1701,11 @@ def _timing_values(timing: dict | None) -> dict:
         key = EVENT_TIMING.get(k)
         if key is None:
             raise RegistryError(TIMING_UNKNOWN)
-        if k in ("nudge", "autofill", "confirm", "first_come") and (v is None or (isinstance(v, str) and not v.strip())):
+        if k in ("nudge", "autofill", "confirm", "first_come", "auto_lock", "auto_lock_fill") and (v is None or (isinstance(v, str) and not v.strip())):
             raise RegistryError(SWITCH_EMPTY)  # never on by default: an empty value is no answer
         if k == "nudge":
             out[key] = OFF if not _switch(v) else "dm"
-        elif k in ("autofill", "confirm", "first_come"):
+        elif k in ("autofill", "confirm", "first_come", "auto_lock", "auto_lock_fill"):
             out[key] = _switch(v)
         elif k == "weights":
             out[key] = {**out.get(key, {}), **_weights_value(v)}
@@ -1749,6 +1774,8 @@ def reschedule_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", start: d
             return TIMING_LOCKED
         if "confirm" in fixed:
             return CONFIRM_LOCKED
+        if "auto_lock" in fixed or "auto_lock_fill" in fixed:
+            return AUTO_LOCK_LOCKED
         if fixed:  # the priority: first come or the weights
             return PRIORITY_LOCKED
         if splits:
@@ -1872,7 +1899,7 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
                 for k in ("cutoff_soft_hours", "cutoff_hard_hours", "confirm_hours"):
                     if k in t0:
                         t[k] = t0[k] + hours
-                for k in ("fill_ask_hours", "autofill"):
+                for k in ("fill_ask_hours", "autofill", "auto_lock", "auto_lock_fill"):
                     if k in values:
                         t[k] = values[k]
                 if w_delta:  # only the weights the officer changed: each later raid keeps its own others
@@ -1893,7 +1920,8 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
     ins = {sg.discord_id for sg in first.signups.values() if sg.status == "in"}
     clash = {uid: key for uid, key in conflicts(rs, first).items() if uid in ins}
     moved = Moved(parts=[p.key for p in parts], old=old.isoformat(), new=new.isoformat(), timing=values, told=told,
-                  absence_cleared=cleared, absence_written=written, locks_now=first.state == "open" and hard <= now_, conflicts=clash,
+                  absence_cleared=cleared, absence_written=written,
+                  locks_now=first.state == "open" and hard <= now_ and bool(team_setting(team, "auto_lock")), conflicts=clash,
                   splits=splits, lock_moved=lock_moved, seating=first_come_now)
     if not save:
         return moved

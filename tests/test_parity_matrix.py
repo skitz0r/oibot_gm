@@ -473,3 +473,22 @@ def test_the_board_stays_the_sites_with_one_written_reason():
     for op in ("run_strategy", "run_autofill", "run_board", "run_move", "run_propose"):
         assert "discord" not in SURFACES[op] and configops.BY_DESIGN_EXEMPT[op]["discord"], op
     assert "Events page" in configops.BY_DESIGN_EXEMPT["run_board"]["discord"]
+
+
+def test_auto_lock_and_its_fill_reach_every_surface():
+    """Issue 14: Auto Lock and Auto-fill on Auto Lock ride on schedule_set (a schedule's) and run_reschedule (one
+    event's, Edit event) — the site's editors, Discord's /gm schedule and /raid edit, plain text and MCP each name both."""
+    from pathlib import Path
+
+    from oibot_gm import event_view, flows_event, flows_raid, flows_schedule
+    from oibot_gm import raidcycle as rc
+    from oibot_gm.registry import SCHEDULE_TIMING
+
+    src = Path(__file__).resolve().parents[1] / "frontend" / "src"
+    for k in ("auto_lock", "auto_lock_fill"):
+        assert k in SCHEDULE_TIMING and k in rc.EVENT_TIMING, k  # schedule_set's and run_reschedule's settings
+        assert k in event_view.EDIT_FIELDS and k in flows_event.SWITCHES and k in flows_schedule.SWITCHES, k  # site + Discord editors
+        assert f'"{k}"' in (src / "pages" / "LineupPage.tsx").read_text() and f'"{k}"' in (src / "components" / "events" / "EditEvent.tsx").read_text(), k
+        assert k in configops.SCHEMA_TEXT, k  # plain text: schedule_set and run_reschedule both name it
+        assert k in ms.schedule_set.__doc__ and k in ms.reschedule_run.__doc__, k
+    assert flows_raid.AUTO_LOCK_PICKS, "a one-off's open form offers both on Discord too"

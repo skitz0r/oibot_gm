@@ -15,7 +15,7 @@ import css from "../../pages/listpage.module.css";
  *  the seating, each raid's split by its key. */
 type Draft = { timing: TimingDraft; weights: Record<string, string>; firstCome: boolean; splits: Record<string, string> };
 
-const TIMING = ["lock_hours_before", "nudge", "nudge_hours_before", "confirm", "confirm_hours_before", "autofill", "fill_ask_hours"];
+const TIMING = ["lock_hours_before", "auto_lock", "auto_lock_fill", "nudge", "nudge_hours_before", "confirm", "confirm_hours_before", "autofill", "fill_ask_hours"];
 
 function seedOf(ev: EventView): Draft {
   const e = ev.edit!;

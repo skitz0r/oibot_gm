@@ -1459,18 +1459,21 @@ class RaidMixin:
 
     # ---- opening and cancelling runs (commands, the web and plain-text ops share these)
     async def open_run_and_post(self, reg, rs, instance: str, start: datetime, by: str, schedule: str | None = None, follow: dict | None = None,
-                                lineup: list[dict] | None = None, lock_hours: float | None = None, first_rosters: int | None = None) -> rc.RaidEvent:
+                                lineup: list[dict] | None = None, lock_hours: float | None = None, first_rosters: int | None = None,
+                                auto_lock: bool | None = None, auto_lock_fill: bool | None = None) -> rc.RaidEvent:
         """Open (or find) the run for `instance` at `start` (from `schedule`, None = the schedule with a run at exactly
         that start, else a one-off — rc.open_run), post its
         sheet in the signup channel when one is set (else the event stays unposted: channel_id None, `/raid sheet` can
         place it), and say so on the ops feed. A start more than a few minutes in the past is refused
         (rc.refuse_past_start) — every on-demand open comes through here; the scheduler only opens future starts. A
         schedule's night asked as a one-off, or one a live one-off holds, is refused (rc.open_refusal); however far ahead, it opens.
-        `lock_hours` / `first_rosters`: the New event page's Locks choice and first raid's rosters for a one-off."""
+        `lock_hours` / `first_rosters` / `auto_lock` / `auto_lock_fill`: the one-off's open form (the New event page,
+        /raid open): its Locks choice, first raid's rosters, Auto Lock and auto-fill (None = the schedule's)."""
         rc.refuse_past_start(reg, start)
         if (why := rc.open_refusal(reg, rs, instance, start, schedule)) is not None:  # a schedule's night: never a one-off beside it
             raise RegistryError(why)
-        ev = rc.open_run(reg, rs, instance, start, by=by, schedule=schedule, follow=follow, lineup=lineup, lock_hours=lock_hours, first_rosters=first_rosters)
+        ev = rc.open_run(reg, rs, instance, start, by=by, schedule=schedule, follow=follow, lineup=lineup, lock_hours=lock_hours, first_rosters=first_rosters,
+                         auto_lock=auto_lock, auto_lock_fill=auto_lock_fill)
         channel = self.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else None
         if channel and not ev.message_id:
             await self.post_sheet(reg, rs, ev, channel)

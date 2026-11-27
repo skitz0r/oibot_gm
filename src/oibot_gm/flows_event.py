@@ -12,7 +12,7 @@ import discord
 
 from . import consequences as cq
 from . import raidcycle as rc
-from .constants import PAGE_WORDS, schedule_line_label
+from .constants import PAGE_WORDS, schedule_line_label, switch_words
 from .flows_lineup import EVERY_RAID_IN, REVIEW, START_CHOICES, STEP, LineupBlock  # noqa: F401 — re-exported: callers import them from here
 from .flows_raid import officer_guard, officer_only
 from .raid_views import run_title
@@ -24,7 +24,7 @@ PICK_WHEN = "Pick the day and time"
 PICK_AGAIN = "Pick another time"
 CHANGE = "Change a setting"
 HOURS = ("lock_hours_before", "nudge_hours_before", "confirm_hours_before", "fill_ask_hours")
-SWITCHES = ("nudge", "confirm", "autofill")
+SWITCHES = ("nudge", "confirm", "autofill", "auto_lock", "auto_lock_fill")
 
 
 async def pick_event(interaction: discord.Interaction, reg: Registry, *, title: str,
@@ -279,7 +279,9 @@ class EditEventWizard(EventWizard):
         head = [f"**{run_title(self.reg, ev)}**"] + ([PAGE_WORDS["edit_locked"]] if ev.state != "open" else [])
         if dropped:  # said once: the next hub has nothing left to drop
             head.append(f"The roster locked while you edited, so your change to {join_words(dropped)} was dropped.")
-        choices = [Opt(f, setting_label(f)) for f in opts["fields"]]
+        # Auto-fill on Auto Lock sits under Auto Lock and changes nothing while Auto Lock is off (issue 14): not offered then
+        choices = [Opt(f, setting_label(f)) for f in opts["fields"]
+                   if not (f == "auto_lock_fill" and self.value(opts, "auto_lock") is False)]
         await self.plain(interaction, "\n".join(head + self.lines(opts)),
                          self.select(CHANGE, choices, self.setting),
                          self.button(REVIEW, self.review, discord.ButtonStyle.primary, disabled=not self.timing),
@@ -307,6 +309,8 @@ class EditEventWizard(EventWizard):
                        for c in trim_hours(opts["hours"][f], cur)]
         elif f == "first_come":
             choices = [Opt("first", PAGE_WORDS["first_to_join"], default=bool(cur)), Opt("priority", PAGE_WORDS["by_priority"], default=not cur)]
+        elif f in ("auto_lock", "auto_lock_fill"):  # On / Off, as the Details row and the site's editor say it
+            choices = [Opt("on", switch_words(f, True), default=bool(cur)), Opt("off", switch_words(f, False), default=not cur)]
         else:
             choices = [Opt("on", PAGE_WORDS["on"], default=bool(cur)), Opt("off", PAGE_WORDS["off"], default=not cur)]
 

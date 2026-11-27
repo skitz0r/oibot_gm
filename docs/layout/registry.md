@@ -26,7 +26,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        each raid's entries back under raids.<id> as raid_override reads them, the list removed, one commit per guild; an
                        unreadable entry refuses that guild), then start the older code; back to phase 2's code = --ids-only, then commit 8b3bc81
                        (= 1821e4d's code) — never a55a112 (it holds phase 3's first task and would lift the ids again at its start);
-                       Phase 2 (§5.67, C7): SCHEDULE_TIMING = the nine values each stored schedule carries written out (write_out_timing on every
+                       Phase 2 (§5.67, C7): SCHEDULE_TIMING = the values each stored schedule carries written out (nine, then issue 14's auto_lock / auto_lock_fill, default True in RAID_DEFAULTS and ADHOC_DEFAULTS; write_out_timing on every
                        _set_raid_rows; timing_suggestion(raid) seeds a new one and is what "inherit" means); a raid refuses timing or a cadence preset
                        (TIMING_ON_SCHEDULE); effective_raid(base, over) = raid_def's pure merge; lift_timing(cfg, raids, skip) at every load (on a copy:
                        timing off every raid onto its schedules (since phase 3 never a `default` entry from the game's run times), live run dicts stamped with

@@ -444,7 +444,8 @@ def before_first_open_sentence(reg: Registry, lineup: list[dict], start, only: s
 
 
 TIMING_NAMES = {"cutoff_hard_hours": "lock time", "cutoff_soft_hours": "reminder time", "confirm_hours": "confirm-by",
-                "reminders": "reminder", "autofill": "Automated Fill Requests", "fill_ask_hours": "fill ask wait",
+                "reminders": "reminder", "auto_lock": "Auto Lock", "auto_lock_fill": "auto-fill on Auto Lock",
+                "autofill": "Automated Fill Requests", "fill_ask_hours": "fill ask wait",
                 # the owner's tweaks (B): an event's other own settings, named the same way
                 "confirm": "confirmation", "first_come": "seating", "weights": "priority", "split": "split"}
 TIMING_ORDER_OF = tuple(TIMING_NAMES)
@@ -477,6 +478,10 @@ def _timing_phrases(reg: Registry, start, changed: dict, team: dict, first_raid:
             elif "cutoff_soft_hours" not in changed:  # turned on: when it goes out (a new time was said above)
                 soft = float(rc.team_setting(team, "cutoff_soft_hours"))
                 out.append(f"the reminder goes out {reg.local12(start - timedelta(hours=soft))}")
+        elif k == "auto_lock":
+            out.append("the bot locks it at the lock time" if v else "an officer locks it")
+        elif k == "auto_lock_fill":
+            out.append("Auto Lock fills the open seats" if v else "Auto Lock rosters the board as it stands")
         elif k == "autofill":
             out.append("Automated Fill Requests are on" if v else "Automated Fill Requests are off")
         elif k == "confirm":
@@ -497,7 +502,8 @@ def _and(items: list[str]) -> str:
     return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
 
 
-_SHEET_TIMING = {"cutoff_hard_hours", "cutoff_soft_hours", "confirm_hours", "reminders", "autofill", "fill_ask_hours"}
+_SHEET_TIMING = {"cutoff_hard_hours", "cutoff_soft_hours", "confirm_hours", "reminders", "autofill", "fill_ask_hours",
+                 "auto_lock", "auto_lock_fill"}
 
 
 def _what_changes(reg: Registry, name: str, first: rc.RaidEvent, start, moves: bool, changed: dict) -> str:
@@ -600,7 +606,7 @@ def reschedule_box(reg: Registry, rs, ev: rc.RaidEvent, start, timing: dict | No
 
 
 # the order Edit event's diff lines follow (the editor's sections: when, sheet timing, confirmation, open seats, priority)
-EDIT_LINE_ORDER = ("start", "lock_hours_before", "nudge", "nudge_hours_before", "confirm", "confirm_hours_before",
+EDIT_LINE_ORDER = ("start", "lock_hours_before", "auto_lock", "auto_lock_fill", "nudge", "nudge_hours_before", "confirm", "confirm_hours_before",
                    "autofill", "fill_ask_hours", "first_come", "weights", "split_policy")
 
 

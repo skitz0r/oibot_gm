@@ -17,7 +17,7 @@ from . import consequences as cq
 from . import raidcycle as rc
 from . import wizard_opts as wo
 from .consequences import before_first_open_sentence, later_places_sentence
-from .constants import PAGE_WORDS
+from .constants import PAGE_WORDS, switch_words
 from .guild_routing import in_server_channel
 from .flows_lineup import LineupBlock
 from .raid_buttons import RUN_WORDS
@@ -110,6 +110,18 @@ async def with_run(interaction: discord.Interaction, reg: Registry, *, title: st
 
 # ---------------------------------------------------------------- /raid open
 
+# a one-off's Auto Lock pick (issue 14): value → (auto_lock, auto_lock_fill); Off keeps the auto-fill as it was asked (On)
+AUTO_LOCK_PICKS = {"fill": (True, True), "board": (True, False), "off": (False, True)}
+
+
+def auto_lock_pick(auto: bool, fill: bool) -> list:
+    """The one-off screen's Auto Lock select, in the editors' words: 'Auto Lock: On · Auto-fill on Auto Lock: On' …"""
+    F, w = PAGE_WORDS["schedule_fields"], switch_words
+    now = "fill" if auto and fill else "board" if auto else "off"
+    return [Opt(k, f"{F['auto_lock']}: {w('auto_lock', a)}" + (f" · {F['auto_lock_fill']}: {w('auto_lock_fill', f)}" if a else ""),
+                default=k == now) for k, (a, f) in AUTO_LOCK_PICKS.items()]
+
+
 class OpenWizard(Wizard, LineupBlock):
     """Raid → Next run · Another upcoming run (a select of the other upcoming runs of every recurring schedule) ·
     Ad hoc run (a pickup template, or a one-off — then day · hour · minute selects; roster redesign §5).
@@ -124,7 +136,7 @@ class OpenWizard(Wizard, LineupBlock):
         super().__init__(reg, owner_id, title="Open an event", guard=officer_guard(reg))
         self.rs = rs
         self.draft = {"raid": None, "start": None, "note": "", "day0": reg.now_local().date(), "schedule": None,
-                      "lock": event_view.NEW_EVENT_LOCKS[0], "here": False}
+                      "lock": event_view.NEW_EVENT_LOCKS[0], "here": False, "auto_lock": True, "auto_lock_fill": True}
         self.lineup: list[dict] = []
         self.lineup_page = 0
 
@@ -410,7 +422,15 @@ class OpenWizard(Wizard, LineupBlock):
             self.lineup[0]["rosters"] = int(values[0])
             await self.one_off(i)
 
+        # Auto Lock and its auto-fill (issue 14) as one pick: the auto-fill means nothing while Auto Lock is off
+        auto = auto_lock_pick(self.draft["auto_lock"], self.draft["auto_lock_fill"])
+
+        async def set_auto(i: discord.Interaction, values: list[str]) -> None:
+            self.draft["auto_lock"], self.draft["auto_lock_fill"] = AUTO_LOCK_PICKS[values[0]]
+            await self.one_off(i)
+
         await self.show(interaction, "\n".join(lines), self.select("Locks", locks, set_lock), self.select("Rosters", rosters, set_rosters),
+                        self.select(PAGE_WORDS["schedule_fields"]["auto_lock"], auto, set_auto),
                         self.button("Open the sheet", self.press_open_one_off, discord.ButtonStyle.success),
                         self.button("Change", self.lineup_hub), self.button("Back", self.shortlist))
 
@@ -430,7 +450,8 @@ class OpenWizard(Wizard, LineupBlock):
         try:
             ev = await interaction.client.open_run_and_post(self.reg, self.rs, self.rid, self.draft["start"], by=interaction.user.display_name,
                                                             schedule=ADHOC_SCHEDULE, lineup=later or None, lock_hours=float(self.draft["lock"]),
-                                                            first_rosters=int(self.lineup[0].get("rosters") or 1))
+                                                            first_rosters=int(self.lineup[0].get("rosters") or 1),
+                                                            auto_lock=self.draft["auto_lock"], auto_lock_fill=self.draft["auto_lock_fill"])
         except RegistryError as e:
             await self.finish(interaction, str(e))
             return

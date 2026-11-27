@@ -140,6 +140,8 @@ Schedules (officer): WHEN a raid runs and its sheet timing. Each schedule has an
   | confirm_hours_before (unanswered confirmations expire) | fill_ask_hours (a fill DM with no answer counts as no after this long)
   | nudge (true|false: DM mains who haven't answered, once) | autofill (true|false: after lock the bot fills freed seats by DM)
   | open_dm (true|false: DM every main when a sheet opens) | confirm (true|false: the lock asks the rostered to confirm)
+  | auto_lock (true|false: "Auto Lock" — the bot locks each event at its lock time; false = an officer locks it)
+  | auto_lock_fill (true|false: "Auto-fill on Auto Lock" — that lock fills the open seats; false = it rosters the board as it stands)
   | split_policy — a timing setting given value "inherit" goes back to the game's suggestion; split_policy "inherit" goes back to the raid's.
   Several schedule_set ops on one schedule in a row are saved together (so "open 48h before and lock 36h before" can't fail half way).
   Runs already open keep their times.
@@ -159,7 +161,9 @@ Runs (officer; target = the event key like bd-k7m2qx from the live-events list, 
   run_reschedule: target, field=start with value=<"YYYY-MM-DD HH:MM" in guild time: the run's new start> — moves the whole run
     (every raid of it keeps its offset), answers stand, everyone who answered sees a notice, nobody is DMed; or field=<one of this
     run's own settings, before lock only: nudge_hours_before|lock_hours_before|confirm_hours_before (value = hours before the
-    start) | nudge|confirm (value on|off: a reminder, the rostered asked to confirm) | first_come (on = first to join, off = by
+    start) | nudge|confirm (value on|off: a reminder, the rostered asked to confirm) | auto_lock (on|off: "Auto Lock", the
+    bot locks it at its lock time; off = an officer locks it) | auto_lock_fill (on|off: "Auto-fill on Auto Lock", that lock
+    fills the open seats; off = it rosters the board as it stands) | first_come (on = first to join, off = by
     priority) | weight_regular|weight_rank|weight_main|weight_sat_out|weight_signup_order (value 0-6) | split_policy
     (balanced|first|rotation: the target raid's split); and before or after the lock: fill_ask_hours (hours a fill ask waits) |
     autofill (on|off: the bot asks people for open seats)>, value. Its schedule keeps its own. Several run_reschedule ops on one
@@ -5080,7 +5084,7 @@ def _amount(v, unit: str) -> str:
 
 
 _HOUR_FIELDS = ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours")
-_SWITCH_FIELDS = ("nudge", "autofill", "open_dm", "confirm")
+_SWITCH_FIELDS = ("nudge", "autofill", "open_dm", "confirm", "auto_lock", "auto_lock_fill")
 
 
 def _schedule_value_words(reg: Registry, rid: str, setting: str, value, s: dict | None):

@@ -962,6 +962,8 @@ def box_cases(reg, rs, runs, ms, dump):
                                 ("first to join", None, {"first_come": True}),
                                 ("the split", None, {"split_policy": "rotation"}),
                                 ("the lock, answers told", None, {"lock_hours_before": 6}),
+                                ("Auto Lock off", None, {"auto_lock": False}),
+                                ("Auto Lock on, the board as it stands", None, {"auto_lock_fill": False}),
                                 ("a move and every field", ev.start + timedelta(hours=1),
                                  {"lock_hours_before": 6, "nudge": False, "confirm": False, "autofill": False, "fill_ask_hours": 2,
                                   "first_come": True, "weights": {"rank": 1}, "split_policy": "rotation"})):
@@ -970,7 +972,8 @@ def box_cases(reg, rs, runs, ms, dump):
         add("reschedule_box edit", case, b)
     add("reschedule_box edit", "locked: the automatic asks", cq.reschedule_box(reg, rs, lk, None, {"autofill": False}, edit=True))
     for case, timing in (("locked: confirmation", {"confirm": False}), ("locked: the priority", {"weights": {"rank": 1}}),
-                         ("locked: the split", {"split_policy": "rotation"}), ("locked: the lock", {"lock_hours_before": 6})):
+                         ("locked: the split", {"split_policy": "rotation"}), ("locked: the lock", {"lock_hours_before": 6}),
+                         ("locked: Auto Lock", {"auto_lock": False})):
         b = cq.reschedule_box(reg, rs, lk, None, timing, edit=True)
         assert b["verb"] is None, (case, b)
         add("reschedule_box edit", case, b)
@@ -1140,6 +1143,9 @@ def reschedule_cases(reg, rs, runs, ms, dump):
     team["reminders"] = was
     add("timing only, the fill ask wait", ev, None, {"fill_ask_hours": 2})
     add("timing only, confirm-by", ev, None, {"confirm_hours_before": 2})
+    add("timing only, Auto Lock off", ev, None, {"auto_lock": False})
+    add("timing only, Auto Lock and its auto-fill off", ev, None, {"auto_lock": False, "auto_lock_fill": False})
+    add("timing only, the lock and Auto Lock off", ev, None, {"lock_hours_before": 6, "auto_lock": False})
     add("timing only, two times", ev, None, {"lock_hours_before": 6, "nudge_hours_before": 12})
     add("timing only, everything", ev, None, {"lock_hours_before": 6, "nudge_hours_before": 12, "confirm_hours_before": 2,
                                               "nudge": False, "autofill": False, "fill_ask_hours": 2})
@@ -1563,6 +1569,9 @@ def test_a_save_boxs_diff_lines_are_the_pages_words(reg):
     # the two switches the Details rows show as Yes / No and On / Off print the same values here (issue #13 follow-up)
     assert _box_line(reg, sid, "confirm", False) == "Lock Confirmation: Yes → No"
     assert _box_line(reg, sid, "autofill", False) == "Automated Fill Requests: On → Off"
+    # issue 14: Auto Lock and its auto-fill read On / Off, as their Details rows do
+    assert _box_line(reg, sid, "auto_lock", False) == "Auto Lock: On → Off"
+    assert _box_line(reg, sid, "auto_lock_fill", False) == "Auto-fill on Auto Lock: On → Off"
     assert _box_line(reg, sid, "nudge_hours_before", 12).startswith("Signup Reminder goes out: "), "the select's line names its switch"
     assert _box_line(reg, sid, "split_policy", "first") == "When one night fills two rosters: the raid's → Raid one first"
     for field, value, want in (("lockout_days", 5, "Lockout: 7 days → 5 days"), ("duration_hours", 2.5, "Length: 3 hours → 2.5 hours"),

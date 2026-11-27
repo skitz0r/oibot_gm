@@ -416,7 +416,7 @@ def test_entry_names_reach_the_answers_log(reg, rs, monkeypatch):
 
 # ---------------------------------------------------------------- a change missing a detail (Task 8 fix, the ruling)
 
-OFF_PROMPT_SHA = "eb449ae2d30d2d8759069d84e68932a9bcd4e4359fcc728d843ce75afbb2015b"  # SYSTEM.format(schema=…); Task 11 added the spec op's from-spec and its never-ask-which-character line; its fix round, the kind=ignore sentence
+OFF_PROMPT_SHA = "a618a10d9e8b13a438ecf44e4f98323714dbb1da4dfc8f167d1b8a8340d1a672"  # SYSTEM.format(schema=…); Task 11 added the spec op's from-spec and its never-ask-which-character line; its fix round, the kind=ignore sentence; issue 14, auto_lock / auto_lock_fill on schedule_set and run_reschedule
 
 
 class PromptSpy:

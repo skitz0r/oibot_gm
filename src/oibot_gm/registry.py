@@ -797,21 +797,26 @@ def hours_label(field: str) -> str:
 
     return schedule_line_label(field) or field.replace("_", " ").capitalize()
 # true/false raid settings (command + API layers parse them the same way). `confirm`: the lock asks everyone rostered to
-# Confirm / Can't make it (off: Join is the commitment, nobody is asked and no seat expires — the ad hoc default, D5)
-RAID_BOOL_FIELDS = ("nudge", "autofill", "open_dm", "confirm")
+# Confirm / Can't make it (off: Join is the commitment, nobody is asked and no seat expires — the ad hoc default, D5).
+# `auto_lock`: the scheduler locks the event at its lock time (off: it stays open until an officer locks it);
+# `auto_lock_fill`: that clock's lock fills the open seats with the solver (off: it rosters the board as it stands —
+# issue 14; both default on, so a schedule or event stored before them reads as it always did)
+RAID_BOOL_FIELDS = ("nudge", "autofill", "open_dm", "confirm", "auto_lock", "auto_lock_fill")
 # loot, per raid (not per schedule): loot_auto_distribute = a companion's drops are distributed ~20 s after a boss's last
 # drop (design §3.1 decision 6, default on — raid_def fills the default)
 RAID_LOOT_FIELDS = ("loot_auto_distribute",)
 # effective defaults under profiles/<game>/raids.yaml and guild overrides (nudge_hours_before is derived: halfway between open and lock)
 RAID_DEFAULTS = {"lockout_days": 7, "duration_hours": 3, "signup_lead_hours": 120, "lock_hours_before": 24, "confirm_hours_before": 6,
-                 "split_policy": "balanced", "nudge": True, "fill_ask_hours": 4, "autofill": True, "open_dm": False, "confirm": True}
+                 "split_policy": "balanced", "nudge": True, "fill_ask_hours": 4, "autofill": True, "open_dm": False, "confirm": True,
+                 "auto_lock": True, "auto_lock_fill": True}
 # ---- ad hoc (roster redesign §2, D4/D5/D17): a pickup template or a one-off run takes the raid's IDENTITY (size, comp,
 # lockout, duration, first opening) but none of its recurring timing — Barrow Deeps' 24 h lock and 36 h reminder are
 # Tuesday decisions. These are guild habits, not game data, so they live here next to RAID_DEFAULTS (not in profiles/).
 # No reminder, no open DM, no confirmations, lock 2 h before, fill asks 1 h, first come first seated (signup order is
 # the weight that counts; seat_bonus reads it per position for an ad hoc run).
 ADHOC_DEFAULTS = {"signup_lead_hours": 168, "nudge_hours_before": 3, "lock_hours_before": 2, "confirm_hours_before": 1, "fill_ask_hours": 1,
-                  "nudge": False, "open_dm": False, "confirm": False, "autofill": True, "split_policy": "balanced"}
+                  "nudge": False, "open_dm": False, "confirm": False, "autofill": True, "split_policy": "balanced",
+                  "auto_lock": True, "auto_lock_fill": True}
 ADHOC_WEIGHTS = {"rank": 0, "main": 1, "sat_out": 0, "signup_order": 6, "regular": 0}
 RAID_IDENTITY = ("name", "size", "minimums", "lockout_days", "duration_hours", "first_open", "notes", "comp_groups", "schedules")
 SPLIT_POLICIES = ("balanced", "first", "rotation")  # how a slot with more joiners than one run seats is split at the scheduled lock
@@ -903,16 +908,16 @@ ID_TAKEN = "Another schedule is already called {sid}. Pick another id."
 SCHEDULE_EXISTS = "The schedule called {sid} already exists. To change it, name the schedule without a raid."
 SCHEDULE_KINDS = ("weekly", "lockout", "pickup")  # weekly slots · day N of each lockout · a template opened on demand
 SCHEDULE_CADENCE = ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours",
-                    "nudge", "autofill", "open_dm", "confirm", "split_policy")  # unset = the raid's value (ad hoc: ADHOC_DEFAULTS)
+                    "nudge", "autofill", "open_dm", "confirm", "auto_lock", "auto_lock_fill", "split_policy")  # unset = the raid's value (ad hoc: ADHOC_DEFAULTS)
 # `weights`: a partial seat-order map {rank, main, sat_out, signup_order, regular} merged per key over the raid's (ad hoc: ADHOC_WEIGHTS)
 SCHEDULE_FIELDS = ("name", "kind", "active", "slots", "days", "time", "rosters", "weights", "follow", "lineup") + SCHEDULE_CADENCE
 # `lineup` (set_schedule): the whole lineup [{raid, rosters[, starts]}] at once, replacing rosters / follow / then — a
 # schedule row keeps its raids past the second under `then` (to_stored_schedule / from_stored_schedule)
-# the nine values a schedule OWNS (C7): every stored schedule carries them written out in full (write_out_timing), seeded
+# the values a schedule OWNS (C7: nine, then issue 14's Auto Lock and its auto-fill): every stored schedule carries them written out in full (write_out_timing), seeded
 # from the game's suggestion for its raid (Registry.timing_suggestion; a pickup row from ADHOC_DEFAULTS). A raid refuses
 # them (TIMING_ON_SCHEDULE). split_policy and weights are not timing: the raid keeps a default a schedule may override (C6).
 SCHEDULE_TIMING = ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before",
-                   "fill_ask_hours", "nudge", "autofill", "open_dm", "confirm")
+                   "fill_ask_hours", "nudge", "autofill", "open_dm", "confirm", "auto_lock", "auto_lock_fill")
 TIMING_ON_SCHEDULE = "Sheet timing belongs to each schedule now. Change it on the schedule."
 MAX_SCHEDULE_ROSTERS = 4  # = raidcycle.MAX_ROSTERS_PER_SLOT
 # A follow-on run (design §5.62) — a second raid the same night from the same signup — carries this reserved schedule id
@@ -1538,7 +1543,8 @@ def write_out_timing(row: dict, rd: dict) -> dict:
 # the lift's words for one timing value (lift_timing's lines, the start's ops line), in SCHEDULE_TIMING's order
 _TIMING_HOURS_WORDS = {"signup_lead_hours": "sheet opens {} before", "nudge_hours_before": "reminder {} before",
                        "lock_hours_before": "locks {} before", "confirm_hours_before": "confirm-by {} before", "fill_ask_hours": "a fill ask waits {}"}
-_TIMING_BOOL_WORDS = {"nudge": "reminder", "autofill": "automatic fill", "open_dm": "opening DM", "confirm": "confirmations"}
+_TIMING_BOOL_WORDS = {"nudge": "reminder", "autofill": "automatic fill", "open_dm": "opening DM", "confirm": "confirmations",
+                      "auto_lock": "Auto Lock", "auto_lock_fill": "auto-fill on Auto Lock"}
 
 
 def timing_words(values: dict) -> str:

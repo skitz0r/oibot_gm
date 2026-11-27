@@ -163,6 +163,9 @@ def stored_entry(s: dict) -> dict:
     """One schedule in machine form for the editor: every STORED_FIELDS value as the schedule holds it (the lineup as
     parse_lineup reads it). Sent back unchanged it is no edit (configops._schedule_ops leaves out what equals this)."""
     out = {f: s.get(f) for f in STORED_FIELDS if f != "lineup"}
+    for f in ("auto_lock", "auto_lock_fill"):  # a schedule stored before issue 14 holds neither: both read On
+        if out.get(f) is None:
+            out[f] = True
     out["slots"], out["days"] = list(s.get("slots") or []), list(s.get("days") or [])
     try:
         out["lineup"] = parse_lineup(row_lineup(s["raid"], s))
@@ -301,6 +304,9 @@ def schedule_json(reg: Registry, rs: "rc.RaidStore", sid: str, now: datetime | N
         details.append(_fact("First event" if active else "Next event if resumed", first))
     details += [_fact("Priority", rc.priority_words(reg, {"kind": s.get("kind"), "weights": sd.get("weights")})),
                 _fact(F["confirm"], rc.confirmation_words(bool(sd.get("confirm"))), hint="confirm")]
+    from .event_view import auto_lock_facts
+
+    details += auto_lock_facts(bool(sd.get("auto_lock", True)), bool(sd.get("auto_lock_fill", True)))  # issue 14
     if not pickup:
         details.append(_fact(F["autofill"], switch_words("autofill", sd.get("autofill")), hint="autofill"))
     if len(lineup) > 1:
@@ -312,7 +318,7 @@ def schedule_json(reg: Registry, rs: "rc.RaidStore", sid: str, now: datetime | N
     open_n = len(reg.schedule_runs_open(sid, rs))
     timing = [_fact("Sheet opens", before(sd["signup_lead_hours"])),
               _fact("Reminder", before(sd["nudge_hours_before"]) if sd.get("nudge") else PAGE_WORDS["no_reminder"], hint="nudge"),
-              _fact("Locks", before(sd["lock_hours_before"])),
+              _fact("Locks", before(sd["lock_hours_before"]) if sd.get("auto_lock", True) else PAGE_WORDS["officer_locks"]),
               _fact("Confirm by", before(sd["confirm_hours_before"]) if sd.get("confirm") else PAGE_WORDS["not_asked"])]
     if active or open_n:
         timing.append(_fact("Open events keeping their own timing", str(open_n)))
@@ -332,7 +338,8 @@ def schedule_json(reg: Registry, rs: "rc.RaidStore", sid: str, now: datetime | N
             opens, locks = rc.sheet_times(t, sd)
             occ = rc.occurrence_stamp(reg, t)
             hit = find(sid, occ)
-            nxt.append({"starts": reg.local12(t), "opens": reg.local12(opens), "locks": reg.local12(locks),
+            nxt.append({"starts": reg.local12(t), "opens": reg.local12(opens),
+                        "locks": reg.local12(locks) if sd.get("auto_lock", True) else PAGE_WORDS["officer_locks"],
                         "start_iso": t.isoformat(), "occurrence": occ, "key": hit.key if hit is not None and not hit.dropped else None})
 
     boxes = {("pause" if active else "resume"): (cq.schedule_pause_box if active else cq.schedule_resume_box)(reg, rs, sid),

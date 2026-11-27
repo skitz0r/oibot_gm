@@ -59,6 +59,8 @@ function NewEvent({ meta }: { meta: Meta }) {
   const [day, setDay] = useState<string | null>(null);
   const [time, setTime] = useState<string | null>(null);
   const [lock, setLock] = useState<string>("2");
+  // a one-off's Auto Lock and its auto-fill (issue 14): both On until the officer switches one off
+  const [auto, setAuto] = useState<{ auto_lock: boolean; auto_lock_fill: boolean }>({ auto_lock: true, auto_lock_fill: true });
   // what the page started with (the first schedule's lineup, no day or time, the first Locks choice): the leave guard
   // counts what differs from it, so an edit undone holds nothing to lose
   const [seed, setSeed] = useState<{ from: string; lineup: LineupEntry[]; lock: string } | null>(null);
@@ -80,13 +82,13 @@ function NewEvent({ meta }: { meta: Meta }) {
     }).catch(fail);
   }, []);
   useLive(() => setTick((t) => t + 1), ["run:", "config"]);  // an event opened elsewhere, a schedule edited: ask again
-  const changes = !seed ? 0 : [from !== seed.from, day !== null, time !== null, lock !== seed.lock].filter(Boolean).length
+  const changes = !seed ? 0 : [from !== seed.from, day !== null, time !== null, lock !== seed.lock, !auto.auto_lock, !auto.auto_lock_fill].filter(Boolean).length
     + Array.from({ length: Math.max(lineup.length, seed.lineup.length) }, (_, k) => k)
       .filter((k) => JSON.stringify(lineup[k] ?? null) !== JSON.stringify(seed.lineup[k] ?? null)).length;
   useDirty("lineup:new", changes > 0, { n: changes, name: "New event" });
 
   const later = lineup.slice(1).map((e) => ({ raid: e.raid, rosters: e.rosters, starts: e.starts }));
-  const timing = { lock_hours_before: Number(lock) };
+  const timing = { lock_hours_before: Number(lock), ...auto };
   const body = lineup.length && day && time ? { when: wallTime(day, time), schedule: "", rosters: lineup[0].rosters, lineup: later, timing } : null;
   const asked = JSON.stringify([lineup[0]?.raid, body]);
   useEffect(() => {
@@ -170,6 +172,12 @@ function NewEvent({ meta }: { meta: Meta }) {
                 data={opts.locks.map((l) => ({ value: String(l.hours), label: l.words }))} onChange={(v) => { if (v) setLock(v); }} />
             )}
           </WhenPicker>
+          {!scheduled && (  /* the schedule editor's own Auto Lock pair: the same labels, (?) and greyed auto-fill */
+            <div style={{ marginTop: 12 }}>
+              <TimingFields words={meta.page_words} values={auto} hours={{}} shown={(k) => k === "auto_lock" || k === "auto_lock_fill"}
+                onChange={(k, v) => setAuto((a) => ({ ...a, [k]: v === true }))} />
+            </div>
+          )}
         </ViewSection>
         <ViewSection title={meta.page_words.what_this_makes}>
           <Stack gap="sm">
@@ -349,7 +357,7 @@ type SchedDraft = {
   lineup: LineupEntry[]; timing: Record<string, number | boolean>; split: string; weights: Record<string, string>;
 };
 const TIMING_HOURS = ["signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours"] as const;
-const TIMING_SWITCHES = ["nudge", "autofill", "open_dm", "confirm"] as const;
+const TIMING_SWITCHES = ["nudge", "autofill", "open_dm", "confirm", "auto_lock", "auto_lock_fill"] as const;
 /** a pickup template opens when an officer opens it and reminds nobody: these mean nothing there */
 const PICKUP_HIDDEN = new Set<string>(["signup_lead_hours", "nudge_hours_before", "nudge", "open_dm"]);
 const SCHEDULES = "/schedules";

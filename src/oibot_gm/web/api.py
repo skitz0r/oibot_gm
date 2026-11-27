@@ -1953,6 +1953,18 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             raise RegistryError(ROSTERS_RANGE)
         return lock, n
 
+    def auto_lock_args(d: dict) -> dict:
+        """The one-off open form's Auto Lock and auto-fill (issue 14): `timing.auto_lock` / `timing.auto_lock_fill`,
+        true or false → {setting: bool} for those sent. Anything else is refused in one sentence."""
+        t = d.get("timing")
+        out = {}
+        for k in ("auto_lock", "auto_lock_fill"):
+            if isinstance(t, dict) and k in t:
+                if not isinstance(t[k], bool):
+                    raise RegistryError(rc.SWITCH_EMPTY)
+                out[k] = t[k]
+        return out
+
     OPEN_UNREAD = cq.OPEN_UNREAD
     open_box = cq.open_box_for  # the one box /raid open prints too
 
@@ -1998,8 +2010,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         rc.open_when / wizard.resolve_local, never replace(tzinfo=)). With `schedule`: that schedule's settings (a pickup
         template); without: the upcoming run at exactly that time if there is one, else a one-off (ad hoc). `occurrence`
         (from the preview; None for a one-off): the schedule's run Open is expected to make — refused (409) with a fresh
-        preview when the time now resolves to another. `rosters` / `timing.lock_hours_before` (the New event page): the first
-        raid's rosters and the lock of a ONE-OFF; a schedule's night keeps its schedule's own. A refusal answers with its
+        preview when the time now resolves to another. `rosters` / `timing.lock_hours_before` / `timing.auto_lock` /
+        `timing.auto_lock_fill` (the New event page): the first raid's rosters, the lock, Auto Lock and its auto-fill of a
+        ONE-OFF; a schedule's night keeps its schedule's own. A refusal answers with its
         box (400)."""
         v, d = await body(request, officer=True)
         reg = v.reg
@@ -2010,13 +2023,14 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             fw = follow_arg(reg, rid, d)
             later = lineup_arg(reg, rid, d)
             lock_h, first_n = one_off_args(d)
+            auto = auto_lock_args(d)
             start, sid, _note = rc.open_when(reg, rid, when, sid)
             rc.refuse_past_start(reg, start, reg.now_local())  # a mistyped year would open a run the scheduler may close at once
             if later:  # the whole lineup's rules (a raid twice, more than four, starts in order) before anything is written
                 reg.lineup_offsets([{"raid": rid, "rosters": 1}, *later])
         except RegistryError as e:
             return box_refused(e)
-        one_off = {k: x for k, x in (("lock_hours", lock_h), ("first_rosters", first_n)) if x is not None}
+        one_off = {**{k: x for k, x in (("lock_hours", lock_h), ("first_rosters", first_n)) if x is not None}, **auto}
         if one_off and rc.which_run(reg, rid, start, sid)["schedule"] != rc.ADHOC_SCHEDULE:
             one_off = {}  # a schedule's night (or a pickup template) opens with its schedule's own rosters and timing
         if "occurrence" in d:

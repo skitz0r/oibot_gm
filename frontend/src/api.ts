@@ -159,9 +159,11 @@ export interface PageWords {
   /** a setting's name: the schedule editor's labels and the Save box's lines (configops) say the same */
   schedule_fields: Record<"name" | "kind" | "slots" | "days" | "time" | "lineup" | "rosters" | "active" | "signup_lead_hours" | "nudge"
     | "nudge_hours_before" | "lock_hours_before" | "confirm" | "confirm_hours_before" | "autofill" | "fill_ask_hours" | "open_dm"
-    | "split_policy" | "weights" | "first_come", string>;
+    | "split_policy" | "weights" | "first_come" | "auto_lock" | "auto_lock_fill", string>;
   /** the (?) beside each Sheet timing switch: exactly who gets what, when and where */
-  schedule_field_help: Record<"nudge" | "confirm" | "autofill" | "open_dm", string>; help_about: string;
+  schedule_field_help: Record<"nudge" | "confirm" | "autofill" | "open_dm" | "auto_lock" | "auto_lock_fill", string>; help_about: string;
+  /** Auto Lock's On / Off, and the Details Locks row when Auto Lock is off (issue 14) */
+  switch_on: string; switch_off: string; officer_locks: string;
   raid_fields: Record<string, string>; split: Record<string, string>; on: string; off: string; raids_own: string; suggested: string;
   regulars_one: string; regulars_n: string; away_n: string;
   me_event_over: string; me_event_over_tail: string;

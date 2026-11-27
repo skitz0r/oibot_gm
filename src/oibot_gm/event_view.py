@@ -105,6 +105,20 @@ def _autofill_fact(on: bool) -> dict:
     return _fact(F["autofill"], switch_words("autofill", on), hint="autofill")
 
 
+def auto_lock_facts(auto: bool, fill: bool) -> list[dict]:
+    """The Auto Lock row and, while it is On, its Auto-fill on Auto Lock row (issue 14): the editors' labels, On / Off
+    and their (?) — an event's, a coming-up night's and a schedule's Details alike."""
+    out = [_fact(F["auto_lock"], switch_words("auto_lock", auto), hint="auto_lock")]
+    if auto:
+        out.append(_fact(F["auto_lock_fill"], switch_words("auto_lock_fill", fill), hint="auto_lock_fill"))
+    return out
+
+
+def locks_value(reg: Registry, at, auto: bool) -> str:
+    """The Details Locks row's value: its time, or with Auto Lock off the server's sentence that an officer locks it."""
+    return reg.local12(at) if auto else PAGE_WORDS["officer_locks"]
+
+
 def _sheet_url(reg: Registry, ev: "rc.RaidEvent") -> str | None:
     if not (ev.channel_id and ev.message_id):
         return None
@@ -310,8 +324,10 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
                    _fact("Sheet opened", reg.local12(opened))]
         if rc.team_setting(team, "reminders") != "none" and first.state == "open":  # the run's own timing (ev_json's timeline)
             details.append(_fact("Reminder", reg.local12(soft), hint="nudge"))
-        details.append(_fact("Locks", reg.local12(first.locked_at or hard)))
-        if state == "open":  # the event's own (Edit event): who asks for an open seat once it locks
+        auto = first.state != "open" or rc.auto_lock(reg, first)  # a locked event names the time it locked
+        details.append(_fact("Locks", locks_value(reg, first.locked_at or hard, auto)))
+        if state == "open":  # the event's own (Edit event): whether the clock locks it, and who asks for an open seat once it locks
+            details += auto_lock_facts(rc.auto_lock(reg, first), rc.auto_lock_fill(reg, first))
             details.append(_autofill_fact(bool(rc.team_setting(team, "autofill"))))
         if rc.run_confirms(reg, first):
             details.append(_fact("Confirm by", reg.local12(confirm)))
@@ -371,7 +387,7 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
 
 # what Edit event offers once the roster is locked (rc.AFTER_LOCK, in the settings' names): automatic asks and an ask's wait
 EDIT_AFTER_LOCK = ("autofill", "fill_ask_hours")
-EDIT_FIELDS = ("lock_hours_before", "nudge", "nudge_hours_before", "confirm", "confirm_hours_before", "autofill",
+EDIT_FIELDS = ("lock_hours_before", "auto_lock", "auto_lock_fill", "nudge", "nudge_hours_before", "confirm", "confirm_hours_before", "autofill",
                "fill_ask_hours", "first_come", "weights", "split_policy")
 
 
@@ -431,7 +447,9 @@ def coming_json(reg: Registry, rs: "rc.RaidStore", sid: str, occurrence: str, no
     why = rc.open_row_refusal(reg, rs, raid, t, sid, opens, now)
     details = [_fact("Lineup", rc.lineup_words(reg, lineup)), _fact(SCHEDULE, name, f"/schedules/{sid}"),
                _fact("Priority", rc.priority_words(reg, sd)), _confirm_fact(bool(sd.get("confirm", True))),
-               _fact("Sheet opens", reg.local12(opens)), _fact("Locks", reg.local12(lock_at))]
+               _fact("Sheet opens", reg.local12(opens)),
+               _fact("Locks", locks_value(reg, lock_at, bool(sd.get("auto_lock", True)))),
+               *auto_lock_facts(bool(sd.get("auto_lock", True)), bool(sd.get("auto_lock_fill", True)))]
     box = None if why else cq.open_now_box(reg, t, opens, lock_at, lineup=lineup, channel=bool(reg.config.signup_channel_id),
                                            rev=occurrence)  # consequences.open_box_for's rev: the open route's box is this one
     return {"title": reg.local12(t), "chip": PAGE_WORDS["no_sheet_yet"], "schedule": {"id": sid, "name": name}, "details": details,

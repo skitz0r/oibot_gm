@@ -156,6 +156,8 @@ PAGE_WORDS = {
                         "confirm": "Lock Confirmation", "confirm_hours_before": "Confirm by",
                         "autofill": "Automated Fill Requests", "fill_ask_hours": "An ask waits",
                         "open_dm": "Sheet Opening DM", "split_policy": "When one night fills two rosters",
+                        # issue 14 (the owner's ruling): whether the clock locks the event, and whether that lock fills
+                        "auto_lock": "Auto Lock", "auto_lock_fill": "Auto-fill on Auto Lock",
                         "weights": "Priority",
                         # an event's own (Edit event, the owner's tweaks B): first to join or by priority
                         "first_come": "Seat order"},
@@ -177,6 +179,13 @@ PAGE_WORDS = {
         "open_dm": "When the sheet opens, each regular gets a DM with their answer so far and the sheet's buttons. "
                    "The DM also says when the roster locks. "
                    "With no regulars yet, every member gets it, and nobody with DMs off is sent one.",
+        # read from raid_scheduler (the lock step skips an event with Auto Lock off) and the lock's fill choice (issue 14)
+        "auto_lock": "At the lock time, the bot locks the roster by itself. "
+                     "With Auto Lock off, nothing happens at the lock time and the sheet stays open until an officer locks it. "
+                     "Asks sent before then still close at their own deadline.",
+        "auto_lock_fill": "When Auto Lock locks the roster, the bot fills its open seats from those who joined. "
+                          "Everyone on the board keeps their place. "
+                          "With Auto-fill on Auto Lock off, that lock rosters exactly the names on the board.",
     },
     # the (?)'s name for a screen reader: "What Signup Reminder does"
     "help_about": "What {name} does",
@@ -185,6 +194,9 @@ PAGE_WORDS = {
     "by_priority": "By priority",
     "edit_locked": "The roster is locked, so only Automated Fill Requests and how long an ask waits can change.",
     "edit_over": "This event has started or is over, so its settings can't change.",
+    # Auto Lock's and its auto-fill's values (constants.switch_words), and the Details Locks row of an event (or a
+    # schedule, or a coming-up night) whose Auto Lock is off: nobody's clock locks it
+    "switch_on": "On", "switch_off": "Off", "officer_locks": "An officer locks it.",
     # a raid's settings by name: the Raids page's Details labels and its Save box's lines
     "raid_fields": {"lockout_days": "Lockout", "duration_hours": "Length", "first_open": "First opens"},
     # how one night's joiners are split into two rosters (registry.SPLIT_POLICIES)
@@ -221,12 +233,15 @@ def field_help(setting: str, label: str) -> dict | None:
 
 def switch_words(setting: str, on) -> str:
     """A switch's value as a person reads it, the same on a Details row and on a Save box's 'label: old → new' line:
-    Lock Confirmation Yes / No, Automated Fill Requests On / Off (the owner's words, issue #13), any other switch on / off.
+    Lock Confirmation Yes / No, Automated Fill Requests On / Off (the owner's words, issue #13), Auto Lock and Auto-fill
+    on Auto Lock On / Off (issue 14), any other switch on / off.
     event_view, schedule_view, rc.confirmation_words, consequences.event_value_words, configops and flows_schedule read it."""
     if setting == "confirm":
         return PAGE_WORDS["asked_at_lock" if on else "not_asked_at_lock"]
     if setting == "autofill":
         return PAGE_WORDS["bot_asks" if on else "officer_asks"]
+    if setting in ("auto_lock", "auto_lock_fill"):  # Auto Lock On / Off (the owner's ruling, issue 14)
+        return PAGE_WORDS["switch_on" if on else "switch_off"]
     return PAGE_WORDS["on" if on else "off"]
 
 

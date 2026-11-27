@@ -80,7 +80,7 @@ def test_a_one_off_with_a_second_raid_opens_one_sheet(reg, rs, officer, channel)
     assert h.selects() == ["Pick a step", "Add a raid"]
     run(h.pick("Add a raid", RAID_B))
     run(h.press("Review changes"))
-    assert h.selects() == ["Locks", "Rosters"] and h.buttons() == ["Open the sheet", "Change", "Back"]
+    assert h.selects() == ["Locks", "Rosters", "Auto Lock"] and h.buttons() == ["Open the sheet", "Change", "Back"]
     assert not bot.calls
     assert [o.label for o in next(s for s in h._items() if getattr(s, "placeholder", None) == "Locks").options] == [
         x["words"] for x in event_view.lock_choices()]
@@ -93,6 +93,7 @@ def test_a_one_off_with_a_second_raid_opens_one_sheet(reg, rs, officer, channel)
     assert call[:2] == ("open_run_and_post", RID) and call[4] == rc.ADHOC_SCHEDULE
     kw = call[5]
     assert [e["raid"] for e in kw["lineup"]] == [RAID_B] and kw["lock_hours"] == 24 and kw["first_rosters"] == 1
+    assert kw["auto_lock"] is True and kw["auto_lock_fill"] is True, "the one-off's Auto Lock pick, On by default"
     assert bot.calls[1] == ("post_sheet", rs.events[bot.calls[1][1]].key, channel.id)  # no signup channel: posted where asked
     assert "✅ Opened" in h.text and "posted in this channel" in h.text
 

@@ -488,7 +488,9 @@ def reschedule_run(run: str, when: str | None = None, timing: dict | None = None
     Any raid of a run moves the whole run (each later raid keeps its offset). `when` = the new start as 'YYYY-MM-DD
     HH:MM' in guild time (or an aware ISO instant); a wall time the clocks skip or pass twice is refused. `timing` =
     {setting: value} from nudge_hours_before | lock_hours_before | confirm_hours_before (hours before the start) |
-    nudge | confirm (on/off) | first_come (on = first to join, off = by priority) | weights ({regular, rank, main,
+    nudge | confirm (on/off) | auto_lock (on/off: Auto Lock — off = no lock by the clock, an officer locks it) |
+    auto_lock_fill (on/off: Auto-fill on Auto Lock — off = the clock's lock rosters the board as it stands) |
+    first_come (on = first to join, off = by priority) | weights ({regular, rank, main,
     sat_out, signup_order: 0-6}, the ones to change) | split_policy (balanced | first | rotation for the raid `run`
     names, or {run key: strategy}) — before the lock only — and fill_ask_hours (hours) | autofill (on/off), which still
     change after the lock; its schedule keeps its own. ALWAYS preview first (preview=true: `sentences` = the confirm,
@@ -734,7 +736,8 @@ def schedule_set(schedule: str, field: str | None = None, value: Any = None, fie
     active (bool) | rosters (1-4) | slots (a list ['Sat 20:00', 'Sun 20:00']) | days (a list [1, 3] = days of each
     lockout, 1 = reset day) | time ('20:00') | cadence (standard|short|same_week: a preset of the four sheet-timing hours)
     | signup_lead_hours | nudge_hours_before | lock_hours_before | confirm_hours_before | fill_ask_hours | nudge |
-    autofill | open_dm | confirm (bools) — the schedule's own sheet timing | split_policy | weights (the schedule's own
+    autofill | open_dm | confirm | auto_lock (Auto Lock: the bot locks each event at its lock time) | auto_lock_fill
+    (Auto-fill on Auto Lock: that lock fills the open seats) (bools) — the schedule's own sheet timing | split_policy | weights (the schedule's own
     seat weights {rank, main, sat_out, signup_order, regular}; a key set to null follows the raid) | follow ('<raid id>
     x<N>' or null: a second raid the same night from the same signup, starting when the first ends). A sheet-timing field
     set to null goes back to the game's suggestion; split_policy null goes back to the raid's. Runs already open keep

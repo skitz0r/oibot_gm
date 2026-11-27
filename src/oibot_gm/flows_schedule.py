@@ -30,9 +30,11 @@ DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 KINDS = PAGE_WORDS["kinds"]  # the site's Repeats choice says the same
 HOUR_FIELDS = ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours")
-SWITCHES = ("nudge", "confirm", "autofill", "open_dm")
+SWITCHES = ("nudge", "confirm", "autofill", "open_dm", "auto_lock", "auto_lock_fill")
+SHEET_SWITCHES = ("nudge", "confirm", "autofill", "open_dm")  # the hub's switches screen
+LOCK_SWITCHES = ("auto_lock", "auto_lock_fill")  # Auto Lock and, under it, its auto-fill (issue 14): a screen of their own
 PICKUP_HIDDEN = {"signup_lead_hours", "nudge_hours_before", "nudge", "open_dm"}  # a pickup reminds nobody (the site's)
-SHOWN = ("signup_lead_hours", "nudge", "nudge_hours_before", "lock_hours_before", "confirm", "confirm_hours_before",
+SHOWN = ("signup_lead_hours", "nudge", "nudge_hours_before", "lock_hours_before", "auto_lock", "auto_lock_fill", "confirm", "confirm_hours_before",
          "autofill", "fill_ask_hours", "open_dm", "weights", "split_policy")  # the hub's lines after Repeats and Lineup
 MAX_RUN_TIMES = 14
 NEW = "New schedule"
@@ -245,9 +247,10 @@ class ScheduleWizard(LineupBlock, OwnerWizard):
                 nxt = rc.next_runs_of(self.reg, row["raid"], row, n=1)
                 if nxt:
                     head.append(f"Next event: {self.reg.local12(nxt[0])}")
-        names = ", ".join(F[f] for f in SWITCHES if f in self.shown())
+        names = ", ".join(F[f] for f in SHEET_SWITCHES if f in self.shown())
         choices = [Opt("name", F["name"]), Opt("repeats", F["kind"]), Opt("lineup", F["lineup"]), Opt("timing", SHEET_TIMING),
-                   Opt("switches", names), Opt("weights", F["weights"]), Opt("split_policy", F["split_policy"])]
+                   Opt("switches", names), Opt("locking", ", ".join(F[f] for f in LOCK_SWITCHES)),
+                   Opt("weights", F["weights"]), Opt("split_policy", F["split_policy"])]
         items: list[discord.ui.Item] = [self.select(CHANGE, choices, self.change),
                                         self.button(REVIEW, self.review, discord.ButtonStyle.primary, disabled=not self.changed())]
         if not self.new:
@@ -300,6 +303,8 @@ class ScheduleWizard(LineupBlock, OwnerWizard):
             await self.timing(i)
         elif what == "switches":
             await self.switches(i)
+        elif what == "locking":
+            await self.switches(i, LOCK_SWITCHES)
         elif what == "weights":
             await self.open_form(i, self.weights_form())
         else:
@@ -419,14 +424,17 @@ class ScheduleWizard(LineupBlock, OwnerWizard):
                         self.button("Back", self.timing))
 
     # ---- the four switches: one select, field=on|off
-    async def switches(self, i: discord.Interaction) -> None:
-        fields = [f for f in SWITCHES if f in self.shown()]
-        opts = [Opt(f"{f}={v}", f"{F[f]}: {PAGE_WORDS[v]}") for f in fields for v in ("on", "off")]  # the lines say what each is now
+    async def switches(self, i: discord.Interaction, group: tuple[str, ...] = SHEET_SWITCHES) -> None:
+        fields = [f for f in group if f in self.shown()]
+        # Auto-fill on Auto Lock changes nothing while Auto Lock is off: its line stays, its choice is not offered
+        pick = [f for f in fields if not (f == "auto_lock_fill" and self.draft.get("auto_lock") is False)]
+        opts = [Opt(f"{f}={v}", f"{F[f]}: {switch_words(f, v == 'on') if f in LOCK_SWITCHES else PAGE_WORDS[v]}")
+                for f in pick for v in ("on", "off")]  # the lines say what each is now
 
         async def picked(it: discord.Interaction, values: list[str]) -> None:
             f, v = values[0].split("=", 1)
             self.draft[f] = v == "on"
-            await self.switches(it)
+            await self.switches(it, group)
         await self.show(i, "\n".join([f"**{self.name()}**"] + [f"{F[f]}: {self.words(f, self.draft.get(f))}" for f in fields]),
                         self.select("Turn one on or off", opts, picked), self.button("Back", self.hub))
 

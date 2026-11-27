@@ -103,9 +103,11 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        MOVE_CLASH via live_at, TIMING_LOCKED, TIMING_ORDER, TIMING_UNKNOWN), reschedule(reg, rs, ev, start=, timing=, by, save=) →
                        Moved = every part keeps its offset (after_minutes), `occurrence` / `schedule` NEVER change, confirm_by moves by the delta (or
                        within MOVE_CONFIRM_GRACE when past), EVENT_TIMING = the settings an event takes as its own (the owner's tweaks B, 2026-11-24:
-                       the sheet timing, confirm, first_come, weights, split_policy — named_split / split_changes, a raid's run FILE split_strategy);
+                       the sheet timing, confirm, first_come, weights, split_policy — named_split / split_changes, a raid's run FILE split_strategy;
+                       issue 14: auto_lock, auto_lock_fill — stamped at open by ensure_run from the schedule or the one-off's open form, read
+                       through auto_lock(reg, ev) / auto_lock_fill(reg, ev), a dict without them True; Moved.locks_now only with Auto Lock on);
                        AFTER_LOCK (fill_ask_hours, autofill) still change once locked, the rest is refused: TIMING_LOCKED, CONFIRM_LOCKED,
-                       PRIORITY_LOCKED, consequences.STRATEGY_LOCKED; a lock-time change tells who answered (Moved.lock_moved, "<raid> now locks …");
+                       AUTO_LOCK_LOCKED, PRIORITY_LOCKED, consequences.STRATEGY_LOCKED; a lock-time change tells who answered (Moved.lock_moved, "<raid> now locks …");
                        run_weights = the run dict's own `weights` (stamped at open by ensure_run / _part_dict: fallback_weights; live_weights only
                        for a dict without them), run_first_come = the first raid's `first_come`, else its kind (a later raid never); first_come_shown = THE predicate
                        every first-come WORD reads (sheet footer, status line, Me queue note, help, priority_words); rotation_weight =
@@ -233,8 +235,10 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        timing (rc.run_timing), people, characters, strategies, test_chip, today, start_day / start_time, locks, edit (edit_options: Edit
                        event's fields NOW — every one before the lock, EDIT_AFTER_LOCK after —, values, splits per raid, hours, max_weight; Details
                        read the event's own: Priority, Lock Confirmation Yes/No, Automated Fill Requests On/Off, Reminder, Confirm by — the rows naming an
-                       editor's switch carry its (?) `help`, constants.field_help); coming_json (Details: Sheet
-                       opens, Locks — no horizon, so can_open unless the night closed —, why, open, box 11 (says the sheet stays up and the schedule won't open it again); ComingGone COMING_OPENED (with the key) |
+                       editor's switch carry its (?) `help`, constants.field_help; auto_lock_facts(auto, fill) = THE Auto Lock row and, while On,
+                       its Auto-fill on Auto Lock row (event, coming-up night and schedule_view alike); locks_value = the Locks row's time, or
+                       PAGE_WORDS officer_locks with Auto Lock off); coming_json (Details: Sheet
+                       opens, Locks, Auto Lock — no horizon, so can_open unless the night closed —, why, open, box 11 (says the sheet stays up and the schedule won't open it again); ComingGone COMING_OPENED (with the key) |
                        COMING_GONE); new_event_options (raids, lineups to copy — no pickup templates —, NEW_EVENT_LOCKS (2, 24), lock_choices, the
                        guild's date), new_event_view (What this makes; SCHEDULED_NIGHT), lineup_edit_json (refused through rc.lineup_fixed) /
                        lineup_draft_json (nothing written), seats_words, tz_words, character_rows. The routes run these in a thread
@@ -296,7 +300,10 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        LootPick `lootpick.<gk>:…`, LootStartButton `lootstart.<gk>:open`; constructors take the guild key first (`raid.<gk>:…` ids; old ids still match,
                        g=None → guild_routing.resolve_button + each button's legacy matcher); raid_views ⇄ raid_buttons import each other at the bottom
   raid_scheduler.py    RaidSchedulerMixin: the minute loop (discord_armory.armory_tick → auctions → cleanup_ephemeral → _warn_gone_raids → open on cadence
-                       → sync_stands_for + complete_parts per live first part → health → lock → expire → fill → close), calls RaidMixin. Open (§5.67
+                       → sync_stands_for + complete_parts per live first part → health → lock → expire → fill → close), calls RaidMixin. Lock (issue
+                       14): an open FIRST raid past its lock time with rc.auto_lock off is never locked and its pre-lock asks are not closed —
+                       only an ask past its own deadline expires (rc.expire_fill_asks, its card closed); an open event is otherwise left alone
+                       past its start and close (no end, no confirmations, no fill). Open (§5.67
                        phase 3): rc.occurrences(lead=True), skipped when rc.event_of_occurrence finds that (schedule, occurrence) in any state — never
                        by a key, so a cancelled occurrence never opens again —, else open_run_and_post(schedule=); _warn_unopened / _warn_open_refused
                        keyed by (guild, schedule id, occurrence); _warn_gone_raids = one ops warn per (guild, schedule) per hour for a schedule naming a
