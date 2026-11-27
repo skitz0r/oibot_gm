@@ -102,7 +102,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        Reschedule (§5.67 phase 3, C11): reschedule_refusal (MOVE_CLOSED, MOVE_STARTED, MOVE_PAST, MOVE_SAME / TIMING_SAME,
                        MOVE_CLASH via live_at, TIMING_LOCKED, TIMING_ORDER, TIMING_UNKNOWN), reschedule(reg, rs, ev, start=, timing=, by, save=) →
                        Moved = every part keeps its offset (after_minutes), `occurrence` / `schedule` NEVER change, confirm_by moves by the delta (or
-                       within MOVE_CONFIRM_GRACE when past), EVENT_TIMING = the settings an event takes as its own (the owner's tweaks B, 2026-11-24:
+                       within MOVE_CONFIRM_GRACE when past — late_confirm_by(at, start, now), THE rule every lock shares), EVENT_TIMING = the settings an event takes as its own (the owner's tweaks B, 2026-11-24:
                        the sheet timing, confirm, first_come, weights, split_policy — named_split / split_changes, a raid's run FILE split_strategy;
                        issue 14: auto_lock, auto_lock_fill — stamped at open by ensure_run from the schedule or the one-off's open form, read
                        through auto_lock(reg, ev) / auto_lock_fill(reg, ev), a dict without them True; Moved.locks_now only with Auto Lock on);
@@ -151,7 +151,13 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        character|spec changed since placed (RaidEvent.placed_as) leaves the board in that save (Join ↔ Bench stays); unplace_member(rs, uid, why) (left the server);
                        board_complete(reg, rs, p) → a later raid's Auto-fill counts that board (event_board_preview(complete_boards=)); False
                        while a Bench answer not kept off waits unplaced (or Auto-fill placed it) and the board holds fewer than run_size ×
-                       run_rosters. The lock: lock_forces(reg, rs, ev, players) → LockForces = THE builder of who is kept on and
+                       run_rosters. The lock as it stands (issue 14, lock_run(fill=False)): board_as_it_stands(reg, rs, ev) = THE roster it
+                       writes, built from the board (board_rosters on board_layout, trailing empty rosters dropped; explain.annotate, no what-if;
+                       group reports), never a solve — exactly the placed names, an Auto-fill Bench place too; lock_open_slots(reg, rs, ev) → open
+                       seats per roster it builds; lock_left_out(reg, ev) → kept-on names (pin in, never_bench) not on the board; lock_empty_board +
+                       LOCK_EMPTY_BOARD (Join/Bench answers and nobody placed; nobody answered still locks); LEFTOVER_PAUSED = the Not rostered
+                       notice's second sentence while Automated Fill Requests are paused (no DM promised). RaidEvent.lock_fill (the choice, on
+                       each part it locked) and lock_line ([channel, message] of the signup channel's "is locked" line). The lock: lock_forces(reg, rs, ev, players) → LockForces = THE builder of who is kept on and
                        off (_solve_run's force_in / force_out, the lock box's count, kept_off_ids — role_plan never asks a kept-off name);
                        a Bench answer AUTO-FILL placed (ev.auto_placed) is not on the lock's board — not kept on, no group pin, not
                        first_come_bench_out's `fixed`: the solve decides again, so a Join after the Auto-fill comes first; one an officer placed
@@ -193,6 +199,13 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        lock_preview, cancel_run(notify) under board_lock (no DMs), reopen_run, remind (the older card goes dead), set_autofill_paused, withdraw_sent_ask;
                        sheets_restore = on_ready's first boot redraws every live sheet in place (refresh_sheet), so a look change reaches posted sheets;
                        every writer of ev.fill_asks holds plan_lock (_send_asks is the one sender)
+                       lock_run(…, fill=True) / lock_parts(…, fill=) / lock_preview(…, fill=) (issue 14): fill=False = the board as it stands
+                       (rc.board_as_it_stands; LOCK_EMPTY_BOARD is a failed lock: lock_error, the scheduler's 15-minute back-off); seats left open
+                       with Automated Fill Requests on pause them (ev.autofill_paused, by = the locker, one log line); every later raid locks
+                       with the first's choice; confirm_by = rc.late_confirm_by. The scheduler passes fill = auto_lock_fill (a later raid's retry:
+                       its first raid's lock_fill). Surfaces a person presses still call the default until they carry the choice.
+                       raid_views.locks_line / dm_locks_line: the sheet's, the officers' card's and the open / reminder DMs' lock words — with
+                       Auto Lock off PAGE_WORDS officer_locks, the Details Locks row's sentence.
                        lock_preview solves with rc.run_strategy and the lock's own budget (rc.SOLVE_TIME_LIMIT_S), so it shows the roster Lock builds;
                        on a later raid whose first raid is open it solves the earlier raids too (rc.earlier_counts, about 25 s; the Discord
                        working line says up to half a minute).

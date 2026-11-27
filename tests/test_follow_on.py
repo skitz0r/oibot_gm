@@ -217,10 +217,10 @@ def test_a_follow_on_whose_lock_raises_leaves_the_lead_locked(reg, rs, monkeypat
     monkeypatch.setattr(rc, "propose", seat_by_name({LEAD: names[:20], FOLLOW: names[:20]}))
     orig = bot.lock_run
 
-    async def lock_run(reg, rs, ev, by="scheduler"):
+    async def lock_run(reg, rs, ev, by="scheduler", fill=True):
         if ev.key == fev.key:
             raise err
-        return await orig(reg, rs, ev, by=by)
+        return await orig(reg, rs, ev, by=by, fill=fill)
 
     monkeypatch.setattr(bot, "lock_run", lock_run)
     line = run(bot.lock_run(reg, rs, lead, by="Jon"))
@@ -244,7 +244,7 @@ def test_the_scheduler_skips_a_follow_on_while_its_lead_is_open(reg, rs, monkeyp
     lead, fev = open_pair(reg, rs, days=0.5)  # inside the ad hoc lock window would be days < 2/24; keep both open
     locked = []
 
-    async def lock_run(reg, rs, ev, by="scheduler"):
+    async def lock_run(reg, rs, ev, by="scheduler", fill=True):
         locked.append(ev.key)
         return "ok"
 
@@ -278,7 +278,7 @@ def test_a_refused_scheduled_open_never_stops_the_guilds_minute(reg, rs, monkeyp
     monkeypatch.setattr(rc, "ensure_run", refused)
     locked = []
 
-    async def lock_run(reg, rs, ev, by="scheduler"):
+    async def lock_run(reg, rs, ev, by="scheduler", fill=True):
         locked.append(ev.key)
         return "ok"
 

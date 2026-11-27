@@ -255,8 +255,12 @@ class RaidSchedulerMixin:
                 tried = datetime.fromisoformat(ev.lock_tried_at) if ev.lock_tried_at else None
                 if ev.lock_error and tried and now - tried < timedelta(minutes=15):
                     continue  # failed recently; give the officers time to fix the board before trying again
+                # Auto-fill on Auto Lock (issue 14): off, the clock's lock rosters the board as it stands. A later raid
+                # (its retry after a failed solve) locks with its first raid's choice, as lock_parts does
+                lead = rc.first_part(rs, ev) if rc.is_follow(ev) else ev
+                fill = lead.lock_fill if rc.is_follow(ev) and lead.lock_fill is not None else rc.auto_lock_fill(reg, lead)
                 try:
-                    line = await self.lock_run(reg, rs, ev)
+                    line = await self.lock_run(reg, rs, ev, fill=fill)
                 except RegistryError:  # someone is locking it right now (rc.SolverBusy), or it stopped being open
                     continue
                 if not ev.lock_error:

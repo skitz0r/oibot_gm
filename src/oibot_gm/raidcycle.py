@@ -233,6 +233,12 @@ class RaidEvent(BaseModel):
     # the discord ids rostered at the lock flip — the only seats the lock's fan-out (and its recovery step) asks; a seat
     # that came later (a fill yes, an officer's add) carries its own ask or none. None = locked before it was recorded
     lock_seats: Optional[list[int]] = None
+    # the lock's fill choice (issue 14), on the raid it locked: True = the solver filled the open seats, False = the board
+    # as it stood. A later raid's lock (lock_parts, and the scheduler's retry of one) takes its first raid's. None = locked
+    # before the choice existed (it filled)
+    lock_fill: Optional[bool] = None
+    # the signup channel's "is locked" line: [channel id, message id] (None = not posted, or locked before it was kept)
+    lock_line: Optional[list[int]] = None
     autofill_paused: bool = False  # the fill engine sends nothing on its own for this run (an officer's explicit send still works, D18)
     autofill_paused_by: Optional[str] = None
     reminded_at: Optional[str] = None  # the last "Remind the unconfirmed" (once per hour per run)
@@ -1539,6 +1545,14 @@ MOVE_OFFICER_ONLY = "Only an officer moves an event or changes its timing."
 MOVE_CONFIRM_GRACE = timedelta(hours=1)  # a confirm-by the move leaves in the past: within the hour instead (never past the start)
 
 
+def late_confirm_by(at: datetime, start: datetime, now_: datetime) -> datetime:
+    """THE late-deadline rule (Reschedule and every lock share it): a confirm deadline `at` that is not in the future at
+    `now_` becomes the earlier of the start and MOVE_CONFIRM_GRACE from now — so a lock after its own confirm-by (an
+    officer's lock with Auto Lock off, a lock after an unlock) never asks people with a deadline already past. A deadline
+    still ahead is kept."""
+    return min(start, now_ + MOVE_CONFIRM_GRACE) if at <= now_ else at
+
+
 MOVE_GAP = "That time doesn't exist that night because the clocks go forward. Pick another time."
 MOVE_TWICE = "That time happens twice that night because the clocks go back. Pick another time."
 MOVE_WHEN = "Pick the new day and time with the picker."
@@ -1907,10 +1921,7 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
                     if "sat_out" in w_delta:
                         t["rotation_sat_out"] = w_delta["sat_out"]
         if p.confirm_by and at != was:
-            cb = datetime.fromisoformat(p.confirm_by) + (at - was)
-            if cb <= now_:
-                cb = min(at, now_ + MOVE_CONFIRM_GRACE)
-            p.confirm_by = cb.isoformat()
+            p.confirm_by = late_confirm_by(datetime.fromisoformat(p.confirm_by) + (at - was), at, now_).isoformat()
     cleared, written = recompute_absences(reg, first) if delta else ([], [])
     lock_moved = not delta and "cutoff_hard_hours" in values  # the night stays, the lock moves: who answered is told too
     first_come_now = values.get("first_come")
@@ -5009,6 +5020,67 @@ def board_complete(reg: Registry, rs, p: RaidEvent) -> bool:
     return not bench or len(placed) >= run_size(reg, p) * run_rosters(reg, p)
 
 
+# ---------------------------------------------------------------- the lock as the board stands (issue 14: fill=False)
+
+# a lock as it stands with people who answered and nobody on the board: one sentence with the way out (the scheduler's
+# lock stores it as its lock_error, so it is also what the officers' line and the sheet's footer say)
+LOCK_EMPTY_BOARD = "Nobody is on the board, so place someone or lock with auto-fill to fill the empty seats."
+
+
+def _board_stands(reg: Registry, ev: RaidEvent) -> list[RosterResult]:
+    """The open board as rosters, name for name and group for group (board_rosters on board_layout, no solver): every
+    placed name in its group — a Bench answer Auto-fill put there too —, nothing added. Trailing rosters nobody is placed
+    in are dropped (as _roster_count lets empty rosters drawn on the board force nothing); at least one is kept."""
+    rosters = board_rosters(reg, ev, board_layout(reg, ev), run_size(reg, ev))
+    while len(rosters) > 1 and not rosters[-1].selected:
+        rosters.pop()
+    return rosters
+
+
+def board_as_it_stands(reg: Registry, rs, ev: RaidEvent) -> list[RosterResult]:
+    """THE roster(s) a lock as it stands writes (RaidMixin.lock_run with fill=False): _board_stands, each with the lock's
+    usual advisories (explain.annotate against the run's tank minimum, no bench what-if: nobody is decided) and its
+    group reports; rosters[0].benched = everyone who answered and is not placed, as propose() leaves it. Built from
+    the board directly rather than by a solve with every unplaced name held out, so a board a comp rule would refuse
+    (a keep-apart pair, a group over its role cap) still locks exactly as the officer left it. PURE."""
+    from .policy import PolicyStore
+
+    players = players_for(reg, ev)
+    raid_id = ev.instance if ev.instance in reg.profile.raids else next(iter(reg.profile.raids))
+    size = run_size(reg, ev)
+    cc = PolicyStore(rs.store if rs is not None else reg.store, rs.key if rs is not None else reg.key).comp_constraints()
+    tank_min = {**reg.minimums(raid_id, size), **merged_role_min(reg.role_bounds(raid_id, size), cc["role_min"])}.get("tank", 0)
+    out = []
+    for r in _board_stands(reg, ev):
+        reports, syn = solver.group_reports(reg.profile, players, r.groups)
+        r = r.model_copy(update={"group_reports": reports, "synergy_value": syn, "objective": syn, "solver_status": "board"})
+        out.append(explain.annotate(reg.profile, players, raid_id, r, whatif=False, tank_min=tank_min))
+    seated = {p.signup_name for r in out for p in r.selected}
+    out[0].benched = [p for p in players if p.signup_name not in seated]
+    return out
+
+
+def lock_open_slots(reg: Registry, rs, ev: RaidEvent) -> list[int]:
+    """The open seats per roster a lock as it stands leaves (size minus who is placed), one number per roster it builds
+    (_board_stands: trailing empty rosters are not built). The lock box's per-roster sentence and the pause read it."""
+    size = run_size(reg, ev)
+    return [max(0, size - len(r.selected)) for r in _board_stands(reg, ev)]
+
+
+def lock_left_out(reg: Registry, ev: RaidEvent) -> list[str]:
+    """The names the full lock would keep on (lock_forces' kept_on: an "in" pin, the comp policy's never_bench) that are
+    not on the board: a lock as it stands does not roster them. Signup names, each once, in lock_forces' order."""
+    on_board = {n for g in board_layout(reg, ev) for n in g}
+    return [n for n in dict.fromkeys(lock_forces(reg, None, ev).kept_on) if n not in on_board]
+
+
+def lock_empty_board(reg: Registry, ev: RaidEvent) -> bool:
+    """A lock as it stands is refused (LOCK_EMPTY_BOARD): someone answered Join or Bench and nobody is placed on the
+    board. An event nobody answered still locks (its roster is the empty board)."""
+    answered = {s.display_name for s in ev.signups.values() if s.status in ("in", "sub")}
+    return bool(answered) and not any(r.selected for r in _board_stands(reg, ev))
+
+
 def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: list[RaidEvent] | None = None, stop=None,
                         counts: dict[int, int] | None = None, complete_boards: bool = False) -> dict[str, "list[RosterResult] | str"]:
     """Every OPEN raid of an event as its lock would place people now — PURE: deep copies, nothing saved. Each raid
@@ -6266,9 +6338,14 @@ def seat_gone(reg: Registry, ev: RaidEvent, uid: int, why: str, *, notice: bool 
     reg.notify(uid, "released", f"Your seat on {run_words(reg, ev)} was released ({reason}). If that's wrong, tell an officer.", run=ev.key)
 
 
+LEFTOVER_PAUSED = "An officer decides who takes an open seat."  # the Not rostered notice's second sentence while asks are paused
+
+
 def leftover_notices(reg: Registry, ev: RaidEvent) -> int:
     """At lock: everyone who joined and was not rostered gets ONE notice (D26 — never a DM unless a seat is offered, the
-    DM rule): how many seats, how many joined, and that a freed seat would reach them. Returns how many were told."""
+    DM rule): how many seats, how many joined, and that a freed seat would reach them — or, while Automated Fill
+    Requests are paused for the event (a lock as it stands with open seats pauses them), that an officer decides who
+    takes an open seat: no DM is promised. Returns how many were told."""
     left = [s for s in ev.by_status("in") if not ev.seat_of(s.discord_id)]
     if not left or not ev.all_rosters:
         return 0
@@ -6278,7 +6355,8 @@ def leftover_notices(reg: Registry, ev: RaidEvent) -> int:
         for s in left:
             m = reg.members.get(s.discord_id)
             how = "you'd get a DM" if reachable(m) else "it would wait on your Me page"
-            reg.notify(s.discord_id, "not_rostered", f"You weren't rostered for {run_words(reg, ev)} ({seats} seats, {joined} joined). You're in line for a freed seat — {how}.", run=ev.key)
+            then = LEFTOVER_PAUSED if ev.autofill_paused else f"You're in line for a freed seat — {how}."
+            reg.notify(s.discord_id, "not_rostered", f"You weren't rostered for {run_words(reg, ev)} ({seats} seats, {joined} joined). {then}", run=ev.key)
     return len(left)
 
 

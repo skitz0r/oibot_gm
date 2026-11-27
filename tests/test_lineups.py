@@ -173,7 +173,7 @@ def test_four_raids_lock_in_order_and_a_short_role_never_stops_one(bot, reg, rs,
     monkeypatch.setattr(reg, "now_local", lambda: later)
     tried = []
 
-    async def lock_run(reg_, rs_, ev, by="scheduler"):
+    async def lock_run(reg_, rs_, ev, by="scheduler", fill=True):
         tried.append(ev.key)
         return "ok"
 

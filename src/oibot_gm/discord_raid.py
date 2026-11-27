@@ -20,7 +20,7 @@ from .raid_commands import register_raid_commands
 from .raid_scheduler import RaidSchedulerMixin
 from .raid_views import (CLOCK12, OUT_MARK, RELEASE_WHY, BotProto, _aura_line, _group_block, _group_summaries, _header,
                          _raidwide_line, _role_counts, ask_closed_layout, ask_line, event_url, clock12, closed_layout, confirm_layout, fill_layout,
-                         gaps_text, guild_prefix, health_layout, health_locked_layout, lock_layout, raid_name, run_actions_row, run_label, run_times, run_title, sheet_message,
+                         dm_locks_line, gaps_text, guild_prefix, health_layout, health_locked_layout, lock_layout, raid_name, run_actions_row, run_label, run_times, run_title, sheet_message,
                          sheet_state)
 from .registry import Registry, RegistryError
 
@@ -474,7 +474,7 @@ class RaidMixin:
                 continue
             s = ev.signups.get(str(m.discord_id))
             status = f"You're marked **{rc.LABELS.get(s.status, s.status)}** ({'away that day' if s.source == 'absence' else s.source})" if s else "You haven't answered yet"
-            if await self.send_member_dm(reg, m, f"{reg.config.name} · {run_label(reg, ev)} (<t:{unix}:R>). {status}. Join / Bench / No thanks:" + (f" (sheet: <#{ev.channel_id}>)" if ev.channel_id else "") + f"\n-# The roster locks <t:{int(hard.timestamp())}:f>; no answer by then means you're not on it.", sheet_view(reg, ev.key), ev=ev):
+            if await self.send_member_dm(reg, m, f"{reg.config.name} · {run_label(reg, ev)} (<t:{unix}:R>). {status}. Join / Bench / No thanks:" + (f" (sheet: <#{ev.channel_id}>)" if ev.channel_id else "") + "\n-# " + dm_locks_line(reg, ev, hard), sheet_view(reg, ev.key), ev=ev):
                 sent += 1
         ev.log.append(f"open DMs sent to {sent}")
         rs.save(ev, f"open DMs {sent}")
@@ -507,7 +507,7 @@ class RaidMixin:
             targets = [m for m, _c in rc.not_answered(reg, ev) if m.discord_id not in ev.nudged and not m.dm_opt_out]
             _soft, hard, _confirm = run_times(reg, ev, team)
             for m in targets:  # same buttons as the sheet (and the open DM), so they can answer right here
-                if await self.send_member_dm(reg, m, f"{reg.config.name}: the {run_label(reg, ev)} sheet is still waiting for you — Join, Bench or No thanks here or in <#{ev.channel_id}>.\n-# The roster locks <t:{int(hard.timestamp())}:f>; no answer by then means you're not on it.", sheet_view(reg, ev.key), ev=ev):
+                if await self.send_member_dm(reg, m, f"{reg.config.name}: the {run_label(reg, ev)} sheet is still waiting for you — Join, Bench or No thanks here or in <#{ev.channel_id}>.\n-# " + dm_locks_line(reg, ev, hard), sheet_view(reg, ev.key), ev=ev):
                     ev.nudged.append(m.discord_id)
             if targets:
                 rs.save(ev, f"nudged {len(targets)}")
@@ -884,17 +884,26 @@ class RaidMixin:
                 log.exception("auto-fill stop failed (%s %s)", reg.key, key)
             yield
 
-    async def lock_preview(self, reg, rs, ev, *, by: str, by_id: int | None = None) -> list:
+    async def lock_preview(self, reg, rs, ev, *, by: str, by_id: int | None = None, fill: bool = True) -> list:
         """The roster(s) the lock would build NOW (rc.split_preview with the run's strategy, honouring the board and the
         pins), under the run's solver single flight — the Discord Preview lock and the site's lock preview share it. A
         later raid whose earlier raid is still open solves with who those raids will roster (rc.earlier_counts), so it
         shows what its lock builds once they lock.
         Nothing about the run changes but `ev.last_proposal` (the layout shown, with who saw it: the same officer's plain
         text "use it" puts it on the board, also after a restart — configops._propose). RegistryError (SolverBusy, or the
-        solver's own sentence) when no preview can be made."""
+        solver's own sentence) when no preview can be made. `fill=False`: the lock as it stands (rc.board_as_it_stands,
+        no solve) — refused with rc.LOCK_EMPTY_BOARD as that lock is."""
         if ev.state != "open":
             raise RegistryError(f"{run_title(reg, ev)} is already {rc.RUN_STATE_WORDS.get(ev.state, ev.state).split(' — ')[0]}, and the preview is for an open sheet.")
         strategy = rc.run_strategy(reg, ev)  # the lock's own strategy and budget: the preview is the roster the lock builds
+        if not fill:  # exactly the board: nothing to solve
+            if rc.lock_empty_board(reg, ev):
+                raise RegistryError(rc.LOCK_EMPTY_BOARD)
+            rosters = rc.board_as_it_stands(reg, rs, ev)
+            ev.last_proposal = {"layout": [list(g) for r in rosters for g in r.groups], "strategy": strategy, "rev": rc.board_rev(reg, ev),
+                                "by": by, "by_id": by_id, "at": rc.now(), "kind": "lock preview"}
+            await asyncio.to_thread(rs.save, ev, f"lock preview by {by}")
+            return rosters
         async with self.solving(reg, ev.key):
             try:  # a later raid whose earlier raid is still open: their lock solves first, as the board and the lock read them
                 earlier = await asyncio.to_thread(rc.earlier_counts, reg, rs, ev)
@@ -905,14 +914,19 @@ class RaidMixin:
         await asyncio.to_thread(rs.save, ev, f"lock preview by {by}")
         return rosters
 
-    async def lock_run(self, reg, rs, ev, by: str = "scheduler") -> str:
+    async def lock_run(self, reg, rs, ev, by: str = "scheduler", fill: bool = True) -> str:
         """Lock the sheet, build the roster(s) from the signups (pins honoured), show them on the sheet and in the
         officer channel, and DM every rostered member for confirmation. One lock per run at a time (solving: a second
         caller gets rc.SolverBusy); the board lock is held from the snapshot to the state flip, so a move made during
         the solve waits and is then refused as stale (never silently lost); a run no longer open is refused. Answers
         and pins take no lock while the sheet is open, so one written during the solve (a No thanks, a pin out) makes
         the lock solve again on the live run (rc.solve_inputs), up to rc.LOCK_SOLVES times; still moving after that,
-        the lock fails and the sheet stays open — nobody is rostered from answers they already changed."""
+        the lock fails and the sheet stays open — nobody is rostered from answers they already changed.
+        `fill` (issue 14): True fills the open seats with the solver (the board's places kept, the Bench last); False locks
+        the board AS IT STANDS (rc.board_as_it_stands: exactly the placed names in their groups, nobody added), fails
+        with rc.LOCK_EMPTY_BOARD when people answered and nobody is placed, and — seats left open with Automated Fill
+        Requests on — pauses those asks for the event. Every later raid of the event locks with the same choice
+        (lock_parts; stored as `ev.lock_fill`). A confirm deadline already past at the lock becomes rc.late_confirm_by's."""
         if rc.is_follow(ev) and any(p.state == "open" for p in rc.event_parts(rs, ev) if rc.part_no(p) < rc.part_no(ev)):
             raise RegistryError(rc.LATER_PART_LOCK.format(first=run_title(reg, rc.first_part(rs, ev))))
         team = rc.run_team(reg, ev)
@@ -925,6 +939,11 @@ class RaidMixin:
                 trial = ev.model_copy(deep=True)
                 seen, inputs = len(trial.log), rc.solve_inputs(trial)
                 ev.lock_tried_at = rc.now()
+                if not fill:  # as it stands: read from the board under board_lock, so nothing moves meanwhile
+                    why = rc.LOCK_EMPTY_BOARD if rc.lock_empty_board(reg, trial) else None
+                    if why is None:
+                        trial.rosters = rc.board_as_it_stands(reg, rs, trial)
+                    break
                 try:
                     await asyncio.to_thread(rc.propose, reg, rs, trial, False)
                 except Exception as e:  # noqa: BLE001 — solver infeasible / timed out
@@ -951,13 +970,19 @@ class RaidMixin:
             if ev.state != "open":  # cancelled while the roster was being built
                 raise RegistryError(f"{run_title(reg, ev)} was {ev.state} before the roster was ready, so it was not locked.")
             _, _, confirm = run_times(reg, ev, team)
+            confirm = rc.late_confirm_by(confirm, ev.start, reg.now_local())  # a late lock never asks with a deadline already past
             confirms = rc.run_confirms(reg, ev)  # off (ad hoc): no confirmation DMs and no deadline — no seat ever expires
             ev.rosters = trial.rosters
             ev.log.extend(trial.log[seen:])  # the solver's lines; lines written on the live run meanwhile stay
             ev.state, ev.locked_at, ev.confirm_by, ev.lock_error = "locked", rc.now(), confirm.isoformat() if confirms else None, None
             ev.placed_by, ev.drag_pins, ev.auto_placed, ev.placed_as = {}, {}, [], {}  # who placed whom was the board before the lock; the roster is the board now
             ev.lock_seats = [uid for r in ev.all_rosters for g in r.groups for n in g if (uid := rc.uid_of_name(ev, n)) is not None]
-            ev.log.append(f"locked by {by}")
+            ev.lock_fill = fill
+            ev.log.append(f"locked by {by}" + ("" if fill else " as the board stood"))
+            if not fill and rc.open_seat_count(reg, ev) and rc.team_setting(team, "autofill") and not ev.autofill_paused:
+                # the officer left seats open on purpose: nobody is DMed for them until an officer resumes the asks
+                ev.autofill_paused, ev.autofill_paused_by = True, by
+                ev.log.append(f"automatic asks paused by {by}: the lock left seats open for an officer to fill")
             held = [a for a in ev.fill_asks if a.held and a.phase == "prelock"]
             pre_gone = rc.release_prelock_asks(ev)  # pre-lock asks expire at lock time (a yes held for a tied partner too)
             short = rc.needs(reg, ev, team)["roles"]
@@ -996,15 +1021,18 @@ class RaidMixin:
             then = ("Rostered? confirm in your DMs. Not rostered? nothing to do." if confirms
                     else "Rostered? you're in — press Can't make it on the sheet if that changes. Not rostered? nothing to do.")
             try:
-                await sig.send(f"🔒 {run_label(reg, ev)}" + (f" · after {rc.lead_name_of(reg, ev)}" if rc.is_follow(ev) else "") + f" is locked: {sum(len(r.selected) for r in ev.all_rosters)} rostered" + (f" in {len(ev.all_rosters)} rosters" if len(ev.all_rosters) > 1 else "") + f". {then}", allowed_mentions=discord.AllowedMentions.none())
+                line = await sig.send(f"🔒 {run_label(reg, ev)}" + (f" · after {rc.lead_name_of(reg, ev)}" if rc.is_follow(ev) else "") + f" is locked: {sum(len(r.selected) for r in ev.all_rosters)} rostered" + (f" in {len(ev.all_rosters)} rosters" if len(ev.all_rosters) > 1 else "") + f". {then}", allowed_mentions=discord.AllowedMentions.none())
+                if getattr(line, "id", None):  # kept, so an unlock can take the line back
+                    ev.lock_line = [sig.id, line.id]
+                    await asyncio.to_thread(rs.save, ev, "lock line posted")
             except Exception as e:  # noqa: BLE001
                 log.warning("lock line failed (%s): %s", ev.key, e)
         first = rc.first_part(rs, ev)
         chaining: set = self.__dict__.setdefault("_parts_locking", set())
-        tail = None if (reg.key, first.key) in chaining else await self.lock_parts(reg, rs, first, by)
+        tail = None if (reg.key, first.key) in chaining else await self.lock_parts(reg, rs, first, by, fill=fill)
         return f"{run_title(reg, ev)}: locked by {by}, {len(ev.all_rosters)} roster(s), {sent} confirmation DM(s)" + (f" · {tail}" if tail else "")
 
-    async def lock_parts(self, reg, rs, first, by: str) -> str | None:
+    async def lock_parts(self, reg, rs, first, by: str, fill: bool = True) -> str | None:
         """The first raid's lock builds every later raid of the run (design §5.62), in order: each solves from the run's
         answers with the people rostered on the raids before it preferred (rc.LEAD_SEAT_BONUS), flips to locked and posts
         its own lock cards; it never confirms. A short role never stops one (the solver rosters whoever can play and the
@@ -1013,7 +1041,8 @@ class RaidMixin:
         rest). Anything a part's lock raises (rc.SolverBusy, a cancel between the state check and the lock, a Discord
         error) never turns an earlier lock into a failure: one ops warn per part and the tail "follow-on not locked:
         <why>". Also called after a later part's own lock (the scheduler's retry) to carry on down the chain. None when
-        nothing was tried. → the parts' lines, joined."""
+        nothing was tried. `fill`: the first raid's lock choice (issue 14), every later raid locks with it. → the parts'
+        lines, joined."""
         if first.state != "locked":
             return None
         chaining: set = self.__dict__.setdefault("_parts_locking", set())
@@ -1026,7 +1055,7 @@ class RaidMixin:
                 if fev.state != "open":  # a later part cancelled or ended on its own (older runs): nothing after it is built
                     break
                 try:
-                    line = await self.lock_run(reg, rs, fev, by=by)
+                    line = await self.lock_run(reg, rs, fev, by=by, fill=fill)
                 except Exception as e:  # noqa: BLE001 — an earlier part stays locked whatever happens to a later one
                     why = str(e) or type(e).__name__
                     log.warning("later raid lock failed (%s after %s): %s", fev.key, first.key, why)

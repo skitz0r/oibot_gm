@@ -15,7 +15,7 @@ from typing import Any, Protocol
 import discord
 
 from . import raidcycle as rc
-from .constants import MARK, ROLES, TEAL
+from .constants import MARK, PAGE_WORDS, ROLES, TEAL
 from .registry import Registry, RegistryError
 
 from .constants import CLOCK12  # noqa: E402 — re-exported for discord_raid; plain-text stamps where Discord can't render <t:…>
@@ -74,6 +74,20 @@ class BotProto(Protocol):
 
 
 # ---------------------------------------------------------------- rendering
+
+def locks_line(reg: Registry, ev: rc.RaidEvent, hard: datetime) -> str:
+    """The open sheet's and the officers' card's lock line: '🔒 locks <t:…:R>', or with Auto Lock off (issue 14) the
+    server's one sentence the Details Locks row also says (PAGE_WORDS officer_locks) — never a time that won't happen."""
+    return f"🔒 locks <t:{int(hard.timestamp())}:R>" if rc.auto_lock(reg, ev) else f"🔒 {PAGE_WORDS['officer_locks']}"
+
+
+def dm_locks_line(reg: Registry, ev: rc.RaidEvent, hard: datetime) -> str:
+    """The opening and reminder DMs' lock sentence: when the roster locks, or with Auto Lock off the same officer_locks
+    sentence as the sheet and the Details Locks row."""
+    if rc.auto_lock(reg, ev):
+        return f"The roster locks <t:{int(hard.timestamp())}:f>; no answer by then means you're not on it."
+    return PAGE_WORDS["officer_locks"]
+
 
 def run_times(reg: Registry, ev: rc.RaidEvent, team: dict) -> tuple[datetime, datetime, datetime]:
     """(health/nudge, lock, confirmation deadline) for a run."""
@@ -168,7 +182,7 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
         confirms = rc.run_confirms(reg, ev)
         e.title = f"{tag}{name}"
         e.description = (f"<t:{unix}:F> · <t:{unix}:R>" + "".join(f"\nthen {reg.follow_words({'raid': t.get('instance'), 'rosters': t.get('rosters') or 1})} <t:{int(rc.dict_start(reg, ev, t).timestamp())}:t>" for t in rc.later_dicts(reg, ev)) + f"\n**{len(ins)}** / {size * want}" + (f" · {runs} rosters" if runs > 1 else "") + "\u2003" + "\u2003".join(f"{ico('role', r)} {n}" for r, n in counts.items())
-                         + f"\n🔒 locks <t:{int(hard.timestamp())}:R>" + (f" · ✓ confirm by <t:{int(confirm.timestamp())}:f>" if confirms else ""))
+                         + f"\n{locks_line(reg, ev, hard)}" + (f" · ✓ confirm by <t:{int(confirm.timestamp())}:f>" if confirms else ""))
         by_cls: dict[str, list] = {}
         for sg in ins:
             by_cls.setdefault(sg.cls, []).append(sg)
@@ -580,7 +594,7 @@ def health_layout(reg: Registry, rs, ev: rc.RaidEvent, team: dict, ico, officer:
     sug = suggested_block(reg, ico, plan) if plan else ""
     if sug:
         parts += [ui.TextDisplay(sug), suggest_row(reg, ev, plan), ui.Separator()]
-    parts.append(ui.TextDisplay(f"🔒 locks <t:{int(hard.timestamp())}:R>" + (f" · ✓ confirm by <t:{int(confirm.timestamp())}:f>" if rc.run_confirms(reg, ev) else f" · {rc.NO_CONFIRMATIONS}")))
+    parts.append(ui.TextDisplay(locks_line(reg, ev, hard) + (f" · ✓ confirm by <t:{int(confirm.timestamp())}:f>" if rc.run_confirms(reg, ev) else f" · {rc.NO_CONFIRMATIONS}")))
     if officer:
         parts.append(run_actions_row(reg, ev, locked=False))
     worst = "red" if short or (plan and plan.short["roles"]) else "amber" if missing or waiting else "green"
