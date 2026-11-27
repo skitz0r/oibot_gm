@@ -5039,6 +5039,7 @@ def board_complete(reg: Registry, rs, p: RaidEvent) -> bool:
 # a lock as it stands with people who answered and nobody on the board: one sentence with the way out (the scheduler's
 # lock stores it as its lock_error, so it is also what the officers' line and the sheet's footer say)
 LOCK_EMPTY_BOARD = "Nobody is on the board, so place someone or lock with auto-fill to fill the empty seats."
+LOCK_EMPTY_RAID = "Nobody is on the {raid} board, so place someone or lock with auto-fill."  # an event of several raids
 
 
 def _board_stands(reg: Registry, ev: RaidEvent) -> list[RosterResult]:
@@ -5081,18 +5082,35 @@ def lock_open_slots(reg: Registry, rs, ev: RaidEvent) -> list[int]:
     return [max(0, size - len(r.selected)) for r in _board_stands(reg, ev)]
 
 
-def lock_left_out(reg: Registry, ev: RaidEvent) -> list[str]:
-    """The names the full lock would keep on (lock_forces' kept_on: an "in" pin, the comp policy's never_bench) that are
-    not on the board: a lock as it stands does not roster them. Signup names, each once, in lock_forces' order."""
+def lock_left_out(reg: Registry, rs, ev: RaidEvent) -> list[str]:
+    """The names the full lock would keep on (lock_forces' kept_on: an "in" pin, the comp policy's never_bench — read
+    from `rs`'s store, as the lock reads it) that are not on the board: a lock as it stands does not roster them.
+    Signup names, each once, in lock_forces' order."""
     on_board = {n for g in board_layout(reg, ev) for n in g}
-    return [n for n in dict.fromkeys(lock_forces(reg, None, ev).kept_on) if n not in on_board]
+    return [n for n in dict.fromkeys(lock_forces(reg, rs, ev).kept_on) if n not in on_board]
 
 
-def lock_empty_board(reg: Registry, ev: RaidEvent) -> bool:
-    """A lock as it stands is refused (LOCK_EMPTY_BOARD): someone answered Join or Bench and nobody is placed on the
-    board. An event nobody answered still locks (its roster is the empty board)."""
-    answered = {s.display_name for s in ev.signups.values() if s.status in ("in", "sub")}
-    return bool(answered) and not any(r.selected for r in _board_stands(reg, ev))
+def _raid_board_empty(reg: Registry, p: RaidEvent) -> bool:
+    """One raid: someone answered Join or Bench and nobody is placed on its board."""
+    answered = any(s.status in ("in", "sub") for s in p.signups.values())
+    return answered and not any(r.selected for r in _board_stands(reg, p))
+
+
+def lock_empty_refusal(reg: Registry, rs, ev: RaidEvent) -> str | None:
+    """Why a lock as it stands can't go, for the WHOLE event, before any raid of it locks (None: it can): a raid still
+    open from `ev` on (ev and every later raid) that someone answered and whose board has nobody placed. A one-raid
+    event says LOCK_EMPTY_BOARD; an event of several raids names the raid (LOCK_EMPTY_RAID). An event nobody answered
+    still locks (its roster is the empty board). `rs` None: `ev` alone. The lock (RaidMixin.lock_run / lock_preview
+    with fill=False) and the lock box read it, so the box refuses first and a lineup never half-locks."""
+    parts = event_parts(rs, ev) if rs is not None else [ev]
+    no = part_no(ev)
+    todo = [ev if p.key == ev.key else p for p in parts if p.key == ev.key or (p.state == "open" and part_no(p) > no)]
+    for p in todo:
+        if _raid_board_empty(reg, p):
+            if len(parts) == 1:
+                return LOCK_EMPTY_BOARD
+            return LOCK_EMPTY_RAID.format(raid=reg.raid_def(p.instance).get("name", p.instance))
+    return None
 
 
 def event_board_preview(reg: Registry, rs: RaidStore, first: RaidEvent, parts: list[RaidEvent] | None = None, stop=None,

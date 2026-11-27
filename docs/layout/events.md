@@ -155,8 +155,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        run_rosters. The lock as it stands (issue 14, lock_run(fill=False)): board_as_it_stands(reg, rs, ev) = THE roster it
                        writes, built from the board (board_rosters on board_layout, trailing empty rosters dropped; explain.annotate, no what-if;
                        group reports), never a solve — exactly the placed names, an Auto-fill Bench place too; lock_open_slots(reg, rs, ev) → open
-                       seats per roster it builds; lock_left_out(reg, ev) → kept-on names (pin in, never_bench) not on the board; lock_empty_board +
-                       LOCK_EMPTY_BOARD (Join/Bench answers and nobody placed; nobody answered still locks); LEFTOVER_PAUSED = the Not rostered
+                       seats per roster it builds; lock_left_out(reg, rs, ev) → kept-on names (pin in, never_bench) not on the board; lock_empty_refusal(reg, rs, ev)
+                       → LOCK_EMPTY_BOARD / LOCK_EMPTY_RAID (names the raid) for the WHOLE event from ev on, before any raid locks
+                       (a raid with Join/Bench answers and nobody placed; nobody answered still locks); LEFTOVER_PAUSED = the Not rostered
                        notice's second sentence while Automated Fill Requests are paused (no DM promised). RaidEvent.lock_fill (the choice, on
                        each part it locked) and lock_line ([channel, message] of the signup channel's "is locked" line). The lock: lock_forces(reg, rs, ev, players) → LockForces = THE builder of who is kept on and
                        off (_solve_run's force_in / force_out, the lock box's count, kept_off_ids — role_plan never asks a kept-off name);
@@ -202,7 +203,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        every writer of ev.fill_asks holds plan_lock (_send_asks is the one sender)
                        lock_run(…, fill=True) / lock_parts(…, fill=) / lock_preview(…, fill=) (issue 14): fill=False = the board as it stands
                        (rc.board_as_it_stands; LOCK_EMPTY_BOARD is a failed lock: lock_error, the scheduler's 15-minute back-off); seats left open
-                       with Automated Fill Requests on pause them (ev.autofill_paused, by = the locker, one log line); every later raid locks
+                       with Automated Fill Requests on pause them on every raid of the event (autofill_paused, by = the locker, one log line
+                       each; set_autofill_paused itself stays per raid); every later raid locks
                        with the first's choice; confirm_by = rc.late_confirm_by. The scheduler passes fill = auto_lock_fill (a later raid's retry:
                        its first raid's lock_fill). Surfaces a person presses still call the default until they carry the choice.
                        raid_views.locks_line / dm_locks_line: the sheet's, the officers' card's and the open / reminder DMs' lock words — with

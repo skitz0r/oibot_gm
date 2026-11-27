@@ -897,8 +897,8 @@ class RaidMixin:
             raise RegistryError(f"{run_title(reg, ev)} is already {rc.RUN_STATE_WORDS.get(ev.state, ev.state).split(' — ')[0]}, and the preview is for an open sheet.")
         strategy = rc.run_strategy(reg, ev)  # the lock's own strategy and budget: the preview is the roster the lock builds
         if not fill:  # exactly the board: nothing to solve
-            if rc.lock_empty_board(reg, ev):
-                raise RegistryError(rc.LOCK_EMPTY_BOARD)
+            if (why := rc.lock_empty_refusal(reg, rs, ev)) is not None:
+                raise RegistryError(why)
             rosters = rc.board_as_it_stands(reg, rs, ev)
             ev.last_proposal = {"layout": [list(g) for r in rosters for g in r.groups], "strategy": strategy, "rev": rc.board_rev(reg, ev),
                                 "by": by, "by_id": by_id, "at": rc.now(), "kind": "lock preview"}
@@ -940,7 +940,7 @@ class RaidMixin:
                 seen, inputs = len(trial.log), rc.solve_inputs(trial)
                 ev.lock_tried_at = rc.now()
                 if not fill:  # as it stands: read from the board under board_lock, so nothing moves meanwhile
-                    why = rc.LOCK_EMPTY_BOARD if rc.lock_empty_board(reg, trial) else None
+                    why = rc.lock_empty_refusal(reg, rs, trial)  # the whole event, before any raid of it locks
                     if why is None:
                         trial.rosters = rc.board_as_it_stands(reg, rs, trial)
                     break
@@ -979,16 +979,25 @@ class RaidMixin:
             ev.lock_seats = [uid for r in ev.all_rosters for g in r.groups for n in g if (uid := rc.uid_of_name(ev, n)) is not None]
             ev.lock_fill = fill
             ev.log.append(f"locked by {by}" + ("" if fill else " as the board stood"))
-            if not fill and rc.open_seat_count(reg, ev) and rc.team_setting(team, "autofill") and not ev.autofill_paused:
-                # the officer left seats open on purpose: nobody is DMed for them until an officer resumes the asks
-                ev.autofill_paused, ev.autofill_paused_by = True, by
-                ev.log.append(f"automatic asks paused by {by}: the lock left seats open for an officer to fill")
+            paused_too = []  # the event's other raids this lock pauses (saved once the flip is committed)
+            if not fill and rc.open_seat_count(reg, ev) and rc.team_setting(team, "autofill"):
+                # the officer left seats open on purpose: nobody is DMed for them until an officer resumes the asks —
+                # on every raid of the event, so no later raid's seats are asked for either
+                for p in (ev if p.key == ev.key else p for p in rc.event_parts(rs, ev)):
+                    if p.state in ("done", "cancelled") or p.autofill_paused:
+                        continue
+                    p.autofill_paused, p.autofill_paused_by = True, by
+                    p.log.append(f"automatic asks paused by {by}: the lock left seats open for an officer to fill")
+                    if p is not ev:
+                        paused_too.append(p)
             held = [a for a in ev.fill_asks if a.held and a.phase == "prelock"]
             pre_gone = rc.release_prelock_asks(ev)  # pre-lock asks expire at lock time (a yes held for a tied partner too)
             short = rc.needs(reg, ev, team)["roles"]
             if short:  # the solver caps a minimum at what the sheet can supply: say so instead of locking quietly
                 ev.log.append("locked short " + ", ".join(f"{k} {r}" for r, k in short.items()))
             rs.save(ev, f"locked by {by}")  # flipped AND committed before anything is posted or sent: resumable (recover_lock)
+            for p in paused_too:
+                rs.save(p, f"autofill paused by {by} at the lock")
         confirming = self._confirming()
         confirming.add((reg.key, ev.key))  # the scheduler's recovery step leaves the run alone while this fan-out runs
         try:

@@ -103,12 +103,14 @@ understands; it answers in the words below.
     and everyone on the board keeps their place. With it off, that lock rosters exactly the names on the board, each in
     its group: a Bench answer Auto-fill placed there is rostered, and someone pinned on who is not on the board is not.
     Everyone left under *Not placed* gets the usual *Not rostered* notice. If seats stay open and Automated Fill
-    Requests are on, the lock pauses them for that event, so nobody is DMed for those seats; the notice then says *"An
-    officer decides who takes an open seat."* and an officer resumes the asks from the event. With people signed up
-    and nobody on the board, that lock fails: the sheet stays open, the officers get one line (*"Nobody is on the
-    board, so place someone or lock with auto-fill to fill the empty seats."*) and the bot tries again after 15
-    minutes, not every minute. An event nobody signed up for still locks. Later raids of the event lock the same way as
-    its first. It is greyed out (in Discord, not offered) while Auto Lock is off.
+    Requests are on, the lock pauses them on every raid of that event, so nobody is DMed for those seats; the notice
+    then says *"An officer decides who takes an open seat."* Resuming them is per raid: an officer resumes each raid's
+    asks from its event. With people signed up and nobody on the board, that lock fails: the sheet stays open, the
+    officers get one line (*"Nobody is on the board, so place someone or lock with auto-fill to fill the empty
+    seats."*) and the bot tries again after 15 minutes, not every minute. An event of several raids is checked as a
+    whole before any raid of it locks: if any of its raids has people signed up and nobody on its board, nothing locks
+    and the line names that raid (*"Nobody is on the Barrow Deeps board, so place someone or lock with auto-fill."*).
+    An event nobody signed up for still locks. Later raids of the event lock the same way as its first. It is greyed out (in Discord, not offered) while Auto Lock is off.
   - **An event nobody locks** is still open at its start, and the bot leaves it open: past its start and past its
     close the scheduler neither locks it nor ends it, sends no confirmations and no fill asks, and the sheet keeps
     taking answers. **End** is refused (*"End is for a locked event, and this sheet is still open."*). An officer locks
@@ -1395,8 +1397,9 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    Bench answer."* when Auto-fill or a whole board put a Bench answer in a group, or a placed joiner answered Bench. Then who is told: *"Everyone rostered gets the Confirm or
    Can't make it DM."* (*"… ask, as a DM or on the site."* when some have DMs off), counted only when the board is the
    whole roster (*"The 20 rostered get the Confirm or Can't make it DM."*), and *"They have until Tue 15 Dec 12:30 PM
-   to answer."* — a lock after its own confirm-by time (an officer's lock on an event nobody locked) gives the
-   rostered until the start or an hour from the lock, whichever is sooner, never a time already past —, on a one-off *"Nobody is asked to confirm. You can still move people after
+   to answer."* A lock after its own confirm-by time (an officer's lock on an event nobody locked) gives the
+   rostered until the start or an hour from the lock, whichever is sooner; a lock at or after the start gives them an
+   hour from the lock. On a one-off the box says *"Nobody is asked to confirm. You can still move people after
    the lock."* On the site every such confirm is one box: a title naming the action (*Lock Tue 15 Dec 6:30 PM?*), at
    most three sentences, **Back** and the action's own verb (red only when it can't be undone). If what the box said
    changed while it was open — someone joined, the event moved — pressing the verb changes nothing and the box shows the

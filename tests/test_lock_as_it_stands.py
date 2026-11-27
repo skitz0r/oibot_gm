@@ -65,7 +65,57 @@ def test_a_lock_as_it_stands_rosters_exactly_the_board(reg, rs):
     assert groups_of(ev) == board_of(layout, 2), "name for name, group for group"
     assert {p.signup_name for p in ev.all_rosters[0].benched} == names(ms[6:]), "the unplaced are not rostered"
     assert ev.lock_fill is False and any("as the board stood" in x for x in ev.log)
-    assert all(isinstance(a, str) for a in ev.all_rosters[0].advisories) and ev.all_rosters[0].group_reports, "the usual advisories and reports"
+    assert len(ev.all_rosters[0].group_reports) == 2, "a report per group"
+
+
+def test_a_board_as_it_stands_carries_the_usual_advisories(reg, rs):
+    """Only damage dealers placed: the roster is short both tanks, and the lock card says so as the full lock's does."""
+    bot = NightBot(reg, rs)
+    ev = schedule_event(reg, rs)
+    ms = base_eight(reg)
+    join(reg, rs, ev, ms)
+    ev.layout = [[m.display_name for m in ms[4:8]]]  # base_eight: 2 tanks, 2 healers, then 4 damage dealers
+    rs.save(ev, "board (test)")
+    lock(bot, reg, rs, rs.events[ev.key], fill=False)
+    adv = rs.events[ev.key].all_rosters[0].advisories
+    assert any(a.startswith("🔴 Tanks 0/2") for a in adv), adv
+
+
+def test_a_name_placed_then_answering_no_thanks_is_not_rostered(reg, rs):
+    bot = NightBot(reg, rs)
+    ev, ms = ten_with_board(reg, rs, placed=6)
+    gone = ms[0]
+    join(reg, rs, rs.events[ev.key], [gone], "out")
+    ev = rs.events[ev.key]
+    lock(bot, reg, rs, ev, fill=False)
+    seated = {p.signup_name for p in rs.events[ev.key].seated()}
+    assert gone.display_name not in seated and seated == names(ms[1:6])
+
+
+def test_preview_lock_as_it_stands_is_the_board_and_refuses_an_empty_one(reg, rs):
+    from contextlib import asynccontextmanager
+
+    import pytest as _pt
+
+    from oibot_gm.discord_raid import RaidMixin
+    from oibot_gm.registry import RegistryError
+
+    class Bare:
+        lock_preview = RaidMixin.lock_preview
+
+        @asynccontextmanager
+        async def solving(self, reg, key):
+            raise AssertionError("a preview as it stands never solves")
+            yield
+
+    ev, _ms = ten_with_board(reg, rs, placed=6)
+    layout = [list(g) for g in ev.layout]
+    shown = run(Bare().lock_preview(reg, rs, ev, by="t", fill=False))
+    assert [sorted(g) for r in shown for g in r.groups] == board_of(layout, 2)
+    empty = schedule_event(reg, rs)
+    join(reg, rs, empty, people(reg, 2, DPS))
+    with _pt.raises(RegistryError, match="Nobody is on the board"):
+        run(Bare().lock_preview(reg, rs, rs.events[empty.key], by="t", fill=False))
 
 
 def test_two_rosters_as_they_stand(reg, rs):
@@ -125,7 +175,7 @@ def test_a_name_pinned_in_off_the_board_is_left_out(reg, rs):
     ev.pins[str(pinned.discord_id)] = "in"
     rs.save(ev, "pin (test)")
     ev = rs.events[ev.key]
-    assert rc.lock_left_out(reg, ev) == [pinned.display_name]
+    assert rc.lock_left_out(reg, rs, ev) == [pinned.display_name]
     lock(bot, reg, rs, ev, fill=False)
     assert pinned.display_name not in {p.signup_name for p in rs.events[ev.key].seated()}
 
@@ -158,7 +208,7 @@ def test_people_answered_and_nobody_placed_is_refused(reg, rs):
     bot = NightBot(reg, rs)
     ev = schedule_event(reg, rs)
     join(reg, rs, ev, base_eight(reg))
-    assert rc.lock_empty_board(reg, ev)
+    assert rc.lock_empty_refusal(reg, rs, ev) == rc.LOCK_EMPTY_BOARD
     line = lock(bot, reg, rs, ev, fill=False)
     ev = rs.events[ev.key]
     assert ev.state == "open" and ev.lock_error == rc.LOCK_EMPTY_BOARD and "lock failed" in line
@@ -168,7 +218,7 @@ def test_people_answered_and_nobody_placed_is_refused(reg, rs):
 def test_an_event_nobody_answered_still_locks_as_it_stands(reg, rs):
     bot = NightBot(reg, rs)
     ev = schedule_event(reg, rs)
-    assert not rc.lock_empty_board(reg, ev)
+    assert rc.lock_empty_refusal(reg, rs, ev) is None
     lock(bot, reg, rs, ev, fill=False)
     ev = rs.events[ev.key]
     assert ev.state == "locked" and not ev.seated() and len(ev.all_rosters) == 1
@@ -233,6 +283,58 @@ def test_the_lock_keeps_its_signup_line(reg, rs):
     assert ev.lock_line and ev.lock_line[0] == bot.signup.id and "is locked" in bot.signup.sent[-1]["content"]
 
 
+# ---------------------------------------------------------------- a lineup is checked whole
+
+def _pair_with_lead_board(reg, rs):
+    reg.seed_test_members(24, "t")
+    lead, fev = open_pair(reg, rs)
+    ms = reg.test_members()
+    join(reg, rs, lead, ms)
+    lead = rs.events[lead.key]
+    lead.layout = [[m.display_name for m in ms[:5]]]
+    rs.save(lead, "board (test)")
+    return rs.events[lead.key], rs.events[fev.key], ms
+
+
+def test_a_lineup_with_an_empty_later_board_is_refused_whole(reg, rs):
+    bot = NightBot(reg, rs)
+    lead, fev, _ms = _pair_with_lead_board(reg, rs)
+    want = rc.LOCK_EMPTY_RAID.format(raid=reg.raid_def(fev.instance)["name"])
+    assert rc.lock_empty_refusal(reg, rs, lead) == want and len(want.split()) <= 20
+    line = lock(bot, reg, rs, lead, fill=False)
+    lead, fev = rs.events[lead.key], rs.events[fev.key]
+    assert lead.state == "open" and fev.state == "open", "nothing locks: never a half-locked event"
+    assert lead.lock_error == want and not fev.lock_error and "lock failed" in line
+    assert bot.updates == [f"⚠️ The lock by Jon failed. {want} The sheet stays open."]
+
+
+def test_the_clock_refuses_a_lineup_with_an_empty_later_board_whole(reg, rs, monkeypatch):
+    bot = NightBot(reg, rs)
+    lead, fev, _ms = _pair_with_lead_board(reg, rs)
+    rc.reschedule(reg, rs, lead, timing={"auto_lock_fill": False}, by="o")
+    at = rs.events[lead.key].start - timedelta(minutes=1)
+    monkeypatch.setattr(reg, "now_local", lambda: at)
+    run(bot.scheduler_tick_guild(reg))
+    lead, fev = rs.events[lead.key], rs.events[fev.key]
+    assert lead.state == "open" and fev.state == "open" and lead.lock_error and lead.lock_error.startswith("Nobody is on the")
+    assert len(bot.updates) == 1 and not fev.lock_error
+
+
+def test_a_lineup_whose_every_raid_has_a_board_locks_whole_and_pauses_every_raid(reg, rs):
+    bot = NightBot(reg, rs)
+    lead, fev, ms = _pair_with_lead_board(reg, rs)
+    rc.reschedule(reg, rs, lead, timing={"autofill": True}, by="o")
+    fev = rs.events[fev.key]
+    fev.layout = [[m.display_name for m in ms[5:8]]]
+    rs.save(fev, "board (test)")
+    assert rc.lock_empty_refusal(reg, rs, rs.events[lead.key]) is None
+    lock(bot, reg, rs, rs.events[lead.key], fill=False)
+    lead, fev = rs.events[lead.key], rs.events[fev.key]
+    assert lead.state == "locked" and fev.state == "locked"
+    assert {p.signup_name for p in fev.seated()} == {m.display_name for m in ms[5:8]}
+    assert lead.autofill_paused and fev.autofill_paused and lead.autofill_paused_by == fev.autofill_paused_by == "Jon"
+
+
 # ---------------------------------------------------------------- the clock's lock
 
 def _clock_event(reg, rs, *, fill: bool, placed: bool = True):
@@ -268,6 +370,13 @@ def test_a_failed_clock_lock_as_it_stands_waits_fifteen_minutes(reg, rs, monkeyp
     run(bot.scheduler_tick_guild(reg))
     ev = rs.events[ev.key]
     assert ev.lock_tried_at == tried and len(bot.updates) == 1, "not tried again within 15 minutes"
+    ev.layout = [[m.display_name for m in _ms[:4]]]  # an officer places people meanwhile
+    rs.save(ev, "board (test)")
+    later = reg.now_local() + timedelta(minutes=6)  # 16 minutes after the failure
+    monkeypatch.setattr(reg, "now_local", lambda: later)
+    run(bot.scheduler_tick_guild(reg))
+    ev = rs.events[ev.key]
+    assert ev.state == "locked" and {p.signup_name for p in ev.seated()} == {m.display_name for m in _ms[:4]}, "tried again after 15"
 
 
 def test_the_clocks_lock_with_auto_fill_on_passes_fill(reg, rs, monkeypatch):
