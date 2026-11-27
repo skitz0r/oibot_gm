@@ -44,8 +44,13 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        by=, by_id=) = every officer edit of a locked roster (a move, swap, substitute, take-off, a Bench answer put on, Auto-fill
                        groups' open seats, an Undo, a whole-board write): exactly the seats asked change, the roster COUNT never changes (a split
                        council's roster index stays valid), a newcomer keeps their answer and gets no Confirm ask, a removed person keeps their
-                       answer (unseat: their OPEN Confirm ask closes `released`, a yes stays) — no notice, DM or fill ask; RaidEvent.officer_open
-                       (open seats an officer's edits left open: the automatic asks hold them, fill_batch(hold=)) and board_undo {officer id →
+                       answer (unseat: their OPEN Confirm ask closes `released`, a yes stays) — no notice, DM or fill ask; RaidEvent.held_seats
+                       [{role, uid}] (the seats an officer's edits opened, hold_seat) read ONLY through held_seats(reg, ev) = what still holds
+                       now (newest first, a seat of its role while that role is short, else a plain open seat, never more than are open; fix
+                       round 1: role-aware, so a held tank seat is no ask for the headcount nor the minimum), pruned by every seat-filling
+                       write (prune_held: seat_player, the quiet path) so a seat a member gives up later is asked for; role_plan(held=) /
+                       fill_batch(held=) take them out seat for seat and never ask the person taken off; held_words(n) = the lock card's
+                       sentence (fill_state_text: never "Nobody left to ask" for held seats); and board_undo {officer id →
                        {before, after}} (undo_record = their one-step Undo while the board is the one their edit left; both emptied by unlock
                        and the lock); board_line(added, removed) = the reply every surface shows; a member-caused opening (Can't make it, an
                        expired ask, an absence) keeps free_seat's fan-out; free_seat/seat_player/
@@ -356,9 +361,13 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        rs, ev, by_id, by, rev=) = Undo my moves (only that officer's placements and the pins their drags changed, rc.undo_rev checked;
                        on a LOCKED roster one step: rc.undo_record's board before their last edit, refused once the board changed since);
                        quiet_drop(reg, rs, ev, m, by) = an officer's No thanks for someone rostered after the lock (free_seat "officer", no
-                       notice, the card edited, each opened seat counted in officer_open, no fill ask); set_answer refuses a member's own
-                       Join / Bench after the lock (rc.LOCKED_JOIN) and records an officer's quietly (no on_behalf notice);
-                       run_fill's automatic asks pass hold = officer_open to rc.fill_batch;
+                       notice, the card edited, each opened seat held: rc.hold_seat, no fill ask); set_answer(…, as_officer=) refuses Join /
+                       Bench after the lock from a MEMBER surface (the sheet, the Me page: rc.LOCKED_JOIN) and records quietly what an OFFICER
+                       surface sends (as_officer — inbox.do_member_action, POST /set, the switch route, plain text's run_answer for someone
+                       else or an officer's own: the officer themselves and someone who never answered included; no on_behalf notice);
+                       run_fill's automatic asks pass held = rc.held_seats to rc.fill_batch and, with every open seat held, return before
+                       the exhausted / suggested branch; board_move(…, undo_id=) / save_board(…, undo_id=) = the acting officer's one-step
+                       Undo after the lock from plain text, MCP and the site's whole-board write;
                        set_answer(…, spec=, via=) (a role switch: the spec on the answer for the whole evening, a notice, one audited line);
                        send_plan(…, seats=) (one ask: the Events page's Switch after the lock); open_run_and_post(…, lock_hours=, first_rosters=);
                        the lock's failure line names its conflict (escaped for Discord)

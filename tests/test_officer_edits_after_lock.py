@@ -109,7 +109,7 @@ def test_take_off_the_roster_puts_them_in_not_rostered_with_their_answer(reg, rs
     assert ev.signups[str(who.discord_id)].status == "in"
     assert who.display_name in rc.board_names(ev), "they can be dragged back"
     assert_told_nobody(bot, reg, ev, before, closed={who.discord_id})
-    assert ev.officer_open == 1, "the seat an officer opened is held from the automatic asks"
+    assert len(rc.held_seats(reg, ev)) == 1, "the seat an officer opened is held from the automatic asks"
 
 
 def test_a_bench_answer_can_be_put_on_the_roster_and_keeps_its_answer(reg, rs):
@@ -188,7 +188,7 @@ def test_auto_fill_route_on_a_locked_roster_writes_through_the_quiet_path(reg, r
     assert run(go()) is None
     assert len(ev.all_rosters[0].selected) == 10
     assert_told_nobody(bot, reg, ev, before)
-    assert ev.officer_open == 0
+    assert rc.held_seats(reg, ev) == []
 
 
 def test_auto_fill_refuses_a_full_locked_roster_in_its_sentence(reg, rs):
@@ -285,7 +285,7 @@ def test_no_thanks_for_someone_rostered_frees_the_seat_and_asks_nobody(reg, rs):
     run(bot.set_answer(reg, rs, ev, who, "out", None, by="Officer", by_id=OFFICER))
     assert not ev.seat_of(who) and ev.signups[str(who.discord_id)].status == "out"
     assert_told_nobody(bot, reg, ev, before, closed={who.discord_id})
-    assert ev.officer_open == 1
+    assert len(rc.held_seats(reg, ev)) == 1
     sent, _nd = run(bot.run_fill(reg, rs, ev, rc.run_team(reg, ev)))
     assert sent == [], "the scheduler's automatic asks leave the officer's open seat alone"
 
@@ -297,7 +297,7 @@ def test_a_members_cant_make_it_still_frees_the_seat_and_asks_the_bench(reg, rs)
     who = seated[-1]
     run(bot.set_answer(reg, rs, ev, who, "out", None, by=who.display_name, by_id=who.discord_id))
     assert not ev.seat_of(who) and ev.callouts, "the callout is recorded"
-    assert ev.officer_open == 0
+    assert rc.held_seats(reg, ev) == []
     assert [a for a in ev.fill_asks if a.pending], "a seat a member gives up is asked for as before"
 
 
@@ -395,13 +395,13 @@ def test_unlock_after_quiet_edits_restores_the_board(reg, rs):
     assert ev.state == "open" and {n for g in ev.layout for n in g} == roster
     assert ev.signups[str(off.discord_id)].status == "in", "taken off by an officer: back in Not placed with their answer"
     assert off.display_name not in roster
-    assert ev.officer_open == 0 and ev.board_undo == {}
+    assert ev.held_seats == [] and ev.board_undo == {}
 
 
 def test_an_event_locked_before_this_change_loads(reg, rs):
     ev, seated = locked_ten(reg, rs)
     raw = ev.model_dump()
-    raw.pop("officer_open")
+    raw.pop("held_seats")
     raw.pop("board_undo")
     old = rc.RaidEvent.model_validate(raw)
-    assert old.officer_open == 0 and old.board_undo == {}
+    assert old.held_seats == [] and old.board_undo == {}

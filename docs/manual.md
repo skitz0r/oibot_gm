@@ -1223,7 +1223,9 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    **Auto-fill groups** still sits beside *Not rostered*: it fills only the open seats, from *Not rostered* first, then the
    bench, and moves nobody already rostered (*Every seat on the roster is taken, so there is nothing to fill.* when there
    is none). **Undo my moves** takes back your last change on the locked roster (one step; refused once anyone changed it
-   since). **Clear the board** and the split strategy stay closed after the lock: *The roster is locked, so Unlock the event
+   since; plain text's and MCP's moves and whole-board writes count as your change too). Undo puts the person back on
+   the roster but does not reopen a Confirm ask the move closed: they are rostered with no ask, so nothing expires for
+   them. **Clear the board** and the split strategy stay closed after the lock: *The roster is locked, so Unlock the event
    first to clear the board.*; when the board changed while the box was open the new box comes back and waits again; *Placed* becomes *Rostered* (*10 of 10 seats*), who holds a
    seat now. A finished event shows **Board, as it was locked**. The
    page updates by itself when someone answers or another officer moves a name, never under a drag in progress, and
@@ -1487,7 +1489,10 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    Ivy's seat in Group 2, and Ivy waits in Not rostered. …"*); dragging someone out takes them off the roster with their
    answer kept (*"Nettle comes off the roster and waits in Not rostered. …"*). A removed person's open Confirm card is
    edited to say the seat was released (an edit, never a DM); someone who had confirmed and is only moved keeps their
-   confirmation. A seat an officer opens is not asked for on its own: **Fill seats…** asks for it when you want. The
+   confirmation. A seat an officer opens is not asked for on its own — not as a seat, and not for the tank or healer it
+   leaves short — and the person taken off is never asked for it automatically; the lock card then says *Officers are
+   keeping 1 seat open, so it is asked for only with Fill seats.* (never *Nobody left to ask*). **Fill seats…** asks for
+   it when you want; once a held seat is filled any way, it is held no more. The
    lock itself, a member's *Can't make it* and an expired confirmation work as before (their seat is asked for when
    Automated Fill Requests are on). A
    drag started on the open board and dropped after the event locked is refused ("The event locked while you were
@@ -1789,13 +1794,15 @@ list, and **Answer for someone** beside the event's headcount does it for anyone
 her baby is sick" is a callout; "set Kestrel to No thanks" is not) and MCP `set_answer` (`out` is a callout unless
 `callout=false`) do the same. Whatever an officer records for someone reaches them as a **notice** on their Me page and
 in `/me view` ("Jon set you to No thanks for Barrow Deeps Tue 7:30 PM"), and an open DM card of theirs is edited to
-*answered for you by Jon* — never a new DM. After the lock an answer recorded for someone is quiet (*Nobody gets a DM.*,
-and no notice): **Join** records their answer and they wait in *Not rostered* for you to put them on the board (a
+*answered for you by Jon* — never a new DM. After the lock an answer recorded for someone from an officer's place (the
+Signups **⋮**, **Answer for someone**, `/raid set`, plain text, MCP `set_answer`) works for anyone — yourself and someone
+who never answered included — and is quiet (*Nobody gets a DM.*, and no notice): **Join** records their answer and they wait in *Not rostered* for you to put them on the board (a
 rostered person's seat follows a new character or spec at once), **Bench** is the answer only, and **No thanks** takes
 their seat with no callout recorded and no fill ask. **Record a callout** stays what it was: their seat is asked for
 like any *Can't make it*. Pins are officers' planning: nobody is told, and after the lock a pin is refused (*The roster
 is already locked, and a pin only shapes the lock.*). When an officer drags someone onto a locked board, the event's
-thread says *in* — nobody is asked to confirm.
+thread says *in* — nobody is asked to confirm. A member's own places (the sheet's buttons, the Me page) refuse Join,
+Bench and No thanks after the lock for everyone, officers included; *Can't make it* is always there.
 
 **Role switches (an officer picks the spec someone plays).** An event's page on the site has a **Role switches**
 section when one of its raids is short of a tank or healer minimum: *Hyjal Summit is short* with the role icon and how

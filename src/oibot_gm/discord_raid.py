@@ -444,13 +444,15 @@ class RaidMixin:
         await interaction.followup.send(line, ephemeral=True)
 
     async def set_answer(self, reg, rs, ev, m, status: str, character: str | None, by: str, by_id: int | None = None, *,
-                         spec: str | None = None, via: str = "discord") -> str:
+                         spec: str | None = None, via: str = "discord", as_officer: bool = False) -> str:
         """The one path for setting someone's answer on a sheet — the member themself or an officer. `by` is a display
         name people read; `by_id` is the Discord id of whoever acts and DECIDES whose answer it is: the member's own when
         `by_id == m.discord_id` (never a name compare — nicks change, design §2.2). No `by_id` = an officer acting.
         Open sheet: the signup + sheet refresh. Locked (2026-11-27, the lock closes the sheet to members, not to
-        officers): a member's own Join or Bench is refused (rc.LOCKED_JOIN — their way out is Can't make it, which frees
-        the seat through drop_seated as before); an officer's answer is the quiet path — Join records the answer (a
+        officers): a member's own Join or Bench from a MEMBER surface (the sheet, the Me page) is refused (rc.LOCKED_JOIN —
+        their way out is Can't make it, which frees the seat through drop_seated as before); an answer an officer surface
+        records (`as_officer`: the Signups ⋮, /raid set, plain text, MCP — for anyone, the officer themselves and someone
+        who never answered included) is the quiet path — Join records the answer (a
         rostered seat follows a new character or spec at once, rc.reseat_parts; someone not rostered waits in Not
         rostered for an officer to place), Bench is the answer only, No thanks frees the seat (quiet_drop) — nobody is
         asked, DMed or sent a notice and no fill ask goes out. `spec` (Join / Bench: an officer's role switch, the Events
@@ -468,8 +470,9 @@ class RaidMixin:
             raise RegistryError(f"{run_title(reg, ev)} is a test event: only test members and the officer running it can answer it")
         label = run_label(reg, ev).replace("**", "")  # plain text: the line is shown in Discord replies and on the web alike
         who = "" if mine else f"{m.display_name}: "
-        quiet = not mine and sheet_state(ev) == "locked"  # an officer's answer after the lock tells nobody (2026-11-27)
-        if mine and sheet_state(ev) == "locked" and status in ("in", "sub"):
+        edit = not mine or as_officer  # an officer surface recording an answer (their own included, fix round 1 I4)
+        quiet = edit and sheet_state(ev) == "locked"  # an officer's answer after the lock tells nobody (2026-11-27)
+        if not edit and sheet_state(ev) == "locked" and status in ("in", "sub"):
             raise ValueError(rc.LOCKED_JOIN)  # the lock closes the sheet to members: only Can't make it is left to them
         released = status == "out" and await self.release_asks_of(reg, rs, ev, m, "answered No thanks")  # their ask covers nothing now
         if sheet_state(ev) == "open":
@@ -479,7 +482,7 @@ class RaidMixin:
                 await self.refresh_cards(reg, ev)
             line = f"✅ {who}{s.character} {rc.LABELS[s.status]} for {label}" + (f" — {s.note}" if s.note and s.status != status else "")
         elif status == "out":
-            if ev.seat_of(m) and not mine:  # an officer's No thanks for someone rostered: the seat goes, nobody is told
+            if ev.seat_of(m) and edit:  # an officer's No thanks for someone rostered: the seat goes, nobody is told
                 await self.quiet_drop(reg, rs, ev, m, by)
                 line = f"✅ {who}No thanks for {label}, and their seat is open"
             elif ev.seat_of(m):  # the sheet's Can't make it after lock is a (late) callout: recorded like /raid out's
@@ -709,9 +712,9 @@ class RaidMixin:
                     rs.save(ev, "fill: complete")
                 return [], nd
             swaps = (approved_by is not None or rc.auto_swaps(reg, ev)) if swaps is None else swaps
-            # the automatic asks leave alone the seats an officer's own edits left open (rc.RaidEvent.officer_open)
-            hold = min(int(ev.officer_open or 0), rc.open_seat_count(reg, ev)) if approved_by is None else 0
-            batch = await asyncio.to_thread(rc.fill_batch, reg, rs, ev, team, swaps=swaps, hold=hold)
+            # the automatic asks leave alone the seats an officer's own edits hold open (rc.held_seats: role-aware)
+            held = rc.held_seats(reg, ev) if approved_by is None else []
+            batch = await asyncio.to_thread(rc.fill_batch, reg, rs, ev, team, swaps=swaps, held=held)
             if ev.state != "locked":  # cancelled during the solve: nothing goes out for a cancelled run
                 return [], nd
             sent = await self._send_asks(reg, rs, ev, team, batch, phase="fill", approved_by=approved_by, deadline=rc.ask_deadline(reg, ev).isoformat())
@@ -727,6 +730,8 @@ class RaidMixin:
             return sent, nd
         if ev.state != "locked":
             return [], nd
+        if held and len(held) >= rc.open_seat_count(reg, ev):
+            return sent, nd  # every open seat is held by the officers: never "nobody left to ask" (fill_state_text says held)
         if not [a for a in ev.fill_asks if a.pending]:
             if not swaps and await asyncio.to_thread(rc.withheld_swaps, reg, rs, ev):
                 if ev.fill_state != "suggested":  # said once: the swap needs an officer's Ask on the lock card
@@ -1187,7 +1192,7 @@ class RaidMixin:
             ev.log.extend(trial.log[seen:])  # the solver's lines; lines written on the live run meanwhile stay
             ev.state, ev.locked_at, ev.confirm_by, ev.lock_error = "locked", rc.now(), confirm.isoformat() if confirms else None, None
             ev.placed_by, ev.drag_pins, ev.auto_placed, ev.placed_as, ev.played_as = {}, {}, [], {}, {}  # who placed whom was the board before the lock; the roster is the board now
-            ev.officer_open, ev.board_undo = 0, {}
+            ev.held_seats, ev.board_undo = [], {}
             ev.lock_seats = [uid for r in ev.all_rosters for g in r.groups for n in g if (uid := rc.uid_of_name(ev, n)) is not None]
             ev.lock_fill = fill
             ev.log.append(f"locked by {by}" + ("" if fill else " as the board stood"))
@@ -1506,7 +1511,7 @@ class RaidMixin:
         return rc.board_line([s.display_name for s in added], removed)
 
     async def save_board(self, reg, rs, ev, groups: list[list[str]], *, rev: str | None = None, by: str, via: str = "web",
-                         strategy: str | None = None) -> str:
+                         strategy: str | None = None, undo_id: int | None = None) -> str:
         """A whole-board write (the site's Clear / Use this split, MCP set_layout, plain text run_board). `rev` = the
         rc.board_rev the author was looking at: when the board changed since, rc.BoardChanged is raised and nothing is
         written. Join and Bench names count (rc.board_names); a Bench name on it is recorded as auto-placed, so the
@@ -1521,10 +1526,11 @@ class RaidMixin:
             if strategy:
                 ev.split_strategy = strategy
             # its Bench names are decided again at the lock, except an officer's drag the write leaves in its group
-            return await self._write_board(reg, rs, ev, groups, by, via=via, auto=rc.board_write_auto(ev, groups))
+            # `undo_id`: the acting officer (site, MCP, plain text) — after the lock their one-step Undo of this write
+            return await self._write_board(reg, rs, ev, groups, by, via=via, auto=rc.board_write_auto(ev, groups), by_id=undo_id)
 
     async def board_move(self, reg, rs, ev, name: str, to: tuple[int, int] | None, by: str, *, rev: str | None = None, via: str = "web",
-                         expect_state: str | None = None, by_id: int | None = None) -> str:
+                         expect_state: str | None = None, by_id: int | None = None, undo_id: int | None = None) -> str:
         """One move applied to the board as it is NOW (so two officers moving at once merge): `to` = (flat group
         index, position) — group index = roster × groups per roster + group — or None for the bank. Dropping on
         someone swaps (the displaced person stays a joiner). ValueError when the group is full or `name` hasn't joined.
@@ -1550,7 +1556,9 @@ class RaidMixin:
                 if to is not None and sg is not None and ev.pins.get(str(sg.discord_id)) == "out":
                     ev.pins.pop(str(sg.discord_id))  # placed in a group: no longer kept off
                 rc.record_moves(ev, name, at_before, groups, pins_before, by_id)
-            return await self._write_board(reg, rs, ev, groups, by, via=via, by_id=by_id)
+            # after the lock the acting officer's one-step Undo: the site's `by_id`, or `undo_id` (plain text: an officer whose
+            # move before the lock belongs to nobody, so `by_id` stays None there)
+            return await self._write_board(reg, rs, ev, groups, by, via=via, by_id=by_id if by_id is not None else undo_id)
 
     async def undo_moves(self, reg, rs, ev, by_id: int, by: str, *, rev: str | None = None, via: str = "web") -> str:
         """Undo my moves (the Events board, before the lock): exactly what the officer `by_id`'s drags did and still
@@ -1761,14 +1769,15 @@ class RaidMixin:
         """An officer's No thanks for someone rostered after the lock (the quiet path, 2026-11-27): their seat goes on
         every raid of the event they hold one on (rc.free_seat: the answer is No thanks now), their open Confirm ask
         closes and its DM card is edited to its final state — no notice, no DM, and no fill ask: each seat opened is
-        held from the automatic asks (RaidEvent.officer_open). One thread line per raid; sheet and cards redrawn."""
-        held = [ev] + ([p for p in rc.later_parts(rs, ev) if sheet_state(p) == "locked" and p.seat_of(m) is not None]
-                       if ev.followed_by and not rc.is_follow(ev) else [])
+        held from the automatic asks (rc.hold_seat / rc.held_seats). One thread line per raid; sheet and cards redrawn."""
+        held = [(ev, ev.seat_of(m)[1].role)] + ([(p, p.seat_of(m)[1].role) for p in rc.later_parts(rs, ev)
+                                                 if sheet_state(p) == "locked" and p.seat_of(m) is not None]
+                                                if ev.followed_by and not rc.is_follow(ev) else [])
         rc.free_seat(reg, rs, ev, m, "officer", notice=False)
         await self.seat_released(reg, ev, m, "officer")
-        for p in held:
+        for p, role in held:
             p = rs.events.get(p.key, p)
-            p.officer_open = min(rc.open_seat_count(reg, p), int(p.officer_open or 0) + 1)
+            rc.hold_seat(p, role, m.discord_id)
             rs.save(p, f"{m.display_name}'s seat held open ({by})")
             await self.post_run_update(reg, p, f"↩️ {by} set {m.display_name} to No thanks — seat open")
             await self.refresh_cards(reg, p)

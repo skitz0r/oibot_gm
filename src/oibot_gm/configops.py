@@ -3117,8 +3117,10 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
                   "sub": " — keeps the seat until set No thanks, nobody gets a DM" if seat else " — nobody gets a DM" if locked else "",
                   "out": " — seat open, nobody gets a DM" if seat else ""}[want]
         note = (op.reason or "").strip()
-        if want == "out" and note:  # a callout with its reason (RaidMixin.call_out): the note is for the officers only
-            effect += f" — a callout; note for the officers: “{note}”"
+        if want == "out" and note:  # a callout with its reason (RaidMixin.call_out): its own fan-out, not the quiet path —
+            from . import inbox  # the box's sentences (a notice, the seat asked for); the note is for the officers only
+
+            effect = " — " + inbox.action_consequence(reg, ev, m, "callout") + f" Note for the officers: “{note}”"
         if (op.text or "").strip() and want != "out":  # a switch for ONE raid of the event (issue 15)
             if not spec:
                 raise RegistryError(RAID_SWITCH_NEEDS_SPEC)
@@ -3913,7 +3915,9 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         want = _answer_value(op.value)
         note = (op.reason or "").strip()
         own = m.discord_id in {by_id, self_id} - {None}  # the presser's own, or the asker's own when someone else applies their diff
-        if own and m.discord_id == by_id and want in ("in", "sub") and ev.state != "open" and not await _actor_is_officer(bot, reg, by_id):
+        # recording for someone else is an officer's op already; one's own after the lock: an officer's is an officer edit (I4)
+        officer = not own or (ev.state != "open" and await _actor_is_officer(bot, reg, by_id))
+        if own and m.discord_id == by_id and want in ("in", "sub") and ev.state != "open" and not officer:
             # the stale-diff gap (design B1): the diff was previewed while the sheet was open and Applied after it locked —
             # a member's own Join / Bench after lock is refused here exactly as authorize and the sheet refuse it
             raise RegistryError(rc.LOCKED_JOIN)
@@ -3929,7 +3933,8 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
                 character = op.character or (sg.character if sg else "") or (m.main.label if m.main else "")
                 line = await bot.set_raid_switch(reg, rs, part, m, character, spec, by, by_id=by_id, via=via or "discord", status=want)
             else:
-                line = await bot.set_answer(reg, rs, ev, m, want, op.character or None, by, by_id=by_id, **({"spec": spec, "via": via or "discord"} if spec else {}))
+                line = await bot.set_answer(reg, rs, ev, m, want, op.character or None, by, by_id=by_id, as_officer=officer,
+                                            **({"spec": spec, "via": via or "discord"} if spec else {}))
         except ValueError as e:
             raise RegistryError(str(e))
         return str(line).replace("**", "").removeprefix("✅ ")
@@ -3946,7 +3951,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
     if op.op == "run_move":  # the board's single drag (RaidMixin.board_move): merges with other officers' moves
         name, to, _ = _move_plan(reg, ev, op)
         try:
-            line = await bot.board_move(reg, rs, ev, name, to, by, rev=rev, via=via)
+            line = await bot.board_move(reg, rs, ev, name, to, by, rev=rev, via=via, undo_id=by_id)
         except rc.BoardChanged:
             raise  # kept as itself: Apply marks the run stale so the rest of the request can't overwrite that change
         except ValueError as e:
@@ -3991,7 +3996,7 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
 
         _board_check(ev, layout)
         was_open = ev.state == "open"
-        line = await bot.save_board(reg, rs, ev, layout, rev=rev, by=by, via=via)
+        line = await bot.save_board(reg, rs, ev, layout, rev=rev, by=by, via=via, undo_id=by_id)
         return line if was_open else f"{run_words(reg, ev)}: {line}"  # before lock the line names the run itself
     if op.op == "run_autofill":  # the site's Auto-fill groups (event_board.AutoFill), waited for
         from .event_board import autofill_of
@@ -4031,7 +4036,7 @@ async def _propose(reg: Registry, rs, ev, op: ConfigOp, by: str, bot, by_id: int
             raise RegistryError("no proposal to use yet — ask for one first")
         if shown and shown != rc.board_rev(reg, ev):  # solved against an older board: never overwrite the moves made since
             raise rc.BoardChanged("The board changed since that proposal (someone moved people) — ask for a fresh one.")
-        line = await bot.save_board(reg, rs, ev, layout, rev=rev, by=by, via=via, strategy=strategy)
+        line = await bot.save_board(reg, rs, ev, layout, rev=rev, by=by, via=via, strategy=strategy, undo_id=by_id)
         seen.pop(key, None)
         return f"{run_words(reg, ev)}: {strategy or 'the last'} proposal used — {line}"
     strategy = v or ((last or {}).get("strategy") if f == "another" else None) or ev.split_strategy or reg.raid_def(ev.instance).get("split_policy", "balanced")

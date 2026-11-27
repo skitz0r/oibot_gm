@@ -1414,7 +1414,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 return stale(v, ev)
             return board_written(v, ev, was_open, line)
         try:  # a whole-board write (Clear, Use this split) is only safe on the board its author was looking at
-            line = await bot.save_board(v.reg, rs, ev, groups, rev=d.get("rev") or None, by=v.name, via=v.via, strategy=strategy)
+            line = await bot.save_board(v.reg, rs, ev, groups, rev=d.get("rev") or None, by=v.name, via=v.via, strategy=strategy, undo_id=v.uid)
         except rc.BoardChanged:
             return stale(v, ev)
         return board_written(v, ev, was_open, line)
@@ -1673,7 +1673,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 line = await bot.set_raid_switch(v.reg, rs, part, m, character, spec, v.name, by_id=v.uid, via=v.via, status=status)
             else:
                 spec = str(d.get("spec") or "").strip() if status != "out" else ""  # a role switch (MCP set_answer's spec)
-                line = await maybe_await(bot.set_answer(v.reg, rs, ev, m, status, d.get("character") or None, v.name, by_id=v.uid,
+                line = await maybe_await(bot.set_answer(v.reg, rs, ev, m, status, d.get("character") or None, v.name, by_id=v.uid, as_officer=True,
                                                         **({"spec": spec, "via": v.via} if spec else {})))
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)

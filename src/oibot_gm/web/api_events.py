@@ -233,7 +233,7 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
                 else:
                     sg = first.signups.get(str(m.discord_id))
                     line = await bot.set_answer(reg, rs, first, m, sg.status if sg is not None and sg.status in ("in", "sub") else "in",
-                                                character, v.name, by_id=v.uid, spec=spec, via=v.via)
+                                                character, v.name, by_id=v.uid, spec=spec, via=v.via, as_officer=True)
             except (RegistryError, ValueError) as e:
                 return _refused(e)
             return {"message": rc.site_words(reg, line), "switches": await fresh_switches()}

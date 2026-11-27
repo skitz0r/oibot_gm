@@ -91,7 +91,7 @@ class FakeBot(LootMixin):
         ev.channel_id, ev.message_id = channel.id, 4242
         self.calls.append(("post_sheet", ev.key, channel.id))
 
-    async def set_answer(self, reg, rs, ev, m, status, character, by, by_id=None, spec=None, via=None):
+    async def set_answer(self, reg, rs, ev, m, status, character, by, by_id=None, spec=None, via=None, as_officer=False):
         self.calls.append(("set_answer", ev.key, m.display_name, status, character, by) + ((spec,) if spec else ()))
         return f"✅ {m.display_name} {status}"
 

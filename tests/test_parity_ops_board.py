@@ -207,7 +207,8 @@ def test_no_thanks_with_a_reason_is_a_callout(reg, rs):
     ev, names = board_run(reg, rs, 3)
     m = reg.test_members()[1]
     op = ConfigOp(op="run_answer", target=ev.key, member=m.display_name, value="no thanks", reason="work trip")
-    assert "a callout; note for the officers: “work trip”" in configops.describe(reg, op)
+    d = configops.describe(reg, op)  # the callout's own sentences (fix round 1, I3), the note for the officers after them
+    assert "The bot records a callout" in d and "Note for the officers: “work trip”" in d, d
     out = apply(reg, bot, op)
     assert "noted for the officers" in out and "work trip" not in out
     assert ev.callouts[-1].note == "work trip" and ev.signups[str(m.discord_id)].status == "out"

@@ -459,3 +459,34 @@ def test_a_row_its_box_refuses_is_left_out_not_the_whole_list(reg, rs, web_bot, 
     assert str(ilse.discord_id) not in uids and str(rook.discord_id) in uids
     r = web_bot.c.get(f"/api/event/{ev.key}", headers=H())
     assert r.status_code == 200, r.text
+
+
+# ---------------------------------------------------------------- fix round 1 (officer edits after the lock)
+
+def test_after_the_lock_a_row_for_someone_not_rostered_stays_ask(web_bot, reg, rs):
+    """A locked Barrow Deeps with open seats and no healer: a Bench answer off the roster who heals is an offer of an open
+    seat — the row is Ask and its press sends one fill ask, nobody's seat switched."""
+    ev = rc.open_run(reg, rs, RID, start_in(reg), by="t")
+    ms = [add(reg, 2, "Tanka", "Warrior", "Protection"), add(reg, 3, "Tankb", "Warrior", "Protection")]
+    ms += [add(reg, 4 + i, f"Dps{chr(97 + i)}", "Mage", "Fire") for i in range(6)]
+    off = add(reg, 20, "Heal", "Priest", "Holy")
+    join(reg, rs, ev, *ms)
+    rc.set_signup(reg, rs, ev, off, None, "sub", source="test")  # a Bench answer, not rostered
+    lock_with_board(reg, rs, ev, [m.display_name for m in ms])  # 8 of 10: two seats open, no healer
+    sw = rc.event_switches(reg, rs, ev)
+    row = next(r for r in sw["rows"] if r["uid"] == str(off.discord_id))
+    assert row["button"] == PAGE_WORDS["ask_button"] and row["box"]["verb"] == "Ask"
+    body = {k: row[k] for k in ("uid", "character", "spec", "part", "seat", "option")} | {"rev": sw["revs"][ev.key], "seen": row["box"]["fp"]}
+    assert post(web_bot, ev.key, body).status_code == 200
+    asks = [a for a in ev.fill_asks if a.pending]
+    assert [a.discord_id for a in asks] == [off.discord_id] and not ev.seat_of(off)
+
+
+def test_the_switch_route_keeps_a_rostered_bench_answer_on_bench(web_bot, reg, rs):
+    ev, ms = locked_short_two_healers(reg, rs)
+    rc.set_signup(reg, rs, ev, ms[0], None, "sub", source="test")  # rostered, answered Bench
+    sw = rc.event_switches(reg, rs, ev)
+    row = next(r for r in sw["rows"] if r["uid"] == str(ms[0].discord_id))
+    body = {k: row[k] for k in ("uid", "character", "spec", "part", "seat", "option")} | {"rev": sw["revs"][ev.key], "seen": row["box"]["fp"]}
+    assert post(web_bot, ev.key, body).status_code == 200
+    assert ev.signups[str(ms[0].discord_id)].status == "sub" and ev.seat_of(ms[0])[1].spec == "Restoration"

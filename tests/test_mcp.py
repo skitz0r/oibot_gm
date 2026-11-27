@@ -76,7 +76,7 @@ class FakeBot:
     async def refresh_sheet(self, reg, ev):
         self.refreshed = [*getattr(self, "refreshed", []), ev.key]
 
-    async def set_answer(self, reg, rs, ev, m, status, character, by, by_id=None):
+    async def set_answer(self, reg, rs, ev, m, status, character, by, by_id=None, as_officer=False):
         return rc.LABELS[rc.set_signup(reg, rs, ev, m, character, status, source="officer").status] + f" for {m.display_name}"
 
 

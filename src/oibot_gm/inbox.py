@@ -193,7 +193,8 @@ def action_lines(reg: Registry, ev, m: Member, key: str, character: str | None =
                 return say(f"{name}'s seat on {run} plays {spec} now.")
             return say(f"{name} plays {char} on {run} and keeps their seat.")
         # not rostered: their answer is recorded and they wait in Not rostered — an officer places them on the board
-        return [f"{name} joins {run} as {char} and waits in {rc.BANK_WORDS['locked']}.", *told, "You can put them on the roster from the board."]
+        return [f"{name} joins {run} as {char} and waits in {rc.BANK_WORDS['locked']}.", *told,
+                "You can change your answer again until the event starts." if own else "You can change their answer again until the event starts."]
     if key == "bench":
         if seated:
             return say(f"{name} goes to Bench for {run}.", "They stay rostered until set to No thanks.")
@@ -248,7 +249,8 @@ async def do_member_action(bot, reg: Registry, rs, ev, m: Member, key: str, *, c
         raise RegistryError(no_longer_applies(reg, ev, m))
     if key in ("join", "bench", "no_thanks"):
         status = {"join": "in", "bench": "sub", "no_thanks": "out"}[key]
-        line = await bot.set_answer(reg, rs, ev, m, status, character or None, by, by_id=by_id, **({"spec": spec, "via": via} if spec and status != "out" else {}))
+        line = await bot.set_answer(reg, rs, ev, m, status, character or None, by, by_id=by_id, as_officer=True,
+                                    **({"spec": spec, "via": via} if spec and status != "out" else {}))
     elif key == "callout":
         line = await bot.call_out(reg, rs, ev, m, (note or "").strip()[:300] or None, by, by_id=by_id)
     elif key in ("confirm_yes", "confirm_no"):

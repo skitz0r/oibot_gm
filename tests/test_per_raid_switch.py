@@ -529,7 +529,7 @@ def test_discord_the_whole_event_with_their_own_spec_replaces_a_raids_switch(reg
     bot = NightBot(reg, rs)
 
     class Bot(tf.FakeBot):
-        async def set_answer(self, reg, rs, ev, m, status, character, by, by_id=None, spec=None, via=None):
+        async def set_answer(self, reg, rs, ev, m, status, character, by, by_id=None, spec=None, via=None, as_officer=False):
             self.calls.append(("set_answer", spec))
             return await inbox.do_member_action(bot, reg, rs, ev, m, "join", character=character, spec=spec, by=by, by_id=by_id)
     fb = Bot(rs)
