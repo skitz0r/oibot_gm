@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ActionIcon, Button, Group, Loader, Menu, Modal, Select, Stack, Text, Textarea } from "@mantine/core";
-import { IconArrowsMove, IconDotsVertical, IconPin, IconPinnedOff, IconUserOff, IconUserPlus } from "@tabler/icons-react";
+import { IconArrowsMove, IconChevronRight, IconDotsVertical, IconPin, IconPinnedOff, IconUserOff, IconUserPlus } from "@tabler/icons-react";
 import { api, type Box, type MemberAction, type MemberActions, type Meta, type Person, type RaidSwitchOption } from "../../api";
 import { GameIcon } from "../Icons";
 import { fail, ok } from "../Page";
@@ -86,9 +86,19 @@ function usePlayAs(run: string, onDone: () => Promise<void> | void) {
   };
 }
 
-/** One "Move to…" destination in a board chip's menu (BoardView): a group, or Not placed / Not rostered. `onPick` is the
- *  board's own move — the same POST /api/run/{key}/move a drag sends, after the server's confirm sentence. */
-export type MoveTarget = { key: string; label: string; disabled?: boolean; hint?: string; aria?: string; onPick: () => void };
+/** One "Move to…" destination in a board chip's menu (BoardView). A group carries `swaps` (one per person there) and is a
+ *  submenu: An open seat (its `onPick`, when it has room), then Swap with each of them; `disabled` = the name's own group.
+ *  Without `swaps` it is a plain item: Not placed / Not rostered. `onPick` is the board's own move — the same
+ *  POST /api/run/{key}/move a drag sends, after the server's confirm sentence. */
+export type MoveTarget = { key: string; label: string; disabled?: boolean; hint?: string; aria?: string; onPick?: () => void; swaps?: MoveTarget[] };
+
+/** A submenu opened by Enter or Space (a click with no pointer, `detail` 0): the focus goes to its first item, as
+ *  ArrowRight does — Mantine opens a Menu.Sub on hover and ArrowRight only, so the press opens it here (a tap too). */
+function focusInto(ev: React.MouseEvent<HTMLButtonElement>) {
+  if (ev.detail !== 0) return;
+  const id = `${ev.currentTarget.id.replace(/-target$/, "")}-dropdown`;  // Popover: the target's id, its dropdown's id + "-dropdown"
+  window.setTimeout(() => document.getElementById(id)?.querySelector<HTMLElement>("[data-menu-item]:not([data-disabled])")?.focus(), 16);
+}
 
 /** One role switch in a Signups row's ⋮ (the Events page, SignupsSection): that member's Role switches row — its spec
  *  icon, the server's words for it and the section's own press (useSwitchPress). */
@@ -97,8 +107,9 @@ export type SwitchItem = { key: string; icon: React.ReactNode; label: string; on
 const AFTER_SWITCH = new Set(["bench", "no_thanks", "pin_in", "pin_out", "unpin"]);
 
 /** The row ⋮ menu on a sheet (joined, Bench, No thanks chips and the not-answered rows) and on a board chip: fetched when
- *  opened, so it is always the member's state now. `moves` (the board's chips): "Move to…" first — every group with room
- *  and Not placed / Not rostered — the board's tap-and-keyboard path (a drag needs a mouse; design §5.56 phase 3).
+ *  opened, so it is always the member's state now. `moves` (the board's chips): "Move to…" first — a submenu of the
+ *  groups (each a submenu: An open seat, then Swap with each person there) and Not placed / Not rostered — the board's
+ *  tap-and-keyboard path (a drag needs a mouse; design §5.56 phase 3).
  *  `onAnswer` (the Events page): Join / Join as… / Bench / No thanks open the SERVER's answer box (useAnswerBox, the member
  *  fixed) with its fields. Callouts, pins and the confirm / fill answers ask in the server's box too (useRecord), and so
  *  does every pick on the Test bench, which passes no `onAnswer`. */
@@ -109,21 +120,45 @@ export function MemberMenu({ run, uid, name, onDone, moves, onAnswer, switches, 
   meta?: Meta;
 }) {
   const [list, setList] = useState<MemberActions | null>(null);
+  const [sub, setSub] = useState(false);  // Move to… open
+  const [group, setGroup] = useState<string | null>(null);  // the group whose submenu is open
+  const w = pageWords();
   const [record, dialog] = useRecord(run, onDone);
   const playAs = usePlayAs(run, onDone);
   const raidSwitches = meta ? list?.raid_switches || [] : [];
   const load = () => { setList(null); if (uid) api.get<MemberActions>(`/api/admin/actions?run=${encodeURIComponent(run)}&member=${encodeURIComponent(uid)}`).then(setList).catch(fail); };
   return (
     <>
-      <Menu shadow="md" width={240} position="bottom-end" onOpen={load} classNames={{ item: css.menuItem }}>
+      <Menu shadow="md" width={240} position="bottom-end" onOpen={load} onClose={() => { setSub(false); setGroup(null); }} classNames={{ item: css.menuItem }}>
         <Menu.Target><ActionIcon variant="subtle" color="gray" size="sm" aria-label={`actions for ${name}`}><IconDotsVertical size={14} /></ActionIcon></Menu.Target>
         <Menu.Dropdown>
           {moves && moves.length > 0 && (
             <>
-              <Menu.Label>Move {name} to…</Menu.Label>
-              {moves.map((m) => (
-                <Menu.Item key={m.key} leftSection={<IconArrowsMove size={14} />} disabled={m.disabled} aria-label={m.aria} rightSection={m.hint ? <Text size="xs" c="dimmed">{m.hint}</Text> : undefined} onClick={m.onPick}>{m.label}</Menu.Item>
-              ))}
+              <Menu.Sub opened={sub} onChange={(o) => { setSub(o); if (!o) setGroup(null); }}>
+                <Menu.Sub.Target>
+                  <Menu.Sub.Item leftSection={<IconArrowsMove size={14} />} onClick={(ev) => { setSub(true); focusInto(ev); }}>{w.move_to}</Menu.Sub.Item>
+                </Menu.Sub.Target>
+                <Menu.Sub.Dropdown>
+                  {moves.map((m) => {
+                    const hint = m.hint ? <Text size="xs" c="dimmed">{m.hint}</Text> : undefined;
+                    if (!m.swaps) return <Menu.Item key={m.key} disabled={m.disabled} aria-label={m.aria} rightSection={hint} onClick={m.onPick}>{m.label}</Menu.Item>;
+                    if (m.disabled) return <Menu.Item key={m.key} disabled rightSection={hint}>{m.label}</Menu.Item>;
+                    return (
+                      <Menu.Sub key={m.key} opened={group === m.key} onChange={(o) => setGroup((g) => (o ? m.key : g === m.key ? null : g))}>
+                        <Menu.Sub.Target>
+                          <Menu.Sub.Item rightSection={<Group gap={4} wrap="nowrap">{hint}<IconChevronRight size={14} /></Group>}
+                            onClick={(ev) => { setGroup(m.key); focusInto(ev); }}>{m.label}</Menu.Sub.Item>
+                        </Menu.Sub.Target>
+                        <Menu.Sub.Dropdown>
+                          {m.onPick && <Menu.Item aria-label={m.aria} onClick={m.onPick}>{w.move_here}</Menu.Item>}
+                          {m.swaps.length > 0 && <Menu.Label>{w.swap_with}</Menu.Label>}
+                          {m.swaps.map((x) => <Menu.Item key={x.key} aria-label={x.aria} onClick={x.onPick}>{x.label}</Menu.Item>)}
+                        </Menu.Sub.Dropdown>
+                      </Menu.Sub>
+                    );
+                  })}
+                </Menu.Sub.Dropdown>
+              </Menu.Sub>
               {uid && <Menu.Divider />}
             </>
           )}

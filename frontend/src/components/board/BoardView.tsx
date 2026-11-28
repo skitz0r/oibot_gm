@@ -180,26 +180,31 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAct
     if (!d) return;
     await place(d.name, d.from, target === "bank" ? null : target, "drag");
   }
-  /** Move to…: every group with room (its first open seat — the same {r, g, i} a drop on that seat sends) and the list
-   *  of joiners without a place (a Bench answer's: the Bench section). A tap, a keyboard, a phone: no drag needed. */
+  /** Move to… (the owner, 2026-11-28: Move to › group › seat): one entry per group as drawn — its count; the name's own
+   *  group greyed — and the list of joiners without a place (a Bench answer's: the Bench section). A group's submenu: its
+   *  first open seat when it has room (the same {r, g, i} a drop on that seat sends), then a swap with each person there.
+   *  A tap, a keyboard, a phone: no drag needed. */
   const movesFor = (name: string, from: From): MoveTarget[] => {
     const out: MoveTarget[] = [];
     board.rosters.forEach((r, ri) => r.groups.forEach((g, gi) => {
-      if (from && from.r === ri && from.g === gi) return;
-      if (locked && g.length === 0 && r.groups.findIndex((x) => x.length === 0) !== gi) return;  // as drawn: one empty group to move into
+      const own = !!from && from.r === ri && from.g === gi;
+      if (!own && locked && g.length === 0 && r.groups.findIndex((x) => x.length === 0) !== gi) return;  // as drawn: one empty group to move into
       const full = g.length >= board.group_size;
-      out.push({ key: `${ri}:${gi}`, label: groupName(ri, gi), disabled: full, hint: `${g.length}/${board.group_size}`, onPick: () => place(name, from, { r: ri, g: gi, i: g.length }, "menu") });
-      if (event && full) g.forEach((o, oi) => out.push(swapWith(name, from, o.display_name, ri, gi, oi)));  // a phone can't drag onto someone
+      out.push({
+        key: `${ri}:${gi}`, label: groupName(ri, gi), disabled: own, hint: `${g.length}/${board.group_size}`, aria: `Move ${name} to ${groupName(ri, gi)}`,
+        onPick: full ? undefined : () => place(name, from, { r: ri, g: gi, i: g.length }, "menu"),
+        swaps: own ? [] : g.map((o, oi) => swapWith(name, from, o.display_name, ri, gi, oi)),  // a phone can't drag onto someone
+      });
     }));
     // a Bench answer taken off a group lands in the Bench section, so its entry says Bench
     const back = event && answers[name] === "sub" ? words.bank.bench : bankWord;
     if (from) out.push({ key: "bank", label: back, onPick: () => place(name, from, null, "menu") });
     return out;
   };
-  /** The Events page's Move to… into a full group: one entry per person there — the same drop onto that person a drag
-   *  makes (a swap, or from Not placed a substitute), named for both in its words and its aria-label. */
+  /** One person in a group's Move to… submenu: the same drop onto that person a drag makes (a swap, or from Not placed a
+   *  substitute) — their name under the submenu's Swap with, both names in its aria-label. */
   const swapWith = (name: string, from: From, other: string, ri: number, gi: number, oi: number): MoveTarget => ({
-    key: `${ri}:${gi}:${oi}`, label: `Swap with ${other}`, hint: groupName(ri, gi), aria: `Swap ${name} with ${other} in ${groupName(ri, gi)}`,
+    key: `${ri}:${gi}:${oi}`, label: other, aria: `Swap ${name} with ${other} in ${groupName(ri, gi)}`,
     onPick: () => place(name, from, { r: ri, g: gi, i: oi }, "menu"),
   });
   const onDragStart = (name: string, from: Drag["from"]) => (ev: React.DragEvent) => { drag.current = { name, from }; ev.dataTransfer.effectAllowed = "move"; live.dragging = true; };

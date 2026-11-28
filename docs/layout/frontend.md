@@ -52,6 +52,10 @@ frontend/              React + Mantine app (Vite). components/board/* (SheetCard
                        box (remind_box, end_box, unlock_box / start_now_box via POST /api/run/{key}/unlock | start) and press with `seen`; SheetCard's Unlock beside End
                        and its Start now beside a greyed End (e.may_start) do the same through useConfirmBox; loot/Tonight's RunCard prints the run's end_note
                        (End's refusal before the start, no council open) with Start now beside it (run.may_start, start_now_box); a locked board's drag, Move to / swap / take off (BoardView: drags = !readOnly) asks POST /move's preview box and presses with `seen`
+                       (BoardView.movesFor → MemberMenu `moves`, the owner 2026-11-28: ONE "Move to…" Menu.Sub (PAGE_WORDS move_to) → a
+                       Menu.Sub per group (its count right, the name's own group greyed) + Not placed / Not rostered as a plain item → in a
+                       group An open seat (move_here, only with room) then under the swap_with label one item per person there (swapWith);
+                       the submenus are controlled and open on a press — a tap, Enter (focusInto moves the focus in) — not on hover alone)
                        (a 409 draws the fresh box and board); New event / New schedule count edits that differ from their seed (the leave guard); RescheduleBox.tsx (useRescheduleBox: the picker inside box 3, Locks only while open); LockBox.tsx (useLockBox(meta, onDone) = THE lock box of
                        the Events page's Lock now AND the SheetCard's Lock / Preview lock — SheetCard's own LockModal is gone: the server's box
                        (POST /lock preview `fill`) with box.choice as a checkbox, unticked, re-asked through replace on change; Preview lock =

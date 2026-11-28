@@ -111,6 +111,9 @@ PAGE_WORDS = {
     # the Board's Not placed list before the lock: a name kept off through the ⋮ menu (an "out" pin) carries this word on
     # its line (the list carries no how-to sentence under its heading: issue #12, the owner, 2026-11-25)
     "kept_off": "kept off",
+    # a board name's ⋮ menu (the owner, 2026-11-28): Move to… › a group › An open seat, or under Swap with one item per
+    # member there — the moves nest so a two-roster event's menu stays short
+    "move_to": "Move to…", "move_here": "An open seat", "swap_with": "Swap with",
     # Auto-fill groups (event_board.AutoFill): the button beside Not placed, its working line, what an MCP press that
     # waited is told, and each outcome that writes nothing (shown beside the button while the board is unchanged)
     "autofill_button": "Auto-fill groups",

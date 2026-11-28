@@ -1214,7 +1214,9 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    Not placed first, then the bench.* with **Undo my moves** (greyed until you have moved
    someone; its tooltip says so). Before the lock the board is what officers placed: nothing is worked out when the
    page opens, when someone answers or when a name is dragged. A drag (or a name's **⋮ › Move to…**, on a phone or a
-   keyboard) moves at once, with no box; into a full group Move to… offers *Swap with Nyx*, one entry per person there.
+   keyboard) moves at once, with no box. **Move to…** opens a list of the groups (each with its count, *4/5*; the
+   name's own group greyed) and *Not placed*; a group opens its own short list — *An open seat* when it has room, then
+   under *Swap with* one entry per person there (*Nyx*). It works with a tap, and with the arrow keys and Enter.
    The name you moved is dimmed where it was until the bot has written the move, then the board shows the bot's answer;
    nothing else on the page moves. A move the bot refuses (a full group, an event that locked meanwhile) leaves the name
    where it was and says why. Everyone in *Not placed* is still joined: the lock seats them where a seat is open, unless
@@ -1251,7 +1253,7 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    Not placed or Bench, by their answer.* when Bench answers are among them · *Nobody is told.* · *Auto-fill groups can place
    everyone again.*). A locked event's board is the roster and stays the officers' to change until the event ends: a drag
    or **⋮ ›
-   Move to…** (a group, *Swap with …*, or back to *Not rostered*) shows the bot's box first — which move it is (*Move*,
+   Move to…** (a group's *An open seat* or *Swap with* a person there, or back to *Not rostered*) shows the bot's box first — which move it is (*Move*,
    *Swap*, *Put on the roster*, *Put in the seat*, *Take off the roster*), what changes, *Nobody gets a DM.* and *Undo puts
    the roster back as it was.* — and the press makes only that move. A Bench answer can be put on the roster too.
    **Auto-fill groups** still sits beside *Not rostered*: it fills only the open seats, from *Not rostered* first, then the
@@ -1380,8 +1382,8 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    thanks, Away that day — each only when someone is in it), and the **board**, one line (*Board — 7 joined, 2 placed:
    shape it before the lock, or let the lock place everyone*) until you press **Open the board** — **Not placed** (everyone
    who joined and isn't in a group yet) and the groups of the event; its ⓘ says what the marks mean. Drag names from Not placed into groups, between groups, or back to Not placed; dropping on
-   someone swaps them. On a phone, or without a mouse, each name's **⋮** menu has **Move to…**: every group with room
-   (*Group 2 · 3/5*) and *Not placed* — tap one, and the confirm says where they go (*"Move Nettle to Group 2? Nettle
+   someone swaps them. On a phone, or without a mouse, each name's **⋮** menu has **Move to…**: the groups (*Group 2 ·
+   3/5*), each opening *An open seat* (when it has room) and *Swap with* each person there, and *Not placed* — tap one, and the confirm says where they go (*"Move Nettle to Group 2? Nettle
    takes an open seat in Group 2. Nothing is sent before the lock."* · **Back** ·
    **Move**). It is the same move a drag makes. On a phone every button and menu row on the page is at least 44 px. Every group shows its auras as you go (coloured = present, greyed with a red edge =
    someone in the group wants it and nobody brings it, one totem per element) and the raid-wide buffs

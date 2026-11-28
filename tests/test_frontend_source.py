@@ -331,6 +331,32 @@ def test_move_to_posts_the_same_move_a_drag_does():
     assert 'send("autofill", { rev: e.rev, wait: true })' in board, "Place the rest carries the board's rev and waits for the board (the route answers it)"
 
 
+def test_move_to_nests_group_then_seat():
+    """The owner, 2026-11-28: the chip ⋮ menu's moves hide under Move to… › group › seat (a flat list of every group and
+    every swap "gets a bit crazy"). One Menu.Sub "Move to…"; in it one entry per group (its count on the right; the
+    member's own group greyed) and Not placed / Not rostered as a plain item; in a group's submenu An open seat when it
+    has room, then under the Swap with label one item per member there. The words are the server's (PAGE_WORDS); every
+    submenu opens on a press (a tap, Enter), not on hover alone, and Enter carries the focus into it."""
+    from oibot_gm.constants import PAGE_WORDS
+    view = _code_only((SRC / "components" / "board" / "BoardView.tsx").read_text())
+    menu = _code_only((SRC / "components" / "board" / "MemberMenu.tsx").read_text())
+    api = (SRC / "api.ts").read_text()
+    assert (PAGE_WORDS["move_to"], PAGE_WORDS["move_here"], PAGE_WORDS["swap_with"]) == ("Move to…", "An open seat", "Swap with")
+    assert all(f"{k}: string" in api for k in ("move_to", "move_here", "swap_with"))
+    assert menu.count("<Menu.Sub ") == 2, "one submenu for Move to…, one per group"
+    assert "{w.move_to}" in menu and "{w.move_here}" in menu and "<Menu.Label>{w.swap_with}</Menu.Label>" in menu
+    assert "Move {name} to…" not in menu, "the flat list's label is gone"
+    assert "swaps?: MoveTarget[]" in menu and "m.swaps.map(" in menu
+    assert "opened={sub}" in menu and "opened={group === m.key}" in menu, "controlled: a press opens it, not hover alone"
+    assert menu.count("focusInto") >= 3, "Enter opens a submenu and moves the focus into it"
+    assert "onClose={() => { setSub(false); setGroup(null); }}" in menu
+    moves = view[view.index("const movesFor"):view.index("const swapWith")]
+    assert "swaps: own ? [] : g.map(" in moves and "disabled: own" in moves
+    assert "onPick: full ? undefined : () => place(name, from, { r: ri, g: gi, i: g.length }, \"menu\")" in moves
+    swap = view[view.index("const swapWith"):view.index("const onDragStart")]
+    assert "label: other" in swap and "Swap with ${other}" not in swap.split("aria:")[0]
+
+
 def test_event_controls_are_44px_on_a_phone():
     """Finding 40, carried to the Events page (phase 4, Task 10): one phone-only rule makes every control at least 44 px
     (the ⋮ buttons, compact buttons, the sort control, the tabs) — the board's rule moved with the board to
