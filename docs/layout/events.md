@@ -376,8 +376,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        send_plan(…, seats=) (one ask: the Events page's Switch after the lock); open_run_and_post(…, lock_hours=, first_rosters=);
                        the lock's failure line names its conflict (escaped for Discord)
   event_view.py        the Events page's read model (§5.67 phase 4), PURE builders over the existing readers (nothing solves, writes or composes
-                       Post board (2026-11-27): event_json's `board_post` {button: Post board | Update board post (null once over), remove:
-                       Remove board post while a post is up (an ended event's too) | null}, null when neither (board_post's words).
+                       Post board (2026-11-27): event_json's `board_post` {button: Post board | Update board post, remove: Remove board post
+                       while a post is up | null} on a live event, null once over (board_post's words).
                        Channels (2026-11-27): channel_section(reg, values, names, back=) = THE Channels section (labels, (?), the empty choice naming the fallback — the guild's, or the schedule's — and the server's text channels from web/api_setup.channel_names); channel_facts = Details rows only for a channel that differs from the guild's (the schedule's / this event's own); edit_options carries `channels` and `note` and, once started, empty `fields` (Edit event = the channels alone until the event ends); new_event_options carries a one-off's channels.
                        a fact of its own; words from PAGE_WORDS; a run key only as an id): event_list(reg, rs, now, offset) → {open (open AND locked,
                        soonest first), coming (coming_nights: each active schedule's next COMING_PER_SCHEDULE 3 nights with no event, through
@@ -450,7 +450,15 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        one, a dropped raid's deleted, a closed event's last edit sets `board_done`); board_channel(reg, first) = THE resolver of where
                        a post goes (own → guild's board_channel_id → sheet_channel); install_board_posts(loop) hooks rc.RUN_LISTENERS (setup_hook):
                        every run save → board_saved → ONE debounced redraw per event (BOARD_DEBOUNCE_S, `_board_timers`, tasks kept in `_finishing`);
-                       board_settle (tests), boards_restore (sheets_restore's first ready). Locks: the event's own post lock, then each raid's board
+                       board_settle (tests), boards_restore (sheets_restore's first ready). Fix round 1: every edit and delete goes through
+                       get_partial_message (_board_edit / _board_delete — no history read, so the "board" kind stays View · Send · Embed); ONLY
+                       discord.NotFound is "deleted by hand" (posted again), any other error keeps the id and posts nothing (tried at the next
+                       change); post_board holds the post lock throughout and checks the route's REQUIRED `seen` against `fp(first)` under it
+                       (rc.BoardChanged → 409); Update on the same channel = _refresh_locked(verify=True), every message edited whatever its
+                       fingerprint, the answer from its {edited, reposted, failed}; a post whose channel is gone is posted again where Board posts
+                       resolve (board_channel quiet=True) with ONE ops line BOARD_GONE, never once the event is over (board_done set instead);
+                       move_channels moves a post that inherits the sheet's channel with the sheet (move_board after move_sheet); remove is
+                       refused once the event is over (BOARD_STAYS); refresh's Discord deletes run with no board lock held. Locks: the event's own post lock, then each raid's board
                        lock only around a render and the id write (never across Discord calls); a redraw that finds the post moved or removed takes
                        back what it posted. Ids: RaidEvent.board_posts per raid, board_channel_id / board_done on the first raid. Words: BOARD_POST /
                        BOARD_UPDATE / BOARD_REMOVE (the site's buttons), BOARD_OVER / BOARD_NONE / BOARD_NOWHERE (refusals), BOARD_POSTED / _CURRENT /

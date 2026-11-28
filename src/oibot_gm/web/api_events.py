@@ -140,13 +140,20 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
             return {"box": fresh} if fresh["verb"] else JSONResponse({"error": fresh["sentences"][0], "box": fresh}, status_code=400)
         if fresh["verb"] is None:
             return JSONResponse({"error": fresh["sentences"][0], "box": fresh}, status_code=400)
-        if d.get("seen") and str(d["seen"]) != fresh["fp"]:
+        if str(d.get("seen") or "") != fresh["fp"]:  # required: a press is always of the box on screen
             return JSONResponse({"error": CONFIRM_WORDS["changed"], "box": fresh}, status_code=409)
         raw = str(d.get("channel") or "").strip()
         if raw and not raw.isdigit():
             return _refused(CHANNEL_WHEN)
+
+        def fp_now(f) -> str:  # the box as it is under the post lock: another officer's press may have got there first
+            return cq.board_post_box(v.reg, rs, f, board_options(v.reg), bot.board_where(v.reg, f))["fp"]
         try:
-            line = await bot.post_board(v.reg, rs, first, channel=int(raw) if raw else None, by=v.name, by_id=v.uid, via=v.via)
+            line = await bot.post_board(v.reg, rs, first, channel=int(raw) if raw else None, by=v.name, by_id=v.uid, via=v.via,
+                                        seen=str(d["seen"]), fp=fp_now)
+        except rc.BoardChanged:
+            again = cq.board_post_box(v.reg, rs, first, board_options(v.reg), bot.board_where(v.reg, first))
+            return JSONResponse({"error": CONFIRM_WORDS["changed"], "box": again}, status_code=409)
         except RegistryError as e:
             return _refused(e)
         return {"message": line}

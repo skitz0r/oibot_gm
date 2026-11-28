@@ -161,10 +161,10 @@ export interface PageWords {
   /** a setting's name: the schedule editor's labels and the Save box's lines (configops) say the same */
   schedule_fields: Record<"name" | "kind" | "slots" | "days" | "time" | "lineup" | "rosters" | "active" | "signup_lead_hours" | "nudge"
     | "nudge_hours_before" | "lock_hours_before" | "confirm" | "confirm_hours_before" | "autofill" | "fill_ask_hours" | "open_dm"
-    | "split_policy" | "weights" | "first_come" | "auto_lock" | "auto_lock_fill" | "sheet_channel" | "officers_channel" | "loot_log_channel", string>;
+    | "split_policy" | "weights" | "first_come" | "auto_lock" | "auto_lock_fill" | "sheet_channel" | "officers_channel" | "loot_log_channel" | "board_channel", string>;
   /** the (?) beside each Sheet timing switch: exactly who gets what, when and where */
   schedule_field_help: Record<"nudge" | "confirm" | "autofill" | "open_dm" | "auto_lock" | "auto_lock_fill" | "sheet_channel" | "officers_channel"
-    | "loot_log_channel", string>; help_about: string;
+    | "loot_log_channel" | "board_channel", string>; help_about: string;
   /** the Channels section (event_view.channel_section): its title, the empty choice's words, a Details row's value, a
    *  channel the bot can't see */
   channels: string; channel_guilds: string; channel_schedules: string; channel_guild_unset: string; channel_from_schedule: string;
@@ -337,9 +337,9 @@ export interface EventView {
    *  one before the lock, the automatic asks and an ask's wait after it), its own values (rc.run_timing), each raid's
    *  split, the schedule editor's hour choices (its own value among them), the highest weight and the split policies */
   edit: EventEdit | null;
-  /** Post board (design 2026-11-27-post-board): the button under the board (Post board | Update board post; null once
-   *  the event is over) and More's Remove board post while a post is up (an ended event's too); null when neither */
-  board_post: { button: string | null; remove: string | null } | null;
+  /** Post board (design 2026-11-27-post-board): the button under the board (Post board | Update board post) and More's
+   *  Remove board post while a post is up; null once the event is over */
+  board_post: { button: string; remove: string | null } | null;
 }
 export interface EventEdit {
   fields: string[]; values: Record<string, number | boolean | Record<string, number>>;
@@ -352,7 +352,7 @@ export interface EventEdit {
  *  the empty choice's words; the server's text channels. */
 export interface ChannelSection {
   title: string;
-  fields: { key: "sheet_channel" | "officers_channel" | "loot_log_channel" | "board_channel"; label: string; help: { key: string; text: string; about: string } | null;
+  fields: { key: string; label: string; help: { key: string; text: string; about: string } | null;
     value: string | null; empty: string }[];
   options: { value: string; label: string; group: string | null }[];
 }

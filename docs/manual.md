@@ -1299,12 +1299,18 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    locked). From then on the bot keeps those same messages current, a few seconds after each change — a move,
    Auto-fill groups, Clear, a per-raid switch, a lock, an unlock, an officer's edit after the lock, a new start — and
    after the lock they show the locked roster. A raid added to the lineup gets its message; a removed raid's is
-   deleted. A message someone deleted by hand is posted again at the next change. While a post is up the button reads
-   **Update board post** (it redraws the post now, or moves it when you pick another channel: posted in the new
-   channel first, the old messages deleted after, the old kept when the bot can't post there); changing *Board posts*
-   in Edit event moves it the same way. When the event ends or is cancelled the post is edited once more (*Finished*
-   over the roster, or *Cancelled*) and stays, no longer updated. **More › Remove board post** (while a post is up,
-   an ended event's too) deletes the messages and stops the updates. Nobody gets a DM or a notice; the first post, a move and a removal write one line in the
+   deleted. A message someone deleted by hand is posted again at the next change to its raid; a message Discord only
+   refuses or fails to edit is left as it is and tried again at the next change, so there is never a second post. While
+   a post is up the button reads **Update board post**: on the same channel it checks every message now and posts again
+   any that is gone, and its answer says so (*A message of the board post was gone, so it is posted again in #board.*,
+   or *The bot couldn't edit the board post in #board, so it tries again at the next change.*); with another channel
+   picked it moves the post (posted in the new channel first, the old messages deleted after, the old kept when the bot
+   can't post there). If another officer pressed first, the box comes back with what is true now and waits again; changing *Board posts*
+   in Edit event moves it the same way, and a post that sits on the signup sheet's channel (no *Board posts* channel on
+   the event, its schedule or the guild) moves with the sheet. A post whose channel was deleted is posted again where
+   *Board posts* goes now, with one line on the ops feed saying where; never once the event is over. When the event ends or is cancelled the post is edited once more (*Finished*
+   over the roster, or *Cancelled*) and stays, no longer updated. **More › Remove board post** (while a post is up on
+   an open or locked event; once it has ended the post stays as it ended) deletes the messages and stops the updates. Nobody gets a DM or a notice; the first post, a move and a removal write one line in the
    event's log and the ops feed, the updates none. Not on an ended or cancelled event (*This event is over, so its
    board can't be posted.*).
    **Edit lineup** (until the roster locks) opens the lineup builder on the event, `/events/<event>/lineup`: its first

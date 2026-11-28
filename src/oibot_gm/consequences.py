@@ -1594,6 +1594,34 @@ def undo_box_for(reg: Registry, ev: rc.RaidEvent, viewer: int | None) -> dict | 
 
 CLEAR_LOCKED = "The roster is locked, so Unlock the event first to clear the board."
 CLEAR_EMPTY = "Nobody is placed on the board, so there is nothing to clear."
+BOARD_POST_TO = "Post to"  # the Post board box's one select
+BOARD_POST_VERB = "Post"
+
+
+def board_post_box(reg: Registry, rs, ev: rc.RaidEvent, options: list[dict], where: int | None) -> dict:
+    """The Post board box (design 2026-11-27-post-board): its title (Post board, or Update board post while a post is
+    up), ONE select 'Post to' and Back · Post — no sentences (the owner, 2026-11-27: "none of this text is needed", an
+    exception to the Confirm rule registered in tests/test_confirm_readability.py). `channel` = {label, value (where the
+    post is now, else where the event's Board posts resolve: the box opens on it), options [{value, label}] (the server's
+    text channels; a value the list doesn't hold is added under PAGE_WORDS channel_gone)}. Refused (one sentence, Back
+    alone) once every raid has ended or is cancelled. Its fp carries whether a post is up, where, and each raid's state."""
+    from .board_post import BOARD_OVER, BOARD_POST, BOARD_UPDATE
+    from .constants import PAGE_WORDS
+
+    first = rc.first_part(rs, ev)
+    parts = rc.event_parts(rs, first)
+    title = BOARD_UPDATE if first.board_channel_id else BOARD_POST
+    if all(p.state in ("done", "cancelled") for p in parts):
+        return refusal_box(title, BOARD_OVER)
+    rev = ":".join([str(first.board_channel_id or ""), str(where or ""), *(p.state for p in parts)])
+    b = box(title, [], BOARD_POST_VERB, rev=rev)
+    opts = [dict(o) for o in options]
+    if where and all(str(o["value"]) != str(where) for o in opts):
+        opts.insert(0, {"value": str(where), "label": PAGE_WORDS["channel_gone"]})
+    b["channel"] = {"label": BOARD_POST_TO, "value": str(where) if where else None, "options": opts}
+    return b
+
+
 CLEARED = "The board is clear, so nobody is placed in a group now."  # the Clear the board route's answer
 
 
@@ -2568,33 +2596,4 @@ def armory_sync_sentence(label: str, result: str) -> str:
 __all__ = ["BOARD_VERBS", "CONFIRM_DM", "NAME_TOKEN", "NOBODY_DM", "NO_SHEET_CHANGES", "NO_SHEET_IN_DAYS", "OTHER_TOKEN", "OWN_CONFIRM", "OWN_RANK", "PEOPLE_VERBS", "RANK_CHOICES", "TO_TOKEN",
            "VERBS", "absence_consequence", "armory_created_words", "armory_give_consequence", "armory_seed_consequence", "armory_sync_sentence", "armory_link_consequence", "armory_unlink_consequence", "armory_guild_clear_consequence", "armory_guild_consequence", "back_consequence", "confirm_consequence", "consequence", "consequences_json", "delete_consequence", "dm_consequence", "ended_line",
            "flex_consequence", "forget_consequence", "main_consequence", "memory_off_consequence", "memory_shared_consequence", "move_consequence", "people_consequence", "profession_consequence", "profession_sync_consequence", "rank_consequence", "regular_remove", "reopen_sentence",
-           "retire_consequence", "save_consequence", "series_words", "spec_consequence"]
-
-
-
-BOARD_POST_TO = "Post to"  # the Post board box's one select
-BOARD_POST_VERB = "Post"
-
-
-def board_post_box(reg: Registry, rs, ev: rc.RaidEvent, options: list[dict], where: int | None) -> dict:
-    """The Post board box (design 2026-11-27-post-board): its title (Post board, or Update board post while a post is
-    up), ONE select 'Post to' and Back · Post — no sentences (the owner, 2026-11-27: "none of this text is needed", an
-    exception to the Confirm rule registered in tests/test_confirm_readability.py). `channel` = {label, value (where the
-    post is now, else where the event's Board posts resolve: the box opens on it), options [{value, label}] (the server's
-    text channels; a value the list doesn't hold is added under PAGE_WORDS channel_gone)}. Refused (one sentence, Back
-    alone) once every raid has ended or is cancelled. Its fp carries whether a post is up, where, and each raid's state."""
-    from .board_post import BOARD_OVER, BOARD_POST, BOARD_UPDATE
-    from .constants import PAGE_WORDS
-
-    first = rc.first_part(rs, ev)
-    parts = rc.event_parts(rs, first)
-    title = BOARD_UPDATE if first.board_channel_id else BOARD_POST
-    if all(p.state in ("done", "cancelled") for p in parts):
-        return refusal_box(title, BOARD_OVER)
-    rev = ":".join([str(first.board_channel_id or ""), str(where or ""), *(p.state for p in parts)])
-    b = box(title, [], BOARD_POST_VERB, rev=rev)
-    opts = [dict(o) for o in options]
-    if where and all(str(o["value"]) != str(where) for o in opts):
-        opts.insert(0, {"value": str(where), "label": PAGE_WORDS["channel_gone"]})
-    b["channel"] = {"label": BOARD_POST_TO, "value": str(where) if where else None, "options": opts}
-    return b
+           "retire_consequence", "save_consequence", "series_words", "spec_consequence", "board_post_box"]

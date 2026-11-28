@@ -8,8 +8,11 @@ the event channels: event → schedule → guild → the event's signup sheet ch
 first post, a move and a removal write one log and ops line, a live update none."""
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
+from types import SimpleNamespace
 
+import discord
 import pytest
 from conftest import first_slot
 from test_event_channels import ALT_SHEET, ChanBot, _failing, live, sched
@@ -28,15 +31,61 @@ from oibot_gm.roster import solver
 BOARD, ALT_BOARD = 63001, 63002
 
 
+def http_error(cls, status: int, text: str = "x"):
+    """A discord.py HTTP error as Discord raises it (NotFound 404, Forbidden 403, HTTPException 5xx)."""
+    return cls(SimpleNamespace(status=status, reason=text), text)
+
+
+class Partial:
+    """discord.PartialMessage: edit / delete by id, no fetch. A message gone → NotFound; `room.edit_error` → that error
+    (a refused or failing edit); `room.gate` (an asyncio.Event) holds every edit until it is set."""
+
+    def __init__(self, room, mid: int):
+        self.room, self.id = room, int(mid)
+
+    async def edit(self, **kw):
+        if self.room.gate is not None:
+            await self.room.gate.wait()
+        if self.room.edit_error is not None:
+            raise self.room.edit_error
+        if self.id not in self.room.msgs:
+            raise http_error(discord.NotFound, 404, "Unknown Message")
+        await self.room.msgs[self.id].edit(**kw)
+
+    async def delete(self):
+        if self.id not in self.room.msgs:
+            raise http_error(discord.NotFound, 404, "Unknown Message")
+        await self.room.msgs[self.id].delete()
+
+
 class BRoom(Room):
-    """A channel whose messages keep the embed they show (posted, then each edit)."""
+    """A channel whose messages keep the embed they show (posted, then each edit). Like the "board" permission kind
+    (View, Send, Embed), the bot can't read its history: fetch_message is Forbidden; edits and deletes go through
+    get_partial_message."""
+
+    edit_error = None
+    gate = None
+    history = False
 
     async def send(self, content=None, **kw):
         msg = await super().send(content, **kw)
         msg.embed, msg.edits = kw.get("embed"), []
         self.bot.seq.append(("send", self.id))
-        assert kw.get("allowed_mentions") is not None and not kw["allowed_mentions"].everyone, "never a mention"
+        if "view" not in kw:  # a board post (a sheet in a sheet channel carries its buttons)
+            assert kw.get("allowed_mentions") is not None and not kw["allowed_mentions"].everyone, "never a mention"
         return msg
+
+    async def fetch_message(self, mid):
+        if not self.history:
+            raise http_error(discord.Forbidden, 403, "Missing Access")
+        return await super().fetch_message(mid)
+
+    def get_partial_message(self, mid):
+        return Partial(self, mid)
+
+
+def live_msgs(bot, cid=BOARD) -> int:
+    return len(bot.rooms[cid].msgs) if cid in bot.rooms else 0
 
 
 @pytest.fixture(autouse=True)
@@ -423,12 +472,6 @@ def test_the_box_is_refused_on_an_ended_event(reg, rs, site):
     r = site.c.post(f"/api/event/{ev.key}/board", json={"preview": True}, headers=H())
     assert r.status_code == 400 and r.json()["box"]["sentences"] == [BOARD_OVER] and r.json()["box"]["verb"] is None
     assert site.c.get(f"/api/event/{ev.key}", headers=H()).json()["board_post"] is None
-    start = (reg.now_local() + timedelta(days=4)).replace(hour=13, minute=15, second=0, microsecond=0)
-    ev2 = rc.open_run(reg, rs, BD_RAID, start, by="t")  # a one-off
-    run(site.bot.post_board(reg, rs, ev2, by="Kara"))
-    run(site.bot.cancel_run(reg, rs, rs.events[ev2.key], by="Jon", reason=None, notify=False))
-    assert site.c.get(f"/api/event/{ev2.key}", headers=H()).json()["board_post"] == {"button": None, "remove": "Remove board post"}, \
-        "a post up on an ended event can still be removed"
 
 
 def test_a_member_who_is_not_an_officer_is_refused(reg, rs, monkeypatch):
@@ -448,3 +491,184 @@ def test_a_member_who_is_not_an_officer_is_refused(reg, rs, monkeypatch):
     for path in ("board", "board/remove"):
         r = c.post(f"/api/event/{ev.key}/{path}", json={"preview": True}, headers=as_user(c, m.discord_id))
         assert r.status_code == 403, path
+
+
+# ---------------------------------------------------------------- fix round 1 (review of 2026-11-27)
+
+def _move(bot, reg, rs, ev, ms, i=0):
+    return bot.board_move(reg, rs, rs.events[ev.key], ms[9].display_name, (1, i), by="Kara")
+
+
+@pytest.mark.parametrize("err", [http_error(discord.Forbidden, 403), http_error(discord.HTTPException, 503)], ids=["forbidden", "5xx"])
+def test_an_edit_discord_refuses_or_fails_keeps_the_id_and_posts_nothing_new(reg, rs, err):
+    bot = BoardBot(reg, rs)
+    ev, ms = one_raid(reg, rs, bot)
+    scenario(bot, lambda: bot.post_board(reg, rs, ev, by="Kara"))
+    (mid,), = ids(rs, ev).values()
+    bot.rooms[BOARD].edit_error = err
+    for i in range(3):
+        scenario(bot, lambda i=i: _move(bot, reg, rs, ev, ms, i))
+    assert ids(rs, ev) == {ev.key: [mid]} and len(bot.rooms[BOARD].sent) == 1 and live_msgs(bot) == 1, "never a second post"
+    bot.rooms[BOARD].edit_error = None
+    scenario(bot, lambda: _move(bot, reg, rs, ev, ms, 4))
+    assert ids(rs, ev) == {ev.key: [mid]} and char(ev, ms[9]) in shown(bot.rooms[BOARD].msgs[mid]), "tried again at the next change"
+
+
+def test_only_a_message_discord_says_is_gone_is_posted_again_once(reg, rs):
+    bot = BoardBot(reg, rs)
+    ev, ms = one_raid(reg, rs, bot)
+    scenario(bot, lambda: bot.post_board(reg, rs, ev, by="Kara"))
+    (old,), = ids(rs, ev).values()
+
+    async def work():
+        await bot.rooms[BOARD].msgs[old].delete()
+        await _move(bot, reg, rs, ev, ms, 3)
+    scenario(bot, work)
+    (new,), = ids(rs, ev).values()
+    assert new != old and live_msgs(bot) == 1 and len(bot.rooms[BOARD].sent) == 2
+
+
+def test_update_board_post_checks_every_message_and_posts_a_missing_one_again(reg, rs):
+    bot = BoardBot(reg, rs)
+    ev, ms = one_raid(reg, rs, bot)
+    scenario(bot, lambda: bot.post_board(reg, rs, ev, by="Kara"))
+    (old,), = ids(rs, ev).values()
+    said = scenario(bot, lambda: bot.post_board(reg, rs, ev, by="Kara"))
+    assert "up to date" in said and ids(rs, ev) == {ev.key: [old]}
+
+    async def gone():
+        await bot.rooms[BOARD].msgs[old].delete()
+    scenario(bot, gone)
+    said = scenario(bot, lambda: bot.post_board(reg, rs, ev, by="Kara"))
+    (new,), = ids(rs, ev).values()
+    assert new != old and live_msgs(bot) == 1 and "posted again" in said and "up to date" not in said, said
+    bot.rooms[BOARD].edit_error = http_error(discord.HTTPException, 503)
+    said = scenario(bot, lambda: bot.post_board(reg, rs, ev, by="Kara"))
+    assert "couldn't" in said and ids(rs, ev) == {ev.key: [new]} and live_msgs(bot) == 1, said
+
+
+def test_two_first_presses_at_once_post_once_and_the_second_is_told_the_box_changed(reg, rs, site):
+    from test_raid_night import H
+
+    ev, ms = one_raid(reg, rs, site.bot)
+    url = f"/api/event/{ev.key}/board"
+    assert site.c.post(url, json={"channel": str(BOARD)}, headers=H()).status_code == 409, "seen is required"
+    fp = site.c.post(url, json={"preview": True}, headers=H()).json()["box"]["fp"]
+
+    async def both():
+        from oibot_gm import consequences as cq
+
+        def fresh(f):
+            return cq.board_post_box(reg, rs, f, [], site.bot.board_where(reg, f))["fp"]
+        return await asyncio.gather(site.bot.post_board(reg, rs, ev, channel=BOARD, by="A", seen=fp, fp=fresh),
+                                    site.bot.post_board(reg, rs, ev, channel=ALT_BOARD, by="B", seen=fp, fp=fresh), return_exceptions=True)
+    got = run(both())
+    assert sum(isinstance(x, str) for x in got) == 1 and sum(isinstance(x, rc.BoardChanged) for x in got) == 1, got
+    assert live_msgs(site.bot, BOARD) + live_msgs(site.bot, ALT_BOARD) == 1
+    r = site.c.post(url, json={"seen": fp, "channel": str(ALT_BOARD)}, headers=H())
+    assert r.status_code == 409 and r.json()["box"]["title"] == "Update board post"
+
+
+def test_a_post_on_the_sheets_channel_moves_with_the_sheet(reg, rs):
+    bot = BoardBot(reg, rs)
+    reg.config.board_channel_id = None
+    for cid, name in ((SIGNUP, "signups"), (ALT_SHEET, "alt-signups")):
+        bot.rooms[cid] = BRoom(bot, cid, name)
+        bot.rooms[cid].history = True
+    bot.signup = bot.rooms[SIGNUP]
+    ev, ms = one_raid(reg, rs, bot)
+    scenario(bot, lambda: bot.post_board(reg, rs, ev, by="Kara"))
+    (old,), = ids(rs, ev).values()
+    assert rs.events[ev.key].board_channel_id == SIGNUP and old in bot.rooms[SIGNUP].msgs
+    bot.seq.clear()
+    scenario(bot, lambda: bot.reschedule_event(reg, rs, rs.events[ev.key], timing={"sheet_channel": str(ALT_SHEET)}, by="Kara"))
+    ev = rs.events[ev.key]
+    (new,), = ids(rs, ev).values()
+    assert ev.board_channel_id == ALT_SHEET and new in bot.rooms[ALT_SHEET].msgs and old not in bot.rooms[SIGNUP].msgs
+    sends = [i for i, x in enumerate(bot.seq) if x == ("send", ALT_SHEET)]
+    assert sends and max(sends) < max(i for i, x in enumerate(bot.seq) if x == ("delete", SIGNUP)), "new first, then old deleted"
+
+
+def test_a_post_whose_channel_is_gone_is_posted_again_where_board_posts_go_with_one_true_ops_line(reg, rs):
+    bot = BoardBot(reg, rs)
+    ev, ms = one_raid(reg, rs, bot)
+    scenario(bot, lambda: bot.post_board(reg, rs, ev, channel=ALT_BOARD, by="Kara"))
+    del bot.rooms[ALT_BOARD]  # the channel was deleted
+    for i in range(2):
+        scenario(bot, lambda i=i: _move(bot, reg, rs, ev, ms, i))
+    ev = rs.events[ev.key]
+    assert ev.board_channel_id == BOARD and live_msgs(bot, BOARD) == 1
+    lines = [x[-1] for x in bot.ops.lines if "board post" in x[-1] and "gone" in x[-1]]
+    assert len(lines) == 1 and "#board" in lines[0] and "guild's channel" not in lines[0], lines
+
+
+def test_an_ended_post_whose_channel_is_gone_is_never_posted_again(reg, rs):
+    bot = BoardBot(reg, rs)
+    ev, ms = one_raid(reg, rs, bot)
+    scenario(bot, lambda: bot.post_board(reg, rs, ev, channel=ALT_BOARD, by="Kara"))
+    del bot.rooms[ALT_BOARD]
+    scenario(bot, lambda: bot.cancel_run(reg, rs, rs.events[ev.key], by="Jon", reason=None, notify=False))
+    run(bot.boards_restore(reg))
+    assert live_msgs(bot, BOARD) == 0 and not bot.rooms[BOARD].sent and rs.events[ev.key].board_done
+
+
+def test_remove_board_post_is_refused_and_hidden_once_the_event_is_over(reg, rs, site):
+    from test_raid_night import H
+
+    ev, ms = one_raid(reg, rs, site.bot)
+    run(site.bot.post_board(reg, rs, ev, by="Kara"))
+    run(site.bot.cancel_run(reg, rs, rs.events[ev.key], by="Jon", reason=None, notify=False))
+    assert site.c.get(f"/api/event/{ev.key}", headers=H()).json()["board_post"] is None
+    r = site.c.post(f"/api/event/{ev.key}/board/remove", json={}, headers=H())
+    assert r.status_code == 400 and rs.events[ev.key].board_posts and live_msgs(site.bot) == 1
+
+
+def test_a_storm_of_saves_edits_the_post_once(reg, rs):
+    bot = BoardBot(reg, rs)
+    ev, ms = one_raid(reg, rs, bot)
+    scenario(bot, lambda: bot.post_board(reg, rs, ev, by="Kara"))
+    n = edits(bot)
+
+    async def storm():
+        p = rs.events[ev.key]
+        for i in range(8):
+            p.layout = [[m.display_name for m in ms[:5]], [m.display_name for m in ms[5:6 + i % 4]]]
+            rs.save(p, f"storm {i} (test)")
+    scenario(bot, storm)
+    assert edits(bot) == n + 1
+
+
+def test_a_listener_error_never_breaks_a_save(reg, rs):
+    bot = BoardBot(reg, rs)
+    ev, ms = one_raid(reg, rs, bot)
+
+    class Broken:
+        def is_closed(self):
+            return False
+
+        def call_soon_threadsafe(self, *a):
+            raise ValueError("broken loop")
+    bot.install_board_posts(Broken())
+    p = rs.events[ev.key]
+    p.log.append("saved anyway (test)")
+    rs.save(p, "a save (test)")
+    assert "saved anyway (test)" in rc.RaidStore(reg.store, reg.key).events[ev.key].log
+
+
+def test_a_redraw_racing_a_move_leaves_exactly_one_post(reg, rs):
+    bot = BoardBot(reg, rs)
+    ev, ms = one_raid(reg, rs, bot)
+    scenario(bot, lambda: bot.post_board(reg, rs, ev, by="Kara"))
+
+    async def race():
+        gate = asyncio.Event()
+        bot.rooms[BOARD].gate = gate
+        await _move(bot, reg, rs, ev, ms, 2)  # schedules a redraw that stops inside its edit
+        for _ in range(5):
+            await asyncio.sleep(0)
+        await bot.reschedule_event(reg, rs, rs.events[ev.key], timing={"board_channel": str(ALT_BOARD)}, by="Kara")
+        gate.set()
+        bot.rooms[BOARD].gate = None
+    scenario(bot, race)
+    assert live_msgs(bot, BOARD) + live_msgs(bot, ALT_BOARD) == 1 and live_msgs(bot, ALT_BOARD) == 1
+    assert rs.events[rs.events[ev.key].key].board_channel_id == ALT_BOARD

@@ -1841,3 +1841,22 @@ def test_the_sheet_cards_cancel_is_the_servers_box_with_its_fields_in_the_server
     assert "askBox({" in body and "seen: fp" in body and "CancelFields" in body
     fields = card[card.index("function CancelFields"):]
     assert "words.cancel_reason" in fields and "words.cancel_notify" in fields
+
+
+def test_the_channel_keys_come_from_the_server_never_a_hand_kept_list():
+    """Post board review I1: the schedule editor seeds, diffs and saves EVERY place the server's Channels section names
+    (opts.channels.fields) — a hand-kept list of three dropped the fourth (Board posts) on the site."""
+    import re
+
+    from oibot_gm.registry import SCHEDULE_CHANNELS
+
+    for f in sorted(SRC.rglob("*.tsx")):
+        text = f.read_text()
+        listed = [k for k in SCHEDULE_CHANNELS if f'"{k}"' in text]
+        assert len(listed) < 2, f"{f.relative_to(SRC)} keeps its own list of channel keys {listed}: read section.fields"
+    page = (SRC / "pages" / "LineupPage.tsx").read_text()
+    assert "CHANNEL_KEYS" not in page and re.search(r"channels\.fields", page), "LineupPage takes the keys from opts.channels.fields"
+    api = (SRC / "api.ts").read_text()
+    for record in ("schedule_fields: Record<", "schedule_field_help: Record<"):
+        body = api.split(record, 1)[1].split(">;", 1)[0]
+        assert all(f'"{k}"' in body for k in SCHEDULE_CHANNELS), record

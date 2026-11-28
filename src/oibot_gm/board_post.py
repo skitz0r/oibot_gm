@@ -51,6 +51,12 @@ BOARD_NOWHERE = "No channel is set for board posts or the signup sheet, so pick 
 BOARD_POSTED = "The board is posted in {channel}, and it stays current as the event changes."
 BOARD_CURRENT = "The board post in {channel} is up to date."
 BOARD_REMOVED = "The board post is removed from {channel}, and it no longer updates."
+BOARD_STAYS = "This event is over, so its board post stays as it ended."
+BOARD_REPOSTED_ONE = "A message of the board post was gone, so it is posted again in {channel}."
+BOARD_REPOSTED = "{n} messages of the board post were gone, so they are posted again in {channel}."
+BOARD_FAILED = "The bot couldn't edit the board post in {channel}, so it tries again at the next change."
+# the ops line when the post's own channel was deleted (or closed to the bot) and it went up again where Board posts go now
+BOARD_GONE = "{title}: the board post's channel is gone, so it is posted again in {channel}."
 
 
 def _closed(p) -> bool:
@@ -65,7 +71,7 @@ class BoardPostMixin:
     BOARD_DEBOUNCE_S = BOARD_DEBOUNCE_S
 
     # ---- where it goes
-    def board_channel(self, reg, first):
+    def board_channel(self, reg, first, *, quiet: bool = False):
         """THE channel a board post of `first`'s event goes to when it is (re)posted: the event's own Board posts channel
         (rc.event_channel; gone or closed to the bot → one ops line and the next), else the guild's, else the event's
         signup sheet channel (RaidMixin.sheet_channel). None = nowhere."""
@@ -73,7 +79,8 @@ class BoardPostMixin:
         if mine:
             if (ch := self._usable(mine)) is not None:
                 return ch
-            self._own_channel_gone(reg, first, "board_channel", mine)
+            if not quiet:  # a redraw says it in its own line (BOARD_GONE)
+                self._own_channel_gone(reg, first, "board_channel", mine)
         g = reg.config.board_channel_id
         if g and (ch := self._usable(g)) is not None:
             return ch
@@ -107,75 +114,129 @@ class BoardPostMixin:
         """(guild, message id) → the fingerprint of what it shows now (an unchanged message is never edited)."""
         return self.__dict__.setdefault("_board_sent", {})
 
+    async def _board_channel_obj(self, cid: int | None):
+        ch = self.get_channel(int(cid)) if cid else None
+        if ch is None and cid and hasattr(self, "fetch_channel"):
+            with contextlib.suppress(Exception):
+                ch = await self.fetch_channel(int(cid))
+        return ch
+
+    async def _board_edit(self, ch, mid: int, embed) -> str:
+        """One board message edited through a partial message (no history read: the "board" kind needs only View, Send
+        and Embed) → "ok", "gone" (ONLY discord.NotFound: deleted by hand, posted again by the caller) or "failed" (any
+        other error — Forbidden, a 5xx, a timeout: the id is kept, nothing new is posted, the next change tries again)."""
+        try:
+            await ch.get_partial_message(int(mid)).edit(embed=embed)
+            return "ok"
+        except discord.NotFound:
+            return "gone"
+        except Exception as e:  # noqa: BLE001 — kept, tried again at the next change
+            log.warning("board message %s not edited (%s): %s", mid, getattr(ch, "id", None), e)
+            return "failed"
+
+    async def _board_delete(self, cid: int | None, mid: int, key: str) -> None:
+        """One board message deleted through a partial message (no history read); one already gone is fine."""
+        ch = await self._board_channel_obj(cid)
+        if ch is None:
+            return
+        try:
+            await ch.get_partial_message(int(mid)).delete()
+        except discord.NotFound:
+            pass
+        except Exception as e:  # noqa: BLE001 — a message left behind is logged, never raised
+            log.warning("board message delete failed (%s, %s/%s): %s", key, cid, mid, e)
+
     # ---- the press
-    async def post_board(self, reg, rs, ev, *, channel: int | None = None, by: str, by_id: int | None = None, via: str = "web") -> str:
-        """The box's Post (officers; the route checks who): no post yet → every raid's board posted in `channel` (the
+    async def post_board(self, reg, rs, ev, *, channel: int | None = None, by: str, by_id: int | None = None, via: str = "web",
+                         seen: str | None = None, fp=None) -> str:
+        """The box's Post (officers; the route checks who), under the event's post lock: `seen` = the fp of the box
+        pressed, checked against `fp(first)` (the box as it is now) once the lock is held — a press another officer's
+        got ahead of raises rc.BoardChanged and writes nothing. No post yet → every raid's board posted in `channel` (the
         box's pick; None = where the event's Board posts resolve), and a picked channel that is not that one becomes the
-        event's own once the post is up; a post up in that channel → redrawn now; a post up elsewhere → moved there
-        (RaidMixin.reschedule_event with the event's own board_channel: new posted first, the old deleted, a failure keeps
-        the old). Refused (RegistryError, one sentence) once every raid has ended or is cancelled. → the answer."""
-        first = rc.first_part(rs, ev)
-        if all(_closed(p) for p in rc.event_parts(rs, first)):
-            raise RegistryError(BOARD_OVER)
+        event's own once the post is up; a post up in that channel → every message checked now (a missing one posted
+        again); a post up elsewhere → moved there (RaidMixin.reschedule_event with the event's own board_channel). Refused
+        (RegistryError, one sentence) once every raid has ended or is cancelled. → the answer, true to what happened."""
         from .discord_pool import channel_name
 
-        if first.board_channel_id:
-            if channel and int(channel) != int(first.board_channel_id):
-                said = await self.reschedule_event(reg, rs, first, timing={"board_channel": str(int(channel))}, by=by, by_id=by_id, via=via)
-                return " ".join(said)
-            await self.refresh_board_post(reg, rs, first.key)
-            return BOARD_CURRENT.format(channel=channel_name(self, first.board_channel_id))
-        resolved = rc.channel_of(reg, first, "board_channel")
-        own = None
-        if channel and int(channel) != (resolved or 0):
-            if why := await self.channel_setting_refusal(reg, {"board_channel": str(int(channel))}):
-                raise RegistryError(why)
-            ch = self.get_channel(int(channel))
-            own = str(int(channel))
-        else:
-            ch = self.board_channel(reg, first)
-        if ch is None:
-            raise RegistryError(BOARD_NOWHERE)
+        first = rc.first_part(rs, ev)
         async with self._board_post_lock(reg, first.key):
+            first = rs.events.get(first.key) or first
+            if fp is not None and seen is not None and fp(first) != seen:
+                raise rc.BoardChanged()
+            if all(_closed(p) for p in rc.event_parts(rs, first)):
+                raise RegistryError(BOARD_OVER)
+            if first.board_channel_id:
+                if channel and int(channel) != int(first.board_channel_id):
+                    said = await self.reschedule_event(reg, rs, first, timing={"board_channel": str(int(channel))}, by=by, by_id=by_id, via=via)
+                    return " ".join(said)
+                res = await self._refresh_locked(reg, rs, first.key, verify=True)
+                where = channel_name(self, rs.events[first.key].board_channel_id or first.board_channel_id)
+                if res["failed"]:
+                    return BOARD_FAILED.format(channel=where)
+                if res["reposted"] == 1:
+                    return BOARD_REPOSTED_ONE.format(channel=where)
+                if res["reposted"]:
+                    return BOARD_REPOSTED.format(n=res["reposted"], channel=where)
+                return BOARD_CURRENT.format(channel=where)
+            resolved = rc.channel_of(reg, first, "board_channel")
+            own = None
+            if channel and int(channel) != (resolved or 0):
+                if why := await self.channel_setting_refusal(reg, {"board_channel": str(int(channel))}):
+                    raise RegistryError(why)
+                ch = self.get_channel(int(channel))
+                own = str(int(channel))
+            else:
+                ch = self.board_channel(reg, first)
+            if ch is None:
+                raise RegistryError(BOARD_NOWHERE)
             async with self._boards_held(reg, rs, first):
                 first = rs.events.get(first.key) or first
-                if first.board_channel_id:  # someone else's press got in first: theirs stands
-                    return BOARD_CURRENT.format(channel=channel_name(self, first.board_channel_id))
                 parts = rc.event_parts(rs, first)
                 drawn = self._render(reg, rs, first)
             posted: dict[str, list] = {}
+
+            async def take_back():
+                for m in [m for ms in posted.values() for m in ms]:
+                    with contextlib.suppress(Exception):
+                        await m.delete()
             try:
                 for p in parts:
                     posted[p.key] = [await ch.send(embed=e, allowed_mentions=discord.AllowedMentions.none()) for e in drawn[p.key]]
             except Exception as e:  # noqa: BLE001 — nothing is kept: every message just posted comes down again
                 log.warning("board post failed (%s → %s): %s", first.key, getattr(ch, "id", None), e)
-                for m in [m for ms in posted.values() for m in ms]:
-                    with contextlib.suppress(Exception):
-                        await m.delete()
+                await take_back()
                 raise RegistryError(self._send_refusal(ch)) from e
+            where = f"#{getattr(ch, 'name', ch.id)}"
+            try:
+                async with self._boards_held(reg, rs, first):
+                    if own:  # the event remembers where its post is: its own Board posts channel (M6: under config_lock)
+                        await asyncio.to_thread(rc.set_own_channel, reg, rs, first, "board_channel", own)
+                    for p in sorted(parts, key=lambda x: x is first):  # the first raid last: its save carries the log line
+                        p = rs.events.get(p.key) or p
+                        p.board_posts = [m.id for m in posted[p.key]]
+                        if p.key == first.key:
+                            p.board_channel_id, p.board_done = ch.id, False
+                            p.log.append(f"board posted in {where} by {by}" + (f", who made {where} this event's Board posts channel" if own else ""))
+                        await asyncio.to_thread(rs.save, p, f"board posted in {where}")
+            except Exception:
+                await take_back()  # nothing remembers these messages: they come down rather than stay orphaned
+                raise
             for p in parts:
                 for m, e in zip(posted[p.key], drawn[p.key]):
                     self._sent()[(reg.key, m.id)] = _fp(e)
-            where = f"#{getattr(ch, 'name', ch.id)}"
-            async with self._boards_held(reg, rs, first):
-                if own:
-                    await asyncio.to_thread(rc.set_own_channel, reg, rs, first, "board_channel", own)
-                for p in sorted(parts, key=lambda x: x is first):  # the first raid last: its save carries the log line
-                    p = rs.events.get(p.key) or p
-                    p.board_posts = [m.id for m in posted[p.key]]
-                    if p.key == first.key:
-                        p.board_channel_id, p.board_done = ch.id, False
-                        p.log.append(f"board posted in {where} by {by}")
-                    await asyncio.to_thread(rs.save, p, f"board posted in {where}")
-        await ops_mod.audited(self.ops, reg, by, f"posted the board of {run_title(reg, first)} in {where}", via=via, by_id=by_id)
+        await ops_mod.audited(self.ops, reg, by, f"posted the board of {run_title(reg, first)} in {where}"
+                              + (f" and made {where} its Board posts channel" if own else ""), via=via, by_id=by_id)
         return BOARD_POSTED.format(channel=where)
 
     async def remove_board_post(self, reg, rs, ev, *, by: str, by_id: int | None = None, via: str = "web") -> str:
-        """More › Remove board post: every raid's messages deleted (a later raid's and a removed raid's too) and the
-        updates stop; nobody is told. Refused (RegistryError) when there is none. → the answer."""
+        """More › Remove board post on a live event: every raid's messages deleted (a later raid's and a removed raid's
+        too) and the updates stop; nobody is told. Refused (RegistryError) when there is none, and once the event is over
+        (nothing could post it again: its last state stays). → the answer."""
         first = rc.first_part(rs, ev)
         if not first.board_channel_id:
             raise RegistryError(BOARD_NONE)
+        if all(_closed(p) for p in rc.event_parts(rs, first)):
+            raise RegistryError(BOARD_STAYS)
         from .discord_pool import channel_name
 
         async with self._board_post_lock(reg, first.key):
@@ -194,18 +255,20 @@ class BoardPostMixin:
                         p.log.append(f"board post removed from {where} by {by}")
                     await asyncio.to_thread(rs.save, p, "board post removed")
             for mid in gone:
-                await self._delete_message(cid, mid, key=first.key)
+                await self._board_delete(cid, mid, first.key)
                 self._sent().pop((reg.key, mid), None)
         await ops_mod.audited(self.ops, reg, by, f"removed the board post of {run_title(reg, first)} from {where}", via=via, by_id=by_id)
         return BOARD_REMOVED.format(channel=where)
 
     # ---- the move (move_channels, under every raid's board lock)
     async def move_board(self, reg, rs, first) -> str | None:
-        """The event's board post into its Board posts channel (board_channel) — POST NEW, VERIFY, THEN DELETE OLD:
-        every raid's messages are posted there first; one send failing takes the new ones down again and leaves the old
-        post and its ids as they were (→ the sentence why; move_channels puts the setting back). Then the ids and the
+        """The event's board post into where its Board posts resolve now (board_channel) — POST NEW, VERIFY, THEN DELETE
+        OLD: every raid's messages are posted there first; one send failing takes the new ones down again and leaves the
+        old post and its ids as they were (→ the sentence why; move_channels puts the setting back). Then the ids and the
         channel are written and the old messages deleted. No post up, or already there: nothing to do. The caller
-        (move_channels) holds every raid's board lock, so this never takes them."""
+        (move_channels) holds every raid's board lock, so this never takes them — nor the post lock (a redraw holding it
+        waits for these board locks): a redraw still editing the old messages finds the channel changed when it writes,
+        and takes back what it posted. Also called when the signup sheet moves and the post inherits its channel."""
         if not first.board_channel_id:
             return None
         ch = self.board_channel(reg, first)
@@ -233,89 +296,106 @@ class BoardPostMixin:
             if p.key == first.key:
                 p.board_channel_id = ch.id
             await asyncio.to_thread(rs.save, p, f"board post moved to #{getattr(ch, 'name', ch.id)}")
-        for mid in old:  # never the post lock here (a redraw holding it waits for these board locks): a redraw still
-            # editing the old messages finds the channel changed when it writes, and takes back what it posted
-            await self._delete_message(old_cid, mid, key=first.key)
+        for mid in old:
+            await self._board_delete(old_cid, mid, first.key)
             self._sent().pop((reg.key, mid), None)
         return None
 
     # ---- live
-    async def refresh_board_post(self, reg, rs, key: str) -> int:
-        """Redraw the board post of the event `key` belongs to (any raid's key): each raid's messages edited in place when
-        what they show changed, a message gone (deleted by hand) posted again, a raid added to the lineup given its
-        message, a removed raid's deleted, a raid that now needs fewer messages trimmed. Every raid ended or cancelled:
-        this last edit marks the post done and later redraws do nothing (a reopened raid starts it again). No post: nothing.
-        → messages edited or posted."""
+    async def refresh_board_post(self, reg, rs, key: str) -> dict:
+        """Redraw the board post of the event `key` belongs to (any raid's key), under the event's post lock
+        (_refresh_locked). → {edited, reposted, failed}."""
         ev = rs.events.get(key)
         if ev is None:
-            return 0
+            return {"edited": 0, "reposted": 0, "failed": 0}
         if ev.dropped:  # a raid taken out of the lineup: its event's redraw deletes its message
             ev = rs.events.get(rc.event_id(ev)) or ev
         first = rc.first_part(rs, ev)
-        n = 0
         async with self._board_post_lock(reg, first.key):
-            async with self._boards_held(reg, rs, first):
-                first = rs.events.get(first.key) or first
-                cid = first.board_channel_id
-                parts = rc.event_parts(rs, first)
-                closed = all(_closed(p) for p in parts)
-                if not cid or (closed and first.board_done):
-                    return 0
-                drawn = self._render(reg, rs, first)
-                ids = {p.key: list(p.board_posts) for p in parts}
-                dropped = {p.key: list(p.board_posts) for p in self._dropped_of(rs, first)}
-            ch = self.get_channel(int(cid))
-            if ch is None and hasattr(self, "fetch_channel"):
-                with contextlib.suppress(Exception):
-                    ch = await self.fetch_channel(int(cid))
-            if ch is None:  # the post's channel is gone: posted again where the event's Board posts go now
-                ch = self.board_channel(reg, first)
-                if ch is None:
-                    log.warning("board post of %s/%s: its channel is gone and there is nowhere to post it", reg.key, first.key)
-                    return 0
-                ids = {k: [] for k in ids}
-            sent = self._sent()
-            new_ids: dict[str, list[int]] = {}
-            fresh: list = []  # messages posted by this redraw (taken back if the post moved meanwhile)
-            trim: list[int] = []
-            for p in parts:
-                out = []
-                for i, e in enumerate(drawn[p.key]):
-                    mid = ids[p.key][i] if i < len(ids[p.key]) else None
-                    fp = _fp(e)
-                    if mid and sent.get((reg.key, mid)) == fp:
-                        out.append(mid)
+            return await self._refresh_locked(reg, rs, first.key, verify=False)
+
+    async def _refresh_locked(self, reg, rs, key: str, *, verify: bool) -> dict:
+        """The redraw (the caller holds the post lock): each raid's messages edited in place when what they show changed
+        — every one when `verify` (Update board post: each is checked, whatever it last showed) —, a message Discord says
+        is gone (NotFound) posted again, one Discord refused or failed kept as it is (tried again at the next change), a
+        raid added to the lineup given its message, a removed raid's deleted, extra messages trimmed. The post's channel
+        gone: posted again where Board posts resolve now, with ONE ops line — never once the event is over. Every raid
+        ended or cancelled: this last edit marks the post done and later redraws do nothing (a reopened raid starts it
+        again). Board locks only around the render and the id write; every Discord call outside them."""
+        out = {"edited": 0, "reposted": 0, "failed": 0}
+        first = rs.events.get(key)
+        if first is None:
+            return out
+        async with self._boards_held(reg, rs, first):
+            first = rs.events.get(first.key) or first
+            cid = first.board_channel_id
+            parts = rc.event_parts(rs, first)
+            closed = all(_closed(p) for p in parts)
+            if not cid or (closed and first.board_done):
+                return out
+            drawn = self._render(reg, rs, first)
+            ids = {p.key: list(p.board_posts) for p in parts}
+            dropped = {p.key: list(p.board_posts) for p in self._dropped_of(rs, first)}
+        ch = await self._board_channel_obj(cid)
+        moved_to = None
+        if ch is None:
+            if closed:  # an ended event's post is never posted again elsewhere: it is done where it was
+                async with self._boards_held(reg, rs, first):
+                    first = rs.events.get(first.key) or first
+                    if first.board_channel_id == cid and not first.board_done:
+                        first.board_done = True
+                        await asyncio.to_thread(rs.save, first, "board post done (its channel is gone)")
+                return out
+            ch = self.board_channel(reg, first, quiet=True)
+            if ch is None:
+                log.warning("board post of %s/%s: its channel is gone and there is nowhere to post it", reg.key, first.key)
+                return out
+            moved_to, ids = ch, {k: [] for k in ids}
+        sent = self._sent()
+        new_ids: dict[str, list[int]] = {}
+        fresh: list = []  # messages posted by this redraw (taken back if the post moved meanwhile)
+        trim: list[int] = []
+        for p in parts:
+            got = []
+            for i, e in enumerate(drawn[p.key]):
+                mid = ids[p.key][i] if i < len(ids[p.key]) else None
+                fp = _fp(e)
+                if mid and not verify and sent.get((reg.key, mid)) == fp:
+                    got.append(mid)
+                    continue
+                if mid:
+                    r = await self._board_edit(ch, mid, e)
+                    if r == "ok":
+                        sent[(reg.key, mid)] = fp
+                        got.append(mid)
+                        out["edited"] += 1
                         continue
+                    if r == "failed":
+                        sent.pop((reg.key, mid), None)
+                        got.append(mid)
+                        out["failed"] += 1
+                        continue
+                    sent.pop((reg.key, mid), None)  # gone: posted again
+                try:
+                    m = await ch.send(embed=e, allowed_mentions=discord.AllowedMentions.none())
+                except Exception as ex:  # noqa: BLE001 — the next change tries again
+                    log.warning("board post of %s not posted again (%s): %s", p.key, getattr(ch, "id", None), ex)
+                    out["failed"] += 1
                     if mid:
-                        try:
-                            await (await ch.fetch_message(int(mid))).edit(embed=e)
-                            sent[(reg.key, mid)] = fp
-                            out.append(mid)
-                            n += 1
-                            continue
-                        except Exception as ex:  # noqa: BLE001 — deleted by hand (or unreachable): posted again below
-                            log.info("board message %s of %s gone (%s): posting it again", mid, p.key, ex)
-                            sent.pop((reg.key, mid), None)
-                    try:
-                        m = await ch.send(embed=e, allowed_mentions=discord.AllowedMentions.none())
-                    except Exception as ex:  # noqa: BLE001 — the next change tries again
-                        log.warning("board post of %s not posted again (%s): %s", p.key, getattr(ch, "id", None), ex)
-                        if mid:
-                            out.append(mid)
-                        continue
-                    fresh.append(m)
-                    sent[(reg.key, m.id)] = fp
-                    out.append(m.id)
-                    n += 1
-                trim += ids[p.key][len(drawn[p.key]):]
-                new_ids[p.key] = out
-            async with self._boards_held(reg, rs, first):
-                first = rs.events.get(first.key) or first
-                if first.board_channel_id != cid:  # moved or removed while this redraw ran: take back what it posted
-                    for m in fresh:
-                        with contextlib.suppress(Exception):
-                            await m.delete()
-                    return 0
+                        got.append(mid)
+                    continue
+                fresh.append(m)
+                sent[(reg.key, m.id)] = fp
+                got.append(m.id)
+                out["reposted" if mid else "edited"] += 1
+            trim += ids[p.key][len(drawn[p.key]):]
+            new_ids[p.key] = got
+        takeback = False
+        async with self._boards_held(reg, rs, first):
+            first = rs.events.get(first.key) or first
+            if first.board_channel_id != cid:  # moved or removed while this redraw ran: take back what it posted
+                takeback = True
+            else:
                 saves = []
                 for p in rc.event_parts(rs, first):
                     if p.key in new_ids and p.board_posts != new_ids[p.key]:
@@ -325,17 +405,26 @@ class BoardPostMixin:
                     if (d := rs.events.get(k)) is not None:
                         d.board_posts = []
                         saves.append(d)
-                done = all(_closed(p) for p in rc.event_parts(rs, first))
+                done = all(_closed(p) for p in rc.event_parts(rs, first)) and not out["failed"]
                 if first.board_channel_id != ch.id or first.board_done != done:
                     first.board_channel_id, first.board_done = ch.id, done
                     if first not in saves:
                         saves.append(first)
                 for p in sorted(saves, key=lambda x: x is first):
                     await asyncio.to_thread(rs.save, p, "board post kept current")
+        if takeback:  # no board lock held for these Discord calls (M5)
+            for m in fresh:
+                with contextlib.suppress(Exception):
+                    await m.delete()
+                sent.pop((reg.key, m.id), None)
+            return {"edited": 0, "reposted": 0, "failed": 0}
+        if moved_to is None:
             for mid in trim + [m for ms in dropped.values() for m in ms]:
-                await self._delete_message(cid, mid, key=first.key)
+                await self._board_delete(cid, mid, first.key)
                 sent.pop((reg.key, mid), None)
-        return n
+        else:
+            await self.ops.emit(reg.config, "warn", BOARD_GONE.format(title=run_title(reg, first), channel=f"#{getattr(moved_to, 'name', moved_to.id)}"))
+        return out
 
     def install_board_posts(self, loop: asyncio.AbstractEventLoop | None = None) -> None:
         """Listen to every run save (rc.RUN_LISTENERS) on `loop` (the client's, or the running one): a raid of an event

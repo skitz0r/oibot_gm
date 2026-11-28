@@ -24,8 +24,8 @@ frontend/              React + Mantine app (Vite). components/board/* (SheetCard
                        in 15-minute steps; StepNodes and the connectors) + LineupPicture.tsx (read-only), components/events/* (BoardPost.tsx = Post board (design 2026-11-27-post-board): BoardPostButton under the
                        EventBoard on an open or locked event (ev.board_post.button — Post board | Update board post), useBoardPost = the server's box
                        (consequences.board_post_box: title, box.channel as ONE Select "Post to" — ChannelPick —, Back · Post, no sentences) through
-                       POST /api/event/{key}/board preview → `seen` + `channel`; EventMore's Remove board post (ev.board_post.remove, an ended event's
-                       too) posts /board/remove; EventBoard = the raid
+                       POST /api/event/{key}/board preview → `seen` + `channel`; EventMore's Remove board post (ev.board_post.remove, live events only)
+                       posts /board/remove; LineupPage takes the channel keys from opts.channels.fields (never a hand-kept list); EventBoard = the raid
                        switch, Rosters / Placed / Short and BoardView variant="event" over the server's picture — working dimmed, failed with its
                        sentence, Undo my moves greyed with the server's reason, the footer = the part's server `footer`; open AND locked
                        (2026-11-27: the lock closes the sheet to members, not to officers) the bank has a second section under Not

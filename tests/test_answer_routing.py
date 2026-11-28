@@ -416,7 +416,7 @@ def test_entry_names_reach_the_answers_log(reg, rs, monkeypatch):
 
 # ---------------------------------------------------------------- a change missing a detail (Task 8 fix, the ruling)
 
-OFF_PROMPT_SHA = "74916805a3914b4c27963aa49c4db9bdb6f4a00cf4d534a0430a24929a6c41ba"  # SYSTEM.format(schema=…); run_cancel's quiet line is on the sheet's thread; Task 11 added the spec op's from-spec and its never-ask-which-character line; its fix round, the kind=ignore sentence; issue 14, auto_lock / auto_lock_fill on schedule_set and run_reschedule; Task 3, run_lock value=fill ("lock and fill …"); Task 5, run_unlock and run_reopen told apart; Task 6, run_start apart from run_open and the loot council; issue 15, run_answer text = the one raid a spec is for; event channels, sheet_channel / officers_channel / loot_log_channel on schedule_set, run_reschedule and run_open's path
+OFF_PROMPT_SHA = "74916805a3914b4c27963aa49c4db9bdb6f4a00cf4d534a0430a24929a6c41ba"  # SYSTEM.format(schema=…); run_cancel's quiet line is on the sheet's thread; Task 11 added the spec op's from-spec and its never-ask-which-character line; its fix round, the kind=ignore sentence; issue 14, auto_lock / auto_lock_fill on schedule_set and run_reschedule; Task 3, run_lock value=fill ("lock and fill …"); Task 5, run_unlock and run_reopen told apart; Task 6, run_start apart from run_open and the loot council; issue 15, run_answer text = the one raid a spec is for; event channels, sheet_channel / officers_channel / loot_log_channel on schedule_set, run_reschedule and run_open's path; post board, board_channel beside them and on op=set
 
 
 class PromptSpy:

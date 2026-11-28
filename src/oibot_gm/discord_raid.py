@@ -504,6 +504,13 @@ class RaidMixin(BoardPostMixin):
                     out[f] = None
             back = {f: before[f] for f, why in out.items() if why}
             await asyncio.to_thread(rc.finish_moves, reg, rs, first, [f for f, why in out.items() if not why], back)
+            follows = None
+            if ("sheet_channel" in out and not out["sheet_channel"] and "board_channel" not in before and first.board_channel_id
+                    and not rc.event_channel(reg, first, "board_channel") and not reg.config.board_channel_id):
+                follows = await self.move_board(reg, rs, first)  # a board post on the sheet's channel moves with the sheet
+        if follows:
+            await self.ops.emit(reg.config, "warn", f"{run_title(reg, first)}: the board post did not move with the signup sheet. {follows} "
+                                "It stays where it was.")
         for f, why in out.items():
             if why:
                 await self.ops.emit(reg.config, "warn", f"{run_title(reg, first)}: the {self.PLACE_WORDS[f]} did not move. {why} "
@@ -1284,7 +1291,10 @@ class RaidMixin(BoardPostMixin):
         warned.add(key)
         what = self.PLACE_WORDS[field]
         where = run_title(reg, ev) if ev is not None and not isinstance(ev, str) else str(ev or "A schedule")
-        text = (f"{where}: the channel picked for its {what} is gone or closed to the bot, so it posts in the guild's channel. "
+        instead = "the guild's channel"
+        if field == "board_channel" and not reg.config.board_channel_id:  # Board posts falls back to the sheet's channel
+            instead = "the signup sheet's channel"
+        text = (f"{where}: the channel picked for its {what} is gone or closed to the bot, so it posts in {instead}. "
                 "Pick another on Edit event or Edit schedule.")
         log.warning("%s: %s", reg.key, text)
         ops = getattr(self, "ops", None)

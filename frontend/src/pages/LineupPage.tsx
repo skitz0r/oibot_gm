@@ -371,7 +371,8 @@ type SchedDraft = {
   /** its own channels by place (null = the guild's) */
   channels: Record<string, string | null>;
 };
-const CHANNEL_KEYS = ["sheet_channel", "officers_channel", "loot_log_channel"] as const;
+/** The places the server's Channels section names (opts.channels.fields): never a hand-kept list (Post board review I1). */
+const channelKeys = (o: Opts): string[] => o.channels.fields.map((f) => f.key);
 const TIMING_HOURS = ["signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours"] as const;
 const TIMING_SWITCHES = ["nudge", "autofill", "open_dm", "confirm", "auto_lock", "auto_lock_fill"] as const;
 /** a pickup template opens when an officer opens it and reminds nobody: these mean nothing there */
@@ -406,12 +407,12 @@ function seedOf(opts: Opts, view: ScheduleView | null, from: string): SchedDraft
       lineup: view.lineup.map((s) => ({ raid: s.raid, rosters: s.rosters, starts: s.starts })),
       timing: Object.fromEntries([...TIMING_HOURS, ...TIMING_SWITCHES].filter((k) => st[k] !== undefined && st[k] !== null).map((k) => [k, st[k] as number | boolean])),
       split: String(st.split_policy || ""), weights,
-      channels: Object.fromEntries(CHANNEL_KEYS.map((k) => [k, (st[k] as string | null | undefined) || null])),
+      channels: Object.fromEntries(channelKeys(opts).map((k) => [k, (st[k] as string | null | undefined) || null])),
     };
   }
   const lineup = (opts.lineups.find((l) => l.id === from)?.lineup || []).map((e) => ({ ...e }));
   return { name: "", id: "", idTyped: false, kind: "weekly", slots: [], days: [], time: "20:00", lineup, timing: suggested(opts, "weekly", lineup[0]?.raid),
-    split: "", weights: Object.fromEntries(PRIORITY_KEYS.map((k) => [k, ""])), channels: Object.fromEntries(CHANNEL_KEYS.map((k) => [k, null])) };
+    split: "", weights: Object.fromEntries(PRIORITY_KEYS.map((k) => [k, ""])), channels: Object.fromEntries(channelKeys(opts).map((k) => [k, null])) };
 }
 /** A new schedule's edits against its seed: one per field that differs (the weights one per key; `idTyped` is how the
  *  id came, not an edit). */
@@ -419,7 +420,7 @@ function newEdits(d: SchedDraft, seed: SchedDraft): number {
   return (Object.keys(d) as (keyof SchedDraft)[]).filter((k) => k !== "idTyped" && k !== "weights" && k !== "channels")
     .filter((k) => JSON.stringify(d[k]) !== JSON.stringify(seed[k])).length
     + Object.keys(d.weights).filter((k) => d.weights[k] !== seed.weights[k]).length
-    + CHANNEL_KEYS.filter((k) => d.channels[k] !== seed.channels[k]).length;
+    + Object.keys(seed.channels).filter((k) => d.channels[k] !== seed.channels[k]).length;
 }
 
 /** New schedule (`sid` undefined) and a schedule's Edit (`/schedules/<id>/edit`): Start from (new only: Copy a lineup),
@@ -496,7 +497,7 @@ function ScheduleEditor({ meta, edit }: { meta: Meta; edit: boolean }) {
       if (d.split) fields.split_policy = d.split;
       const w = Object.fromEntries(Object.entries(d.weights).filter(([, v]) => v !== "").map(([k, v]) => [k, Number(v)]));
       if (Object.keys(w).length) fields.weights = w;
-      for (const k of CHANNEL_KEYS) if (d.channels[k]) fields[k] = d.channels[k];
+      for (const k of channelKeys(o)) if (d.channels[k]) fields[k] = d.channels[k];
       return fields;
     }
     if (d.name.trim() !== base.name) fields.name = d.name.trim() || null;
@@ -508,7 +509,7 @@ function ScheduleEditor({ meta, edit }: { meta: Meta; edit: boolean }) {
     if (d.split !== base.split) fields.split_policy = d.split || null;
     const w = Object.fromEntries(Object.entries(d.weights).filter(([k, v]) => v !== base.weights[k]).map(([k, v]) => [k, v === "" ? null : Number(v)]));
     if (Object.keys(w).length) fields.weights = w;
-    for (const k of CHANNEL_KEYS) if (d.channels[k] !== base.channels[k]) fields[k] = d.channels[k];  // null = back to the guild's
+    for (const k of channelKeys(o)) if ((d.channels[k] ?? null) !== (base.channels[k] ?? null)) fields[k] = d.channels[k] ?? null;  // null = back to the guild's
     return fields;
   }
 

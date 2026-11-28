@@ -1984,16 +1984,18 @@ def finish_moves(reg: Registry, rs: "RaidStore", ev: "RaidEvent", done: list[str
 def set_own_channel(reg: Registry, rs: "RaidStore", ev: "RaidEvent", field: str, value: str | None) -> None:
     """Write one of the event's own channels on every raid's dict alike, with nothing to move (Post board's first post
     to a channel picked in its box: the post goes up there, so the event remembers it — board_post.BoardPostMixin).
-    A move of something already posted goes through reschedule (channels_pending) instead. One config save."""
-    for p in event_parts(rs, first_part(rs, ev)):
-        t = reg.config.team(p.team)
-        if t is None:
-            continue
-        if value:
-            t[field] = str(value)
-        else:
-            t.pop(field, None)
-    reg.save_config(f"event {first_part(rs, ev).key}: its own {field}", notify=False)
+    A move of something already posted goes through reschedule (channels_pending) instead. One config save, under
+    config_lock as the config verbs write (the caller's ops line and the event's log line name who set it)."""
+    with reg.config_lock:
+        for p in event_parts(rs, first_part(rs, ev)):
+            t = reg.config.team(p.team)
+            if t is None:
+                continue
+            if value:
+                t[field] = str(value)
+            else:
+                t.pop(field, None)
+        reg.save_config(f"event {first_part(rs, ev).key}: its own {field}", notify=False)
 
 
 def channel_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", changes: dict) -> str | None:
