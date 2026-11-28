@@ -15,6 +15,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        policy sentences from the ACTIVE precedents (route distil, refs validated, nothing written — policy.append_rule is the write;
                        the <policy>/<rules>/<precedents> blocks go through llm.provider.unfence)
   discord_loot.py      LootMixin: THE loot verbs open_loot · tick · distribute · override · confirm · discard · set_reason · correct · end_run
+                       loot_log_target (discord_pool.LootLogMixin) reads the award's event's own loot_log_channel first (rc.event_channel; gone → the guild's + one ops line), then the guild's loot channel, then the updates thread; the council's refusal counts the event's own officers' channel (discord_loot, discord_loot_surface, loot_ops).
                        (+ remove_candidate · set_scores_only · keep_open), each (reg, session, …, by, by_id, via) under loot_lock (end_run, end_box and
                        loot_ops' end review refuse a locked event with no council before its start — rc.end_refusal, as end_decide; issue 14;
                        end_run edits the Confirm cards rc.end_run closed — RaidMixin.end_ask_cards); loot_ctx / loot_roster

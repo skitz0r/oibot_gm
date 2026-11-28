@@ -222,16 +222,23 @@ def test_edit_after_the_lock_offers_only_the_asks_and_the_wait(reg, rs, officer)
     h, _bot = harness(reg, rs)
     run(FLOWS["raid_edit"](h.command(), reg))
     sel = next(s for s in h.screen["view"].children if getattr(s, "placeholder", "") == "Change a setting")
-    assert {o.value for o in sel.options} == set(EDIT_AFTER_LOCK) and PAGE_WORDS["edit_locked"] in h.text
+    # the channels are not timing: they change until the event ends (design 2026-11-27-event-channels)
+    assert {o.value for o in sel.options} == set(EDIT_AFTER_LOCK) | set(flows_event.CHANNELS) and PAGE_WORDS["edit_locked"] in h.text
 
 
-def test_a_started_event_says_it_cant_change(reg, rs, officer):  # noqa: F811
+def test_a_started_event_changes_only_its_channels_and_an_ended_one_nothing(reg, rs, officer):  # noqa: F811
     first = open_one_off(reg, rs, days=4)
     first.starts_at = (reg.now_local() - timedelta(minutes=5)).isoformat()
     rs.save(first, "started")
     h, _bot = harness(reg, rs)
     run(flows_event.EditEventWizard(reg, rs, OFFICER_ID, first.key, title="Edit event").start(h.command()))
-    assert PAGE_WORDS["edit_over"] in h.text and h.screen["view"] is None
+    sel = next(s for s in h.screen["view"].children if getattr(s, "placeholder", "") == "Change a setting")
+    assert PAGE_WORDS["edit_started"] in h.text and {o.value for o in sel.options} == set(flows_event.CHANNELS)
+    first.state = "done"
+    rs.save(first, "ended")
+    h2, _bot = harness(reg, rs)
+    run(flows_event.EditEventWizard(reg, rs, OFFICER_ID, first.key, title="Edit event").start(h2.command()))
+    assert PAGE_WORDS["edit_over"] in h2.text and h2.screen["view"] is None
 
 
 def test_the_event_locks_while_edit_is_open(reg, rs, officer):  # noqa: F811

@@ -35,6 +35,7 @@ from .. import raid_views as rv
 from .. import raidcycle as rc
 from ..constants import CONFIRM_WORDS
 from ..registry import RegistryError
+from .api_setup import channel_names
 
 # a link to an event that isn't one any more: its record is gone, or (a raid taken out of a lineup) it is no event of its own
 NO_EVENT = "This event is no longer on the Events list."
@@ -64,7 +65,7 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
         """The New event page's choices (event_view.new_event_options): the guild's date, the raids, the lineups to copy,
         the lock choices. Its preview and Open are POST /api/raid/{rid}/open(/preview)."""
         v = await who(request, officer=True)
-        return await asyncio.to_thread(event_view.new_event_options, v.reg)
+        return await asyncio.to_thread(event_view.new_event_options, v.reg, channel_names(bot, v.reg))
 
     @app.get("/api/event/coming/{sid}/{occurrence}")
     async def event_coming(request: Request, sid: str, occurrence: str):
@@ -85,7 +86,7 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
         af = event_board.autofill_of(bot)  # the board is the officers' layout: nothing solves here, Auto-fill groups' line only
         return await asyncio.to_thread(event_view.event_json, v.reg, rs, ev, v.uid,
                                        sheet=lambda p, rosters=None, open_seats=True: ev_json(v.reg, rs, p, rosters=rosters, open_seats=open_seats),
-                                       autofill=lambda p: af.state(v.reg, p))
+                                       autofill=lambda p: af.state(v.reg, p), names=channel_names(bot, v.reg))
 
     @app.post("/api/event/{key}/clear")
     async def event_clear(request: Request, key: str):

@@ -107,21 +107,19 @@ class RaidSchedulerMixin:
             elif c.silent_for <= 300:
                 c.warned = False
 
-    async def _warn_unopened(self, reg, now) -> None:
-        """No signup channel: the scheduler opens nothing (design B4 "scheduler visibility"). Each run that is due to open
-        gets ONE ops warn ("Barrow Deeps Tue 7:30 PM did not open: no signup channel") — never repeated every minute, and
-        no DM beyond the ops feed's own error path; the Events page's Signup sheet fact says what it waits for. Keyed
-        by (guild, schedule id, occurrence): a run is found by its stamps, never by a key."""
+    async def _warn_unopened(self, reg, sched: dict, start) -> None:
+        """No signup channel for this schedule (its own sheet channel nor the guild's): the scheduler opens nothing
+        (design B4 "scheduler visibility"). Each run that is due to open gets ONE ops warn ("Barrow Deeps Tue 7:30 PM did
+        not open: no signup channel") — never repeated every minute, and no DM beyond the ops feed's own error path; the
+        Events page's Signup sheet fact says what it waits for. Keyed by (guild, schedule id, occurrence): a run is
+        found by its stamps, never by a key."""
         warned: set = self.__dict__.setdefault("_unopened_warned", set())
-        rs = self.raids.store(reg)
-        for sched, start in rc.occurrences(reg, now, lead=True):
-            occ = rc.occurrence_stamp(reg, start)
-            key = (reg.key, sched["id"], occ)
-            if key in warned or rc.event_of_occurrence(rs, sched["id"], occ, reg=reg) is not None:
-                continue
-            warned.add(key)
-            inst = sched["raid"]
-            await self.ops.emit(reg.config, "warn", f"{reg.raid_def(inst).get('name', inst)} {reg.local12(start)} did not open: no signup channel is set (/gm config signup-channel)")
+        key = (reg.key, sched["id"], rc.occurrence_stamp(reg, start))
+        if key in warned:
+            return
+        warned.add(key)
+        inst = sched["raid"]
+        await self.ops.emit(reg.config, "warn", f"{reg.raid_def(inst).get('name', inst)} {reg.local12(start)} did not open: no signup channel is set (/gm config signup-channel)")
 
     async def _warn_open_refused(self, reg, sched: dict, start, err: Exception) -> None:
         """A scheduled open the registry refused (a follow-on raid gone from the profile, a schedule that can't be read):
@@ -201,27 +199,27 @@ class RaidSchedulerMixin:
         exhausted_posted: set[tuple[str, str]] = self.__dict__.setdefault("_fill_exhausted_posted", set())
         cfg = reg.config
         rs = self.raids.store(reg)
-        channel = self.get_channel(cfg.signup_channel_id) if cfg.signup_channel_id else None
         await self.cleanup_ephemeral(reg, rs)
         now = reg.now_local()
-        # open sheets on cadence: every active schedule's runs within that schedule's signup lead (needs the signup
-        # channel); a pickup template never opens here. A run is found by its schedule and occurrence (live or closed:
-        # never a second sheet, a cancelled occurrence never again)
+        # open sheets on cadence: every active schedule's runs within that schedule's signup lead (needs a signup
+        # channel: the schedule's own sheet channel, else the guild's — rc.schedule_sheet_channel); a pickup template
+        # never opens here. A run is found by its schedule and occurrence (live or closed: never a second sheet, a
+        # cancelled occurrence never again)
         await self._warn_gone_raids(reg, now)
-        if channel:
-            for sched, start in rc.occurrences(reg, now, lead=True):
-                if rc.event_of_occurrence(rs, sched["id"], rc.occurrence_stamp(reg, start), reg=reg) is not None:
-                    continue
-                other = rc.one_off_at(rs, sched["raid"], start)  # every live run at that minute, not only the newest
-                if other is not None:  # a ONE-OFF already holds that minute (another schedule's run there is never in the way)
-                    await self._warn_night_taken(reg, sched, start, other)
-                    continue
-                try:
-                    await self.open_run_and_post(reg, rs, sched["raid"], start, by="scheduler", schedule=sched["id"])
-                except RegistryError as e:  # a refused open (a follow-on raid gone — design §5.62)
-                    await self._warn_open_refused(reg, sched, start, e)
-        else:
-            await self._warn_unopened(reg, now)
+        for sched, start in rc.occurrences(reg, now, lead=True):
+            if rc.event_of_occurrence(rs, sched["id"], rc.occurrence_stamp(reg, start), reg=reg) is not None:
+                continue
+            if self.sheet_channel_of(reg, sched["raid"], sched["id"]) is None:
+                await self._warn_unopened(reg, sched, start)
+                continue
+            other = rc.one_off_at(rs, sched["raid"], start)  # every live run at that minute, not only the newest
+            if other is not None:  # a ONE-OFF already holds that minute (another schedule's run there is never in the way)
+                await self._warn_night_taken(reg, sched, start, other)
+                continue
+            try:
+                await self.open_run_and_post(reg, rs, sched["raid"], start, by="scheduler", schedule=sched["id"])
+            except RegistryError as e:  # a refused open (a follow-on raid gone — design §5.62)
+                await self._warn_open_refused(reg, sched, start, e)
         # every live run is processed even when its sheet channel can't be resolved: the steps that post to a
         # channel (refresh_sheet, post_run_update, cards) fail soft on their own
         for ev in rs.live():  # an open cut off between its raids (a restart) gets its missing later raids, once

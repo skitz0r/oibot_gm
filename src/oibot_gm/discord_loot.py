@@ -213,7 +213,7 @@ class LootMixin:
         channel (roster, else ops). No channel configured → refused; configured but unreachable (Discord down) → the
         session opens with no thread (thread pending)."""
         cfg = reg.config
-        if not (cfg.roster_channel_id or cfg.ops_channel_id):
+        if not (cfg.roster_channel_id or cfg.ops_channel_id or rc.event_channel(reg, ev, "officers_channel")):  # the event's own counts
             raise RegistryError("Set a roster or ops channel first — the loot council's thread goes there (/gm config roster-channel).")
         ch = self.officer_channel(reg, ev) if hasattr(self, "officer_channel") else None
         if ch is None:

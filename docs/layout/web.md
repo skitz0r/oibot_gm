@@ -45,6 +45,7 @@ scripts/serve_scratch.py  THIS worktree's site on a throw-away copy of fixtures/
                        nothing refused), → `reply` = help_answer(may_act=False, link=False, entry="site"), `questions` [] (ASK_GUIDE outside
                        the ask audience; /api/ask shares the constant)
   web/api_setup.py     install_setup_api (called from api.py; design §5.46): GET/POST /api/admin/channels (rows with `missing`/`problem`, never while Discord is
+                       channel_names(bot, reg) = {id: name} of the server's text channels for the Channels sections ({} while Discord is unreachable); POST /api/raid/{rid}/open takes `channels` (a one-off's own), /api/run/{key}/reschedule the channel keys in `timing`.
                        unreachable; POST = a translator through app.state.ops_translate), POST /api/admin/news-webhook (owner; the URL never in an ops line),
                        GET /api/admin/setup (checklist, invite, error alerts + the owner's choices and the settings rev; Host card for a superuser / the
                        bearer), GET /api/admin/left + POST

@@ -220,7 +220,9 @@ class LootSurfaceMixin:
         if session.origin != "raid":
             return await super().loot_open_thread(reg, rs, ev, session)
         cfg = reg.config
-        if not (cfg.roster_channel_id or cfg.ops_channel_id):
+        from .raidcycle import event_channel
+
+        if not (cfg.roster_channel_id or cfg.ops_channel_id or event_channel(reg, ev, "officers_channel")):  # the event's own counts
             raise RegistryError("Set a roster or ops channel first — the loot council's thread goes there (/gm config roster-channel).")
         ch = self.officer_channel(reg, ev)
         if ch is None:

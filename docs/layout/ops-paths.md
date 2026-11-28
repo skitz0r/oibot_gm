@@ -5,6 +5,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
 
 ```
   configops.py         plain-text config: whitelisted ConfigOp schema (flat, ≤13 fields; `target` = raid id / run key / buff id / family id / schedule id; schedule_set / schedule_remove target = the schedule id ALONE
+                       Channels (2026-11-27): schedule_set and run_reschedule take sheet_channel / officers_channel / loot_log_channel (a mention, an id or none); _apply_async runs bot.channel_setting_refusal before a schedule's channel is saved; _schedule_value_words / _schedule_words name them (consequences.channel_words). MCP: schedule_set, reschedule_run and open_run(channels=) name them.
                        (SCHEDULE_ID_ALONE), field = the setting alone (SETTING_ALONE), field `raid` = a NEW schedule's first raid), describe() diff,
                        apply() via the same code paths as commands, apply_async(bot=) for card-posting channels and announced absences; request text in <request>;
                        OP_GROUP (every op in one capability group), bind_self (own-record scope decided in code, never by the model),

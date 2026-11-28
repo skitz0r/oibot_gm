@@ -36,6 +36,7 @@ LOCK_SWITCHES = ("auto_lock", "auto_lock_fill")  # Auto Lock and, under it, its 
 PICKUP_HIDDEN = {"signup_lead_hours", "nudge_hours_before", "nudge", "open_dm"}  # a pickup reminds nobody (the site's)
 SHOWN = ("signup_lead_hours", "nudge", "nudge_hours_before", "lock_hours_before", "auto_lock", "auto_lock_fill", "confirm", "confirm_hours_before",
          "autofill", "fill_ask_hours", "open_dm", "weights", "split_policy")  # the hub's lines after Repeats and Lineup
+CHANNELS = ("sheet_channel", "officers_channel", "loot_log_channel")  # the Channels step (skippable: empty = the guild's)
 MAX_RUN_TIMES = 14
 NEW = "New schedule"
 CHANGE = "Change"
@@ -198,6 +199,10 @@ class ScheduleWizard(LineupBlock, OwnerWizard):
             from .schedule_view import repeats_words
 
             return repeats_words(self.reg, v, full=True)
+        if f in CHANNELS:
+            from .flows_event import channel_mention_words
+
+            return channel_mention_words(self.reg, f, v)
         return str(v) if v not in (None, "") else PAGE_WORDS["raids_own"]
 
     def shown(self) -> list[str]:
@@ -212,6 +217,8 @@ class ScheduleWizard(LineupBlock, OwnerWizard):
         out = [self.line(F["kind"], self.words("repeats", base), self.words("repeats", self.entry())),
                self.line(F["lineup"], self.words("lineup", base["lineup"]), self.words("lineup", self.lineup))]
         out += [self.line(self.label(f), self.words(f, base.get(f)), self.words(f, self.draft.get(f))) for f in self.shown()]
+        out += [self.line(self.label(f), self.words(f, base.get(f)), self.words(f, self.draft.get(f)))
+                for f in CHANNELS if base.get(f) or self.draft.get(f)]  # only a channel of its own: the hub stays short
         return out
 
     # ---- the hub
@@ -250,7 +257,7 @@ class ScheduleWizard(LineupBlock, OwnerWizard):
         names = ", ".join(F[f] for f in SHEET_SWITCHES if f in self.shown())
         choices = [Opt("name", F["name"]), Opt("repeats", F["kind"]), Opt("lineup", F["lineup"]), Opt("timing", SHEET_TIMING),
                    Opt("switches", names), Opt("locking", ", ".join(F[f] for f in LOCK_SWITCHES)),
-                   Opt("weights", F["weights"]), Opt("split_policy", F["split_policy"])]
+                   Opt("weights", F["weights"]), Opt("split_policy", F["split_policy"]), Opt("channels", PAGE_WORDS["channels"])]
         items: list[discord.ui.Item] = [self.select(CHANGE, choices, self.change),
                                         self.button(REVIEW, self.review, discord.ButtonStyle.primary, disabled=not self.changed())]
         if not self.new:
@@ -307,8 +314,36 @@ class ScheduleWizard(LineupBlock, OwnerWizard):
             await self.switches(i, LOCK_SWITCHES)
         elif what == "weights":
             await self.open_form(i, self.weights_form())
+        elif what == "channels":
+            await self.channels(i)
         else:
             await self.split(i)
+
+    # ---- Channels: where the events it opens post (Discord's own channel picker, a widget; empty = the guild's)
+    async def channels(self, i: discord.Interaction) -> None:
+        text = [f"**{self.name()}**"] + [f"{self.label(f)}: {self.words(f, self.draft.get(f))}" for f in CHANNELS]
+
+        async def picked(it: discord.Interaction, values: list[str]) -> None:
+            await self.channel(it, values[0])
+        await self.show(i, "\n".join(text), self.select(PAGE_WORDS["channels"], [Opt(f, self.label(f)) for f in CHANNELS], picked),
+                        self.button("Back", self.hub))
+
+    async def channel(self, i: discord.Interaction, f: str) -> None:
+        from .flows_config import _text_channel_select
+
+        cur = self.draft.get(f)
+
+        async def picked(it: discord.Interaction, chans: list) -> None:
+            self.draft[f] = str(chans[0].id) if chans else None
+            await self.channels(it)
+
+        async def cleared(it: discord.Interaction) -> None:
+            self.draft[f] = None
+            await self.channels(it)
+        await self.show(i, f"**{self.name()}**\n{self.label(f)}: {self.words(f, cur)}\n-# {PAGE_WORDS['schedule_field_help'][f]}",
+                        _text_channel_select("Pick the channel", picked),
+                        self.button("Use the guild's channel", cleared, disabled=not cur),
+                        self.button("Back", self.channels))
 
     async def renamed(self, i: discord.Interaction, v: dict[str, str]) -> None:
         self.draft["name"] = (v.get("name") or "").strip()[:40] or None

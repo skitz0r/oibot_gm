@@ -5,6 +5,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
 
 ```
   registry.py          Member/RegisteredCharacter/Applicant/Absence + GuildConfig on the git store (one file per member);
+                       SCHEDULE_CHANNELS (sheet_channel · officers_channel · loot_log_channel, in SCHEDULE_FIELDS, stored as id text, unset = the guild's: GUILD_CHANNEL_OF), channel_value (THE parser: id / <#id> / channel, empty → None, else CHANNEL_WHEN), channel_clash (OFFICERS_ON_SHEET: own officers in the sheet's or the guild's signup channel, own sheet in the guild's officers' channel) — checked in _set_schedule; schedule_def_of puts the schedule's own channels on eff (never the raid's).
                        the inbox: notify (THE notice write), remove_notices(kind, run) (an unlock takes back the lock's not_rostered),
                        has_notice(uid, kind, run); placement asks: ANSWER_WORDS (… `unrostered` = closed by a lock after an unlock that left
                        them off), close_placement_ask, claim_placement;

@@ -313,6 +313,27 @@ understands; it answers in the words below.
   working after a bot restart).
 - **Loot channel (the public loot log)** — one line per recorded award (item → character · boss), with an **Add to my
   wishlist** button; never a reason or a score (§9). Not set: the lines go to each event's updates thread.
+- **A schedule's or an event's own channels.** A schedule, and each event, can name its own channel for three places:
+  **Signup sheet** (the sheet and its thread with the lock and cancel lines), **Officers' cards** (the health card, the
+  lock cards, the event's updates thread and a loot council's thread) and **Loot log** (one public line per confirmed
+  award, while a loot council is held). Empty means the guild's channel above; an event opened from a schedule takes the
+  schedule's channels when it opens (every raid of it alike), so a later change to the schedule never moves an event
+  already open. They are set in a folded **Channels** section under the timing on New schedule, Edit schedule, New event
+  (a one-off) and Edit event, each select's empty choice naming where it falls back to (*#raid-signups (the guild's)*, or
+  *(the schedule's)* on an event from a schedule that names one); in Discord a **Channels** step in `/gm schedule` and
+  `/raid edit` with Discord's own channel picker; in plain text and MCP as `sheet_channel`, `officers_channel` and
+  `loot_log_channel` on the schedule and event settings. A schedule's own sheet channel lets it open even when the guild
+  has no signup channel. The officers' cards can never share the sheet's channel (*"The officers' cards can't go in the
+  channel where the signup sheet is posted. Pick another channel."*), and a channel is checked as the Config page checks
+  the guild's (the bot can see it and post there, threads included for the sheet). An event's channels change until it
+  ends or is cancelled — after the lock and after the start too — and **changing one moves what is posted**: the sheet
+  is posted in the new channel with every answer and the old one is deleted (on a locked event the *is locked* line is
+  written again in the new sheet's thread); the officers' cards of every raid move and a new updates thread starts there,
+  the old thread getting one last line (*"Updates for this event continue in #alt-officers."*) before it is archived;
+  later loot log lines go to the new channel and lines already posted stay. Nobody gets a DM, and DMs already sent keep
+  their old channel link. A channel later deleted or closed to the bot falls back to the guild's, with one line on the
+  ops feed. The ops feed itself always stays the guild's. Details on the Events and Schedules pages show these channels
+  only when one differs from the guild's, with where it comes from.
 - **News channel** — a Wowhead webhook posts game news there. The bot reads only the post itself (title and
   summary, never the linked article) and keeps the items about our game version, our raids, or the extra news
   keywords on the Config page. A daily review compares them with what the bot believes about the game; a
@@ -1714,7 +1735,10 @@ Confirm by, Automated Fill Requests and An ask waits, each switch with its (?) �
 picked from lists, the same labels as the Schedules page's editor. **Save** shows the bot's box first: each change as
 *label: old → new* (*Locks: 24 hours before → 12 hours before*), then what changes, who is told and what can still be
 undone; if the event changed meanwhile the box comes back with the new facts and waits again. After the lock the
-editor shows only Automated Fill Requests and how long an ask waits. The split moved here from **More**. Plain text says it (*"move tonight's Barrow Deeps
+editor shows only Automated Fill Requests and how long an ask waits; once the event has started it shows only its
+*Channels* (*"This event has started, so only its channels can change."*), which change until it ends — see §2 *A
+schedule's or an event's own channels* (the box says what moves, *"The signup sheet moves to #alt-signups with every
+answer."*, then *"Nobody gets a DM."*). The split moved here from **More**. Plain text says it (*"move tonight's Barrow Deeps
 to Wednesday 8 PM"*, *"lock Thursday's event 12 hours before"*; the diff prints the same confirm, and a time the clocks
 skip or pass twice that night is refused: *"That time doesn't exist that night because the clocks go forward. Pick
 another time."*). MCP's `reschedule_run` previews first and sends the preview's `rev` back. If someone changed the event
@@ -2398,12 +2422,13 @@ Back returns to the raid's sections with your draft as it was). The list is grou
 schedule by its name and when it repeats; an empty one says *"No schedule plays Barrow Deeps yet. Add one with New
 schedule."* Pick one to open its screen: Repeats, Lineup, Sheet timing (Sheet opens, Signup Reminder and when it goes
 out, Locks, Lock Confirmation and Confirm by, Automated Fill Requests and how long An ask waits, Sheet Opening DM),
-Priority and When one night fills two rosters, in the Schedules page's words, and its next event (a paused one says
+Priority and When one night fills two rosters, a channel of its own only when it has one, in the Schedules page's words, and its next event (a paused one says
 *"Paused, so no event opens. Resume it to open events again."*). **Change** edits one thing at a time: the name; the
 event times (a day, an hour and the minutes in quarter hours; ✕ a time to drop it) or a lockout schedule's days and
 start; the lineup (the same lineup screen as `/raid lineup`: add a raid, its rosters, its start after the first); Sheet
 timing (a preset — Standard, Short notice, Same week — or one setting's hours); the four switches; Priority (five
-picks, each a number or *Same as the raid*); the split. Each change shows as *was → now* until you save. **Review
+picks, each a number or *Same as the raid*); the split; **Channels** (pick the place, then Discord's channel picker or
+*Use the guild's channel*). Each change shows as *was → now* until you save. **Review
 changes** shows the Schedules page's Save box (*"Save Alt night?"* with each change and what it reaches: *"The change
 starts with the Tue 15 Dec event. The Tue 8 Dec event is already open and keeps its timing."*); **Pause**, **Resume**
 and **Remove** show theirs (Remove's verb is red: a removed schedule cannot be brought back). Pause, Resume, Remove or
@@ -3262,7 +3287,8 @@ With the log on (the default) every recorded award gets one line in the **loot c
 Kestrel · Gatekeeper"*; a correction *"✎ Robe of Tests: was Kestrel, now Mira"*; a disenchant *"→ disenchanted"*),
 with an **Add to my wishlist** button — and nothing else goes there (no officer prompts, no reasons, no scores). With
 no loot channel set the lines go to the event's updates thread — never the signup channel — and the first one says so in
-the ops channel and the council's thread. With the log off nothing is posted; the site still shows every award. A
+the ops channel and the council's thread. An event (or its schedule) can name its own **Loot log** channel (§2): its lines
+go there instead, and changing it on a live event sends only later lines there. With the log off nothing is posted; the site still shows every award. A
 rehearsal posts nothing. The owner sets it with `/gm config loot-channel` (a channel or `clear`, and `log` on or off —
 one confirm screen saying what changes), on the
 Config page (the *Loot log* card shows which of the three states it is in), in plain text ("post the loot log in

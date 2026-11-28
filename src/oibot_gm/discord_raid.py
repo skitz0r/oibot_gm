@@ -422,6 +422,124 @@ class RaidMixin:
             except Exception as e:  # noqa: BLE001
                 log.warning("card refresh failed (%s %s): %s", ev.key, key, e)
 
+    MOVE_WAIT_S = 10.0  # a channel move's route waits this long for its Discord edits; the rest go on behind it (finish_later)
+
+    async def move_channels(self, reg, rs, first, moves: dict) -> None:
+        """What a channel change on a live event moves (design 2026-11-27-event-channels §4), AFTER its write
+        (rc.reschedule stamped the event's own channels; `moves` = Moved.channels). Under every raid's board lock, so a
+        lock's flip or an unlock never interleaves (a lock still posting was refused before the write: CHANNELS_BUSY).
+        The signup sheet: move_sheet. The officers' cards: move_cards. The loot log: nothing to move (later lines go to
+        the new channel, lines already posted stay). A failed send or delete is logged, never raised. Nobody is DMed."""
+        parts = rc.event_parts(rs, first)
+        async with contextlib.AsyncExitStack() as stack:
+            for key in sorted(p.key for p in parts):  # one order everywhere: no lock cycle with a lock or an unlock
+                await stack.enter_async_context(self.board_lock(reg, key))
+            first = rs.events.get(first.key) or first
+            if first.state in ("done", "cancelled"):
+                return
+            if "sheet_channel" in moves:
+                await self.move_sheet(reg, rs, first)
+            if "officers_channel" in moves:
+                await self.move_cards(reg, rs, first)
+
+    async def move_sheet(self, reg, rs, first) -> None:
+        """The live sheet into the event's sheet channel (sheet_channel) with every answer (answers live in the run file):
+        a new message there, the old one DELETED; the stored sheet thread and every raid's "is locked" line reset (the
+        old line deleted, the old thread archived), then on a locked event the line written again in the new sheet's
+        thread. A sheet never posted is posted there now, without the opening DMs. Already-sent DMs keep their link."""
+        ch = self.sheet_channel(reg, first)
+        if ch is None or (first.channel_id and int(first.channel_id) == ch.id):
+            return
+        if not first.message_id:
+            await self.post_sheet(reg, rs, first, ch, dm=False)
+            return
+        parts = rc.event_parts(rs, first)
+        old, old_thread = (first.channel_id, first.message_id), first.sheet_thread_id
+        lines = {p.key: p.lock_line for p in parts if p.lock_line}
+        embed, view = sheet_message(reg, first, rc.run_team(reg, first), self.ico)
+        try:
+            msg = await ch.send(embed=embed, **({"view": view} if view else {}))
+        except Exception as e:  # noqa: BLE001 — the sheet stays where it is; the next move or /raid sheet can place it
+            log.warning("sheet move failed (%s → %s): %s", first.key, ch.id, e)
+            return
+        first.channel_id, first.message_id, first.sheet_thread_id = ch.id, msg.id, None
+        for p in parts:
+            if p.key in lines:
+                p.lock_line = None
+        for p in sorted(parts, key=lambda e: e is first):  # the first raid last: its save copies its answers onto the later raids
+            await asyncio.to_thread(rs.save, p, f"sheet moved to #{getattr(ch, 'name', ch.id)}")
+        for line in lines.values():
+            await self._delete_message(line[0], line[1], key=first.key)
+        await self._delete_message(old[0], old[1], key=first.key)
+        if old_thread and (th := await self._channel(old_thread)) is not None and hasattr(th, "edit"):
+            with contextlib.suppress(Exception):
+                await th.edit(archived=True)
+        for p in parts:
+            if p.key in lines and p.state == "locked":
+                await self.post_lock_line(reg, rs, p, bool(p.confirm_by))
+        await self.refresh_sheet(reg, first)  # the members' read-only copies name the new channel
+
+    def _card_view(self, reg, rs, ev, key: str, team):
+        """The view one officer card of `ev` shows now (refresh_cards' choice), or None when the card has no place any
+        more (an open sheet's health card on a locked event: the lock card says it)."""
+        if ev.state in ("done", "cancelled"):
+            return closed_layout(reg, ev, self.ico)
+        if key == "health":
+            return health_layout(reg, rs, ev, team, self.ico) if ev.state == "open" else None
+        if key.startswith("lock:") and int(key[5:]) < len(ev.all_rosters):
+            return lock_layout(reg, ev, team, self.ico, int(key[5:]), rs)
+        return None
+
+    async def move_cards(self, reg, rs, first) -> None:
+        """Every live raid's officer cards (health, lock) into the event's officers' channel (officer_channel): each
+        posted there anew and the old one deleted, `cards` / `cards_channel_id` rewritten (the lock card's message-id
+        check reads the new ids; the buttons are keyed by event). The old updates thread gets one last line saying where
+        updates continue and is archived; a new one is started from the first raid's card in the new channel."""
+        ch = self.officer_channel(reg, first)
+        if ch is None:
+            log.warning("officers' cards not moved (%s): %s", first.key, self.no_officer_channel_why(reg, first))
+            return
+        parts = rc.event_parts(rs, first)
+        moved = False
+        for p in (x for x in parts if x.state in ("open", "locked")):
+            if not p.cards or (p.cards_channel_id and int(p.cards_channel_id) == ch.id):
+                continue
+            team, old_ch, old = rc.run_team(reg, p), p.cards_channel_id, dict(p.cards)
+            new: dict = {}
+            for key in old:
+                view = self._card_view(reg, rs, p, key, team)
+                if view is None:
+                    continue
+                try:
+                    new[key] = (await ch.send(view=view)).id
+                except Exception as e:  # noqa: BLE001
+                    log.warning("card move failed (%s %s): %s", p.key, key, e)
+            p.cards, p.cards_channel_id = new, ch.id
+            await asyncio.to_thread(rs.save, p, f"officer cards moved to #{getattr(ch, 'name', ch.id)}")
+            for mid in old.values():
+                await self._delete_message(old_ch, mid, key=p.key)
+            moved = True
+        old_threads = [t for t in dict.fromkeys([first.updates_thread_id] + [p.updates_thread_id for p in parts]) if t]
+        if not old_threads and not moved:
+            return
+        for p in parts:
+            if p.updates_thread_id:
+                p.updates_thread_id = None
+                await asyncio.to_thread(rs.save, p, "updates thread moves with the cards")
+        for tid in old_threads:
+            th = await self._channel(tid)
+            if th is None or getattr(th, "parent_id", None) == ch.id:
+                continue
+            try:
+                if getattr(th, "archived", False) and hasattr(th, "edit"):
+                    await th.edit(archived=False)
+                await th.send(f"Updates for this event continue in #{getattr(ch, 'name', ch.id)}.", allowed_mentions=discord.AllowedMentions.none())
+                if hasattr(th, "edit"):
+                    await th.edit(archived=True)
+            except Exception as e:  # noqa: BLE001 — the old thread keeps its last state
+                log.warning("old updates thread not closed (%s, %s): %s", first.key, tid, e)
+        await self.updates_thread(reg, first)  # the new thread, under the first raid's card in the new channel
+
     async def apply_signup(self, interaction: discord.Interaction, reg, rs, ev, m, character, status):
         """A member's own press (or an officer pressing for a test puppet): set_answer, the line back ephemerally."""
         if not interaction.response.is_done():
@@ -621,13 +739,15 @@ class RaidMixin:
                     log.warning("sheet restore failed (%s %s): %s", reg.key, ev.key, e)
         return n
 
-    async def post_sheet(self, reg, rs, ev, channel) -> None:
+    async def post_sheet(self, reg, rs, ev, channel, *, dm: bool = True) -> None:
+        """Post `ev`'s sheet in `channel` and keep its ids; the opening DMs follow when the event asks for them and `dm`
+        (a sheet first posted by a channel change sends none: nobody gets a DM from a move)."""
         team = rc.run_team(reg, ev)
         embed, view = sheet_message(reg, ev, team, self.ico)
         msg = await channel.send(embed=embed, **({"view": view} if view else {}))
         ev.channel_id, ev.message_id = channel.id, msg.id
         rs.save(ev, "sheet posted")
-        if rc.team_setting(team, "open_dm"):
+        if dm and rc.team_setting(team, "open_dm"):
             await self.dm_on_open(reg, rs, ev, team)
 
     async def dm_on_open(self, reg, rs, ev, team) -> int:
@@ -1038,16 +1158,78 @@ class RaidMixin:
         if own and (ch := self.get_channel(int(own))) is not None:
             return ch
         public = self._sheet_channels(reg, ev)
+        mine = rc.event_channel(reg, ev, "officers_channel")  # the event's own (its schedule's, stamped at open), checked live
+        if mine and mine not in public:
+            if (ch := self._usable(mine)) is not None:
+                return ch
+            self._own_channel_gone(reg, ev, "officers_channel", mine)
         for cid in (cfg.roster_channel_id, cfg.ops_channel_id):
             if cid and int(cid) not in public and (ch := self.get_channel(int(cid))) is not None:
                 return ch
         return None
 
+    def _usable(self, cid: int | None):
+        """A channel of the event's own the bot can still post in (get_channel, then View Channel / Send Messages /
+        Embed Links — perms.BASE), else None: deleted, or closed to the bot since it was picked."""
+        from . import perms
+
+        ch = self.get_channel(int(cid)) if cid else None
+        if ch is None or perms.missing_for(ch, None):
+            return None
+        return ch
+
+    def _own_channel_gone(self, reg, ev, field: str, cid: int) -> None:
+        """An event's (or a schedule's) own channel is deleted or closed to the bot: it posts in the guild's instead, and
+        the ops feed hears it ONCE per (guild, place, channel) — never every minute, never a DM."""
+        warned: set = self.__dict__.setdefault("_own_channel_warned", set())
+        key = (reg.key, field, int(cid))
+        if key in warned:
+            return
+        warned.add(key)
+        what = {"sheet_channel": "signup sheet", "officers_channel": "officers' cards", "loot_log_channel": "loot log"}[field]
+        where = run_title(reg, ev) if ev is not None and not isinstance(ev, str) else str(ev or "A schedule")
+        text = (f"{where}: the channel picked for its {what} is gone or closed to the bot, so it posts in the guild's channel. "
+                "Pick another on Edit event or Edit schedule.")
+        log.warning("%s: %s", reg.key, text)
+        ops = getattr(self, "ops", None)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        if ops is not None:
+            tasks: set = self.__dict__.setdefault("_finishing", set())
+            task = loop.create_task(ops.emit(reg.config, "warn", text))
+            tasks.add(task)
+            task.add_done_callback(tasks.discard)
+
+    def sheet_channel(self, reg, ev):
+        """THE channel `ev`'s sheet posts in when it is (re)posted: the event's own sheet channel (rc.event_channel), else
+        the guild's signup channel; an own one deleted or closed to the bot falls back to the guild's with one ops line.
+        None = nowhere (the sheet waits; /raid sheet can place it)."""
+        mine = rc.event_channel(reg, ev, "sheet_channel")
+        if mine:
+            if (ch := self._usable(mine)) is not None:
+                return ch
+            self._own_channel_gone(reg, ev, "sheet_channel", mine)
+        g = reg.config.signup_channel_id
+        return self.get_channel(int(g)) if g else None
+
+    def sheet_channel_of(self, reg, instance: str, schedule: str | None):
+        """sheet_channel before any event exists (the scheduler's open): the schedule's own sheet channel
+        (rc.schedule_sheet_channel), else the guild's; an own one gone falls back with one ops line."""
+        own = rc.schedule_sheet_channel(reg, instance, schedule)
+        g = int(reg.config.signup_channel_id) if reg.config.signup_channel_id else None
+        if own and own != g:
+            if (ch := self._usable(own)) is not None:
+                return ch
+            self._own_channel_gone(reg, f"{reg.raid_def(instance).get('name', instance)} · {schedule}", "sheet_channel", own)
+        return self.get_channel(g) if g else None
+
     def no_officer_channel_why(self, reg, ev=None) -> str:
         """Why officer_channel found none, in a sentence naming the setting to change: none set, or the ones set are the
         public sheet channel (the officers' channel can't be the signup channel), or the bot can't see them."""
         cfg = reg.config
-        set_ = [int(c) for c in (cfg.roster_channel_id, cfg.ops_channel_id) if c]
+        set_ = [int(c) for c in (rc.event_channel(reg, ev, "officers_channel"), cfg.roster_channel_id, cfg.ops_channel_id) if c]
         if not set_:
             return "No roster or ops channel is set. Set one on the Config page."
         if all(c in self._sheet_channels(reg, ev) for c in set_):
@@ -1057,8 +1239,9 @@ class RaidMixin:
 
     @staticmethod
     def _sheet_channels(reg, ev=None) -> set[int]:
-        """The public channels an officer line must never land in: the signup channel and the one `ev`'s sheet is in."""
-        return {int(c) for c in (reg.config.signup_channel_id, getattr(ev, "channel_id", None)) if c}
+        """The public channels an officer line must never land in: the guild's signup channel, `ev`'s own sheet channel
+        and the one `ev`'s sheet is really in."""
+        return {int(c) for c in (reg.config.signup_channel_id, rc.event_channel(reg, ev, "sheet_channel"), getattr(ev, "channel_id", None)) if c}
 
     @contextlib.asynccontextmanager
     async def solving(self, reg, key: str, *, lock: bool = False):
@@ -1250,29 +1433,36 @@ class RaidMixin:
                 return f"{run_title(reg, ev)}: locked by {by}, then {ev.state} before the confirmations finished ({sent} sent)"
             if confirms and ev.state == "locked":
                 await self.refresh_cards(reg, ev)  # the lock card's "confirmations not yet sent" line goes
-            sig = await self.sheet_thread(reg, ev) if ev.channel_id else None  # the event's thread on its sheet, never loose
-            if sig is not None:
-                head = f"🔒 {run_label(reg, ev)}" + (f" · after {rc.lead_name_of(reg, ev)}" if rc.is_follow(ev) else "")
-                n_seated = sum(len(r.selected) for r in ev.all_rosters)
-                if not n_seated:  # an empty roster an officer locked on purpose (F3): nobody to confirm, an officer seats people
-                    text = f"{head} is locked with nobody rostered yet. An officer decides who takes a seat, and nothing is asked of you now."
-                else:
-                    then = ("Rostered? confirm in your DMs. Not rostered? nothing to do." if confirms
-                            else "Rostered? you're in — press Can't make it on the sheet if that changes. Not rostered? nothing to do.")
-                    text = f"{head} is locked: {n_seated} rostered" + (f" in {len(ev.all_rosters)} rosters" if len(ev.all_rosters) > 1 else "") + f". {then}"
-                try:
-                    line = await sig.send(text, allowed_mentions=discord.AllowedMentions.none())
-                    if getattr(line, "id", None):  # kept, so an unlock can take the line back
-                        ev.lock_line = [sig.id, line.id]
-                        await asyncio.to_thread(rs.save, ev, "lock line posted")
-                except Exception as e:  # noqa: BLE001
-                    log.warning("lock line failed (%s): %s", ev.key, e)
+            await self.post_lock_line(reg, rs, ev, confirms)
         finally:
             posting.discard((reg.key, ev.key))
         first = rc.first_part(rs, ev)
         chaining: set = self.__dict__.setdefault("_parts_locking", set())
         tail = None if (reg.key, first.key) in chaining else await self.lock_parts(reg, rs, first, by, fill=fill, by_person=by_person)
         return f"{run_title(reg, ev)}: locked by {by}, {len(ev.all_rosters)} roster(s), {sent} confirmation DM(s)" + (f" · {tail}" if tail else "")
+
+    async def post_lock_line(self, reg, rs, ev, confirms: bool) -> None:
+        """The members' "is locked" line about `ev` in its event's thread on the sheet (sheet_thread — never loose in the
+        channel), kept in `ev.lock_line` so an unlock (or a sheet moved to another channel) can take it back. Written by
+        the lock, and again in the new sheet's thread when the sheet moves (move_channels). No sheet: no line."""
+        sig = await self.sheet_thread(reg, ev) if ev.channel_id else None
+        if sig is None:
+            return
+        head = f"🔒 {run_label(reg, ev)}" + (f" · after {rc.lead_name_of(reg, ev)}" if rc.is_follow(ev) else "")
+        n_seated = sum(len(r.selected) for r in ev.all_rosters)
+        if not n_seated:  # an empty roster an officer locked on purpose (F3): nobody to confirm, an officer seats people
+            text = f"{head} is locked with nobody rostered yet. An officer decides who takes a seat, and nothing is asked of you now."
+        else:
+            then = ("Rostered? confirm in your DMs. Not rostered? nothing to do." if confirms
+                    else "Rostered? you're in — press Can't make it on the sheet if that changes. Not rostered? nothing to do.")
+            text = f"{head} is locked: {n_seated} rostered" + (f" in {len(ev.all_rosters)} rosters" if len(ev.all_rosters) > 1 else "") + f". {then}"
+        try:
+            line = await sig.send(text, allowed_mentions=discord.AllowedMentions.none())
+            if getattr(line, "id", None):  # kept, so an unlock can take the line back
+                ev.lock_line = [sig.id, line.id]
+                await asyncio.to_thread(rs.save, ev, "lock line posted")
+        except Exception as e:  # noqa: BLE001
+            log.warning("lock line failed (%s): %s", ev.key, e)
 
     async def lock_parts(self, reg, rs, first, by: str, fill: bool = True, by_person: bool = False) -> str | None:
         """The first raid's lock builds every later raid of the run (design §5.62), in order: each solves from the run's
@@ -1683,7 +1873,8 @@ class RaidMixin:
         if g is not None and getattr(g, "id", None) != reg.config.discord_guild_id:
             raise RegistryError("That channel is in another server.")
         cid = getattr(channel, "id", None)
-        if cid is not None and cid != reg.config.signup_channel_id and reg.plain_mode(cid) == "ignore":
+        exempt = {reg.config.signup_channel_id, rc.event_channel(reg, ev, "sheet_channel")}  # the guild's and the event's own sheet channel
+        if cid is not None and cid not in exempt and reg.plain_mode(cid) == "ignore":
             raise RegistryError(f"The bot keeps quiet in #{getattr(channel, 'name', cid)} (its plain-text mode is ignore) — pick another channel.")
         embed, view = sheet_message(reg, ev, rc.run_team(reg, ev), self.ico)
         where = f"#{getattr(channel, 'name', cid)}"
@@ -1696,9 +1887,17 @@ class RaidMixin:
             rs.save(ev, "sheet copy posted")
             return f"Posted a read-only copy of the sheet for {run_title(reg, ev)} in {where} — answers go on the live sheet in {self._live_sheet_name(ev)}."
         old = (ev.channel_id, ev.message_id)
+        lines = {p.key: p.lock_line for p in rc.event_parts(rs, ev) if p.lock_line} if old[1] else {}
         msg = await channel.send(embed=embed, **({"view": view} if view else {}))
         ev.channel_id, ev.message_id = msg.channel.id, msg.id
+        ev.sheet_thread_id = None  # the thread on the old message stays there; the next line starts one on the new sheet
         rs.save(ev, "sheet re-posted")
+        for p in rc.event_parts(rs, ev):  # the "is locked" line follows the sheet into its new thread
+            if p.key in lines:
+                p.lock_line = None
+                await self._delete_message(lines[p.key][0], lines[p.key][1], key=ev.key)
+                if p.state == "locked":
+                    await self.post_lock_line(reg, rs, p, bool(p.confirm_by))
         if old[0] and old[1] and old != (ev.channel_id, ev.message_id):
             with contextlib.suppress(Exception):  # the old message keeps its look, says where the sheet went, loses its buttons
                 old_msg = await self.get_channel(old[0]).fetch_message(old[1])
@@ -1809,7 +2008,7 @@ class RaidMixin:
     # ---- opening and cancelling runs (commands, the web and plain-text ops share these)
     async def open_run_and_post(self, reg, rs, instance: str, start: datetime, by: str, schedule: str | None = None, follow: dict | None = None,
                                 lineup: list[dict] | None = None, lock_hours: float | None = None, first_rosters: int | None = None,
-                                auto_lock: bool | None = None, auto_lock_fill: bool | None = None) -> rc.RaidEvent:
+                                auto_lock: bool | None = None, auto_lock_fill: bool | None = None, channels: dict | None = None) -> rc.RaidEvent:
         """Open (or find) the run for `instance` at `start` (from `schedule`, None = the schedule with a run at exactly
         that start, else a one-off — rc.open_run), post its
         sheet in the signup channel when one is set (else the event stays unposted: channel_id None, `/raid sheet` can
@@ -1817,13 +2016,17 @@ class RaidMixin:
         (rc.refuse_past_start) — every on-demand open comes through here; the scheduler only opens future starts. A
         schedule's night asked as a one-off, or one a live one-off holds, is refused (rc.open_refusal); however far ahead, it opens.
         `lock_hours` / `first_rosters` / `auto_lock` / `auto_lock_fill`: the one-off's open form (the New event page,
-        /raid open): its Locks choice, first raid's rosters, Auto Lock and auto-fill (None = the schedule's)."""
+        /raid open): its Locks choice, first raid's rosters, Auto Lock and auto-fill (None = the schedule's); `channels`
+        its own channels (rc.ensure_run). The sheet posts in the event's sheet channel (sheet_channel: its own, else the
+        guild's)."""
         rc.refuse_past_start(reg, start)
         if (why := rc.open_refusal(reg, rs, instance, start, schedule)) is not None:  # a schedule's night: never a one-off beside it
             raise RegistryError(why)
+        if channels and (why := await self.channel_setting_refusal(reg, channels)):  # the bot can post there (Setup's check)
+            raise RegistryError(why)
         ev = rc.open_run(reg, rs, instance, start, by=by, schedule=schedule, follow=follow, lineup=lineup, lock_hours=lock_hours, first_rosters=first_rosters,
-                         auto_lock=auto_lock, auto_lock_fill=auto_lock_fill)
-        channel = self.get_channel(reg.config.signup_channel_id) if reg.config.signup_channel_id else None
+                         auto_lock=auto_lock, auto_lock_fill=auto_lock_fill, channels=channels)
+        channel = self.sheet_channel(reg, ev)
         if channel and not ev.message_id:
             await self.post_sheet(reg, rs, ev, channel)
         if not ev.health_early and not ev.health_posted and rc.early_warning(reg, rs, ev):
@@ -2091,7 +2294,10 @@ class RaidMixin:
         still in play — an open Confirm / Can't ask and an open fill ask — is edited to the new time with its buttons
         (edit_live_card: the ask stands, nobody answers again); a moved start gives everyone who answered a `moved`
         notice (Me page, /me view). One line in the run's thread, one audit line. Nobody is DMed. → the done line.
-        `rev` (rc.event_rev, what the preview showed): a run changed since is refused (rc.RUN_CHANGED) under the locks."""
+        `rev` (rc.event_rev, what the preview showed): a run changed since is refused (rc.RUN_CHANGED) under the locks.
+        The event's own channels (`timing`'s sheet_channel / officers_channel / loot_log_channel) are not timing: checked
+        as the guild's channel setting is (channel_setting_refusal), refused while a lock or an unlock still posts
+        (rc.CHANNELS_BUSY), written with the rest, then move_channels moves what is posted (the route waits MOVE_WAIT_S)."""
         from .consequences import reschedule_consequence
 
         if by_id is not None and (await guild_routing.resolve_role(self, reg, int(by_id), max_age=guild_routing.PRIV_LIVE)).role not in ("owner", "officer"):
@@ -2101,15 +2307,28 @@ class RaidMixin:
         why = rc.reschedule_refusal(reg, rs, first, start, timing)
         if why:
             raise RegistryError(why)
+        chans = rc.channel_changes(reg, first, timing)
+        if chans and (refusal := await self.channel_setting_refusal(reg, chans)):  # the bot can post there (Setup's check)
+            raise RegistryError(refusal)
         if preview:
             return reschedule_consequence(reg, rs, first, start, timing)
         parts = rc.event_parts(rs, first)
+
+        def busy() -> bool:  # a lock still posting its cards and line, or an unlock still taking them down
+            chaining = self.__dict__.get("_parts_locking", set())
+            return self.unlock_finishing(reg, first) is not None or any(
+                (reg.key, p.key) in self._lock_posting() or (reg.key, p.key) in chaining for p in parts)
+
+        if chans and busy():
+            raise RegistryError(rc.CHANNELS_BUSY)
         async with contextlib.AsyncExitStack() as stack:
             for key in sorted(p.key for p in parts):  # one order everywhere: no lock cycle with a cancel or a lock
                 await stack.enter_async_context(self.board_lock(reg, key))
             why = rc.reschedule_refusal(reg, rs, first, start, timing)  # again, now that nothing else writes the run
             if why:
                 raise RegistryError(why)
+            if chans and busy():
+                raise RegistryError(rc.CHANNELS_BUSY)
             if rev and rev != rc.event_rev(reg, rs, first):  # changed since the confirm was shown: never overwritten unseen
                 raise RegistryError(rc.RUN_CHANGED)
             old = first.start
@@ -2118,6 +2337,14 @@ class RaidMixin:
         name = reg.raid_def(first.instance).get("name", first.instance)
         when = reg.local12(first.start)
         moved = first.start != old
+        if mv.channels:  # the write is done: what was posted moves now (its route waits a little, the rest goes on behind)
+            task = self.finish_later(reg, first, "the channel move", self.move_channels(reg, rs, first, mv.channels))
+            await asyncio.wait({task}, timeout=self.MOVE_WAIT_S)
+        if mv.channels and not moved and not mv.timing and not mv.splits:  # the channels alone: nothing else to redraw or tell
+            where = self.channel_words(reg, first, mv.channels)
+            await self.post_run_update(reg, first, f"📌 {name}: its channels set by {by} · {where}", whole=True)
+            await ops_mod.audited(self.ops, reg, by, f"set {name}'s channels for {when}: {where}", via=via, by_id=by_id)
+            return [f"{name}'s channels are saved, and what was posted has moved. Nobody was DMed."]
         edited = await self._after_move(reg, rs, first, parts, mv, moved)
         cards = "" if not edited else " · 1 open card shows the new time" if edited == 1 else f" · {edited} open cards show the new time"
         timing_only = set(mv.timing) <= {"cutoff_hard_hours", "cutoff_soft_hours", "confirm_hours", "reminders", "autofill", "fill_ask_hours",
@@ -2130,6 +2357,41 @@ class RaidMixin:
             what += f" and set its own {own}"
         await ops_mod.audited(self.ops, reg, by, what, via=via, by_id=by_id)
         return [f"{name} now starts {when}." if moved else f"{name} keeps its start. Its own {own} {'is' if timing_only else 'are'} saved."]
+
+    def channel_words(self, reg, ev, moves: dict) -> str:
+        """'signup sheet #alt-signups, loot log the guild's #loot': where each place changed now posts (ops and thread
+        lines, officers only)."""
+        from .discord_pool import channel_name
+
+        what = {"sheet_channel": "signup sheet", "officers_channel": "officers' cards", "loot_log_channel": "loot log"}
+        out = []
+        for f, (_old, new) in moves.items():
+            if new:
+                out.append(f"{what[f]} {channel_name(self, new)}")
+            else:
+                g = rc.channel_of(reg, None, f)
+                out.append(f"{what[f]} the guild's " + (channel_name(self, g) if g else "channel"))
+        return ", ".join(out)
+
+    async def channel_setting_refusal(self, reg, chans: dict) -> str | None:
+        """Why one of a schedule's or an event's own channels can't be saved, or None: the check the guild's channel
+        setting runs (SetupMixin._channel_or_refuse — reachable, a text channel of this server, the bot's permissions
+        for that place, threads included for the sheet). A channel cleared (back to the guild's) is never refused. A
+        client without the check (a test fake) passes."""
+        from .registry import CHANNEL_KIND_OF
+
+        check = getattr(self, "_channel_or_refuse", None)
+        if check is None:
+            return None
+        for f, v in chans.items():
+            if not v:
+                continue
+            try:
+                check(reg, CHANNEL_KIND_OF[f], int(v))
+            except ValueError as e:
+                text = str(e)
+                return text[:1].upper() + text[1:] + ("" if text.endswith(".") else ".")
+        return None
 
     async def _after_move(self, reg, rs, first, parts, mv, moved: bool, notice: str | None = None) -> int:
         """What a moved start (or a re-timed run) tells, shared by reschedule_event and start_now: the sheet edited in

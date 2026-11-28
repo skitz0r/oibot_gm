@@ -172,7 +172,9 @@ PAGE_WORDS = {
                         "auto_lock": "Auto Lock", "auto_lock_fill": "Auto-fill on Auto Lock",
                         "weights": "Priority",
                         # an event's own (Edit event, the owner's tweaks B): first to join or by priority
-                        "first_come": "Seat order"},
+                        "first_come": "Seat order",
+                        # a schedule's and an event's own channels (design 2026-11-27-event-channels): the Channels section
+                        "sheet_channel": "Signup sheet", "officers_channel": "Officers' cards", "loot_log_channel": "Loot log"},
     # the (?) beside each switch of Sheet timing (the schedule editor and Edit event): exactly who gets what, when and
     # where — read from discord_raid.post_health / dm_on_open / lock_run / confirm_one / run_fill, raidcycle.fill_batch
     # (FILL_OVERASK one more than the shortfall, FILL_MAX_OPEN asks out at once) and expire_confirmation_asks
@@ -198,14 +200,29 @@ PAGE_WORDS = {
         "auto_lock_fill": "When Auto Lock locks the roster, the bot fills its open seats from those who joined. "
                           "Everyone on the board keeps their place. "
                           "With Auto-fill on Auto Lock off, that lock rosters exactly the names on the board.",
+        # the Channels section (the schedule editor, New event, Edit event): where each place posts and what a change moves
+        "sheet_channel": "The signup sheet posts here, with its thread for the lock and cancel lines. "
+                         "Changing it on a live event moves the sheet with every answer.",
+        "officers_channel": "The health card, the lock cards, the event's updates thread and a loot council's thread post here. "
+                            "Pick a channel only officers can see.",
+        "loot_log_channel": "During a loot council, one public line per confirmed award posts here. "
+                            "Lines already posted stay where they are.",
     },
+    # the Channels section: its title, the empty option of each select (the channel it falls back to), and a Details
+    # row's value when an event's or a schedule's own channel differs from the guild's (where it comes from)
+    "channels": "Channels",
+    "channel_guilds": "{channel} (the guild's)", "channel_schedules": "{channel} (the schedule's)",
+    "channel_guild_unset": "The guild's, once one is set on the Config page",
+    "channel_from_schedule": "{channel}, the schedule's", "channel_from_event": "{channel}, this event's own",
+    "channel_gone": "a channel the bot can't see",
     # the (?)'s name for a screen reader: "What Signup Reminder does"
     "help_about": "What {name} does",
     # Edit event's seating choice beside PAGE_WORDS["first_to_join"], and its one-line states: after the lock, and once the
     # event has started or is over (the page shows nothing to edit)
     "by_priority": "By priority",
     "edit_locked": "The roster is locked, so only Automated Fill Requests and how long an ask waits can change.",
-    "edit_over": "This event has started or is over, so its settings can't change.",
+    "edit_over": "This event is over, so its settings can't change.",
+    "edit_started": "This event has started, so only its channels can change.",
     # Auto Lock's and its auto-fill's values (constants.switch_words), and the Details Locks row of an event (or a
     # schedule, or a coming-up night) whose Auto Lock is off: nobody's clock locks it
     "switch_on": "On", "switch_off": "Off", "officer_locks": "An officer locks it.",

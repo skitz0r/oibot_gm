@@ -510,7 +510,7 @@ class OpenWizard(Wizard, LineupBlock):
             lines.append(f"-# This is before the raid's first lockout opens ({self.reg.local12(fo)}).")
         elif not ev and (before := before_first_open_sentence(self.reg, lineup, start)):  # C9: a later raid opens after its start
             lines.append(f"-# {before}")
-        if not self.reg.config.signup_channel_id:
+        if not rc.schedule_sheet_channel(self.reg, self.rid, self.draft.get("schedule")):  # the schedule's own sheet channel counts
             lines.append(f"-# {cq.no_channel_sentence(self.draft['here'])}")
         await self.show(interaction, "\n".join(lines),
                         self.button("Open", self.save, discord.ButtonStyle.success),

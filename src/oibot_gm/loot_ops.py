@@ -224,7 +224,10 @@ def describe(reg: Registry, op, *, why: str | None = None) -> str:
             raise RegistryError(f"{title} isn't locked — lock the roster first.")
         if sessions:
             return f"loot council for {title}: already open — the card is re-posted in its thread"
-        where = "the roster channel" if reg.config.roster_channel_id else "the ops channel" if reg.config.ops_channel_id else None
+        from .raidcycle import event_channel
+
+        where = ("the event's officers' channel" if event_channel(reg, ev, "officers_channel") else "the roster channel" if reg.config.roster_channel_id
+                 else "the ops channel" if reg.config.ops_channel_id else None)
         if where is None:
             raise RegistryError("Set a roster or ops channel first — the loot council's thread goes there.")
         n = len(ev.all_rosters)

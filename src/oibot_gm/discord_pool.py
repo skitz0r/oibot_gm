@@ -1226,16 +1226,28 @@ class LootLogMixin:
         LEDGER_LISTENERS[:] = [f for f in LEDGER_LISTENERS if getattr(f, "__name__", "") != loot_log_award.__name__] + [loot_log_award]
 
     def loot_log_target(self, reg: Registry, run_key: str | None):
-        """(channel, fell_back) for an award line, or (None, False): log off, or nowhere to post."""
+        """(channel, fell_back) for an award line, or (None, False): log off, or nowhere to post. The event's own loot log
+        channel first (rc.event_channel on the award's raid — every raid of an event holds the same; one deleted or
+        closed to the bot falls back with one ops line, RaidMixin._own_channel_gone), then the guild's loot channel,
+        then the event's updates thread (`fell_back`)."""
+        from . import raidcycle as rc
+
         cfg = reg.config
         if not cfg.loot_log:
             return None, False
         get = getattr(self, "get_channel", None)
+        ev = self.raids.store(reg).events.get(run_key) if run_key and hasattr(self, "raids") else None
+        mine = rc.event_channel(reg, ev, "loot_log_channel")
+        if mine and get:
+            usable = getattr(self, "_usable", None)
+            ch = usable(mine) if usable else get(mine)
+            if ch is not None:
+                return ch, False
+            if (gone := getattr(self, "_own_channel_gone", None)) is not None:
+                gone(reg, ev, "loot_log_channel", mine)
         if cfg.loot_channel_id:
             ch = get(cfg.loot_channel_id) if get else None
             return ch, False
-        ev = self.raids.store(reg).events.get(run_key) if run_key and hasattr(self, "raids") else None
-        from . import raidcycle as rc
 
         tid = rc.updates_thread_of(self.raids.store(reg), ev) if ev is not None else None  # the event's one updates thread
         return (get(tid) if get and tid else None), True

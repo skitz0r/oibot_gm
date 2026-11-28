@@ -25,6 +25,21 @@ PICK_AGAIN = "Pick another time"
 CHANGE = "Change a setting"
 HOURS = ("lock_hours_before", "nudge_hours_before", "confirm_hours_before", "fill_ask_hours")
 SWITCHES = ("nudge", "confirm", "autofill", "auto_lock", "auto_lock_fill")
+CHANNELS = ("sheet_channel", "officers_channel", "loot_log_channel")  # the Channels step: not timing, editable until it ends
+PICK_CHANNEL = "Pick the channel"
+
+
+def channel_mention_words(reg: Registry, field: str, own, back: dict | None = None) -> str:
+    """One of an event's or a schedule's own channels as a Discord screen says it: its mention, or the empty choice's
+    words — the channel it falls back to, '<#raid-signups> (the guild's)' or '(the schedule's)'."""
+    from .registry import GUILD_CHANNEL_OF
+
+    if own:
+        return f"<#{own}>"
+    if back and back.get(field):
+        return PAGE_WORDS["channel_schedules"].format(channel=f"<#{back[field]}>")
+    g = getattr(reg.config, GUILD_CHANNEL_OF[field], None) or (reg.config.ops_channel_id if field == "officers_channel" else None)
+    return PAGE_WORDS["channel_guilds"].format(channel=f"<#{g}>") if g else PAGE_WORDS["channel_guild_unset"]
 
 
 async def pick_event(interaction: discord.Interaction, reg: Registry, *, title: str,
@@ -207,7 +222,7 @@ class EditEventWizard(EventWizard):
     def options(self, ev: rc.RaidEvent) -> dict:
         from .event_view import edit_options
 
-        return edit_options(self.reg, self.rs, ev, rc.run_timing(self.reg, ev))
+        return edit_options(self.reg, self.rs, ev, rc.run_timing(self.reg, ev), started=ev.start <= self.reg.now_local())
 
     def value(self, opts: dict, field: str):
         if field == "weights":
@@ -240,6 +255,9 @@ class EditEventWizard(EventWizard):
             self.timing[field] = v
 
     def words(self, field: str, v) -> str:
+        if field in CHANNELS:
+            ev = self.ev()
+            return channel_mention_words(self.reg, field, v, rc.schedule_channels(self.reg, ev) if ev is not None else None)
         if field == "weights":
             P = PAGE_WORDS["priority"]
             return ", ".join(f"{P[k]} {v.get(k)}" for k in P)
@@ -260,6 +278,10 @@ class EditEventWizard(EventWizard):
                 continue
             was, now = self.words(f, opts["values"].get(f)), self.words(f, self.value(opts, f))
             out.append(f"{setting_label(f)}: {was}" + (f" → {now}" if f in self.timing and now != was else ""))
+        own = {c["key"]: c["value"] for c in opts["channels"]["fields"]}
+        for f in CHANNELS:  # the Channels step: drafted ones only (the hub stays short)
+            if f in self.timing:
+                out.append(f"{setting_label(f)}: {self.words(f, own.get(f))} → {self.words(f, self.timing[f] or None)}")
         return out
 
     # ---- the hub
@@ -268,20 +290,20 @@ class EditEventWizard(EventWizard):
 
     async def hub(self, interaction: discord.Interaction) -> None:
         ev = self.ev()
-        if ev is None or ev.state not in ("open", "locked") or ev.start <= self.reg.now_local():
+        if ev is None or ev.state not in ("open", "locked"):
             await self.finish(interaction, PAGE_WORDS["edit_over"])
             return
         opts = self.options(ev)
-        allowed = set(opts["fields"])
+        allowed = set(opts["fields"]) | set(CHANNELS)  # the channels change until the event ends
         dropped = [setting_label(k) for k in self.timing if k not in allowed]
         self.timing = {k: v for k, v in self.timing.items() if k in allowed}  # a lock meanwhile narrows the draft
         self.prune_weights(opts)
-        head = [f"**{run_title(self.reg, ev)}**"] + ([PAGE_WORDS["edit_locked"]] if ev.state != "open" else [])
+        head = [f"**{run_title(self.reg, ev)}**"] + ([opts["note"]] if opts.get("note") else [PAGE_WORDS["edit_locked"]] if ev.state != "open" else [])
         if dropped:  # said once: the next hub has nothing left to drop
             head.append(f"The roster locked while you edited, so your change to {join_words(dropped)} was dropped.")
         # Auto-fill on Auto Lock sits under Auto Lock and changes nothing while Auto Lock is off (issue 14): not offered then
         choices = [Opt(f, setting_label(f)) for f in opts["fields"]
-                   if not (f == "auto_lock_fill" and self.value(opts, "auto_lock") is False)]
+                   if not (f == "auto_lock_fill" and self.value(opts, "auto_lock") is False)] + [Opt(f, setting_label(f)) for f in CHANNELS]
         await self.plain(interaction, "\n".join(head + self.lines(opts)),
                          self.select(CHANGE, choices, self.setting),
                          self.button(REVIEW, self.review, discord.ButtonStyle.primary, disabled=not self.timing),
@@ -293,6 +315,9 @@ class EditEventWizard(EventWizard):
             await self.hub(interaction)
             return
         opts, f = self.options(ev), values[0]
+        if f in CHANNELS:
+            await self.channel_screen(interaction, f)
+            return
         if f not in opts["fields"]:  # locked since the hub was drawn
             await self.hub(interaction)
             return
@@ -324,6 +349,42 @@ class EditEventWizard(EventWizard):
 
         await self.plain(interaction, f"**{run_title(self.reg, ev)}**\n{setting_label(f)}: {self.words(f, cur)}",
                          self.select(setting_label(f), choices, picked), back)
+
+    async def channel_screen(self, interaction: discord.Interaction, f: str) -> None:
+        """One channel of the event: Discord's own channel picker (a widget, never typed), or the empty choice — its
+        schedule's channel, else the guild's. Drafted; the Review box says what moves."""
+        from .flows_config import _text_channel_select
+
+        ev = self.ev()
+        if ev is None:
+            await self.hub(interaction)
+            return
+        own = rc.own_channels(self.reg, ev).get(f)
+        cur = self.timing.get(f, own) or None
+        back = rc.schedule_channels(self.reg, ev)
+
+        async def picked(i: discord.Interaction, chans: list) -> None:
+            self._put_channel(f, str(chans[0].id) if chans else "", own)
+            await self.hub(i)
+
+        async def cleared(i: discord.Interaction) -> None:
+            self._put_channel(f, "", own)
+            await self.hub(i)
+
+        empty = "Use the schedule's channel" if back.get(f) else "Use the guild's channel"  # a button label renders no mention
+        await self.plain(interaction, f"**{run_title(self.reg, ev)}**\n{setting_label(f)}: {self.words(f, cur)}\n-# {PAGE_WORDS['schedule_field_help'][f]}",
+                         _text_channel_select(PICK_CHANNEL, picked),
+                         self.button(empty, cleared, disabled=not cur or cur == back.get(f)),
+                         self.button("Back", self.hub))
+
+    def _put_channel(self, f: str, v: str, own) -> None:
+        """Draft one channel: `v` an id, or '' for the empty choice; the event's own value again is no change."""
+        ev = self.ev()
+        back = rc.schedule_channels(self.reg, ev).get(f) if ev is not None else None
+        if (v or back or None) == (own or None):
+            self.timing.pop(f, None)
+        else:
+            self.timing[f] = v
 
     def weights_form(self, opts: dict) -> Form:
         from .schedule_view import MAX_WEIGHT

@@ -17,7 +17,8 @@ from .constants import RANK_ORDER, ROLES
 from .models import Player, RosterResult
 from .profiles import GameProfile
 from .registry import (ADHOC_SCHEDULE, ADHOC_WEIGHTS, DEFAULT_RAID_SIZE, FOLLOW_SCHEDULE, LINEUP_MAX, RAID_DEFAULTS, RAID_WEIGHT_DEFAULTS, Member, Registry,
-                       RegisteredCharacter, RegistryError, can_cover, join_words, now, schedule_class, schedule_def_of, slot_words)
+                       RegisteredCharacter, RegistryError, can_cover, join_words, now, schedule_class, schedule_def_of, slot_words,
+                       GUILD_CHANNEL_OF, SCHEDULE_CHANNELS, channel_clash, channel_value)
 from .roster import explain, solver
 from .store import GitStore
 
@@ -401,6 +402,41 @@ def auto_lock_fill(reg: Registry, ev: "RaidEvent") -> bool:
     """Auto-fill on Auto Lock (issue 14): the clock's lock fills the open seats with the solver. Off, it rosters the
     board as it stands. Meaningful only while auto_lock is on; a dict without it reads True."""
     return bool(team_setting(run_team(reg, ev), "auto_lock_fill"))
+
+
+def event_channel(reg: Registry, ev: "RaidEvent | None", field: str) -> int | None:
+    """An event's OWN channel for one place (registry.SCHEDULE_CHANNELS: sheet_channel · officers_channel ·
+    loot_log_channel), stamped on its run dict at open from its schedule (or the one-off's form) and changed by Edit
+    event (set_channels writes every raid's dict alike), else None. Never the guild's: channel_of adds that."""
+    if ev is None:
+        return None
+    v = (reg.config.team(ev.team) or {}).get(field)
+    return int(v) if v and str(v).isdigit() else None
+
+
+def channel_of(reg: Registry, ev: "RaidEvent | None", field: str) -> int | None:
+    """THE channel id one place of `ev` posts in, as stored: the event's own (event_channel), else the guild's setting
+    (GUILD_CHANNEL_OF). None = neither is set. The Discord side checks the channel still exists (RaidMixin.sheet_channel,
+    officer_channel, LootLogMixin.loot_log_target) and falls back to the guild's with one ops line when it is gone."""
+    own = event_channel(reg, ev, field)
+    if own:
+        return own
+    g = getattr(reg.config, GUILD_CHANNEL_OF[field], None)
+    return int(g) if g else None
+
+
+def schedule_sheet_channel(reg: Registry, instance: str, schedule: str | None) -> int | None:
+    """Where a schedule's (or a one-off's: None) next sheet would post, before any event exists: the schedule's own sheet
+    channel, else the guild's signup channel. The scheduler's open, Open now, the previews and the "no signup channel"
+    warnings ask this, so a schedule that names its own channel opens in a guild with none."""
+    try:
+        own = reg.schedule_def(instance, schedule).get("sheet_channel") if schedule else None
+    except RegistryError:
+        own = None
+    if own and str(own).isdigit():
+        return int(own)
+    g = reg.config.signup_channel_id
+    return int(g) if g else None
 
 
 def prelock_deadline(reg: Registry, ev: "RaidEvent", hard: datetime) -> datetime:
@@ -1211,7 +1247,7 @@ def fit_cutoffs(available_h: float, nudge_h: float, lock_h: float, confirm_h: fl
 def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None, schedule: str | None = None,
                follow: dict | None = None, *, occurrence: str | None = None, rs: "RaidStore | None" = None,
                lineup: list[dict] | None = None, lock_hours: float | None = None, first_rosters: int | None = None,
-               auto_lock: bool | None = None, auto_lock_fill: bool | None = None) -> dict:
+               auto_lock: bool | None = None, auto_lock_fill: bool | None = None, channels: dict | None = None) -> dict:
     """CREATE the run dicts of one run — one per raid of its lineup — that carry its settings (size, cutoffs from its
     schedule's cadence, how many rosters it expects) under new keys (new_run_key; finding an existing run is the
     caller's: find_run). `schedule` = the schedule id it comes from (None: the schedule with a run at exactly `start`,
@@ -1230,7 +1266,9 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
     files a new key must not meet. `lock_hours` / `first_rosters` (a one-off from the New event page, never a test run):
     the lock this many hours before the start instead of the schedule's, and the first raid's rosters. `auto_lock` /
     `auto_lock_fill` (the one-off's open form): its Auto Lock and auto-fill instead of the schedule's (None = the
-    schedule's, stamped like the rest of its sheet timing). → part 0's dict."""
+    schedule's, stamped like the rest of its sheet timing). `channels` (the one-off's open form) {sheet_channel,
+    officers_channel, loot_log_channel}: its own channels instead of the schedule's; a channel neither names is not
+    stamped (the guild's, read live). Later raids copy part 0's through _part_dict. → part 0's dict."""
     from .registry import parse_lineup
 
     test = bool(cutoffs)
@@ -1250,6 +1288,10 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
         if e["raid"] not in reg.profile.raids or e["raid"] == instance:
             raise RegistryError(f"a later raid is another raid of this game (one of {', '.join(reg.profile.raids)})")
     offsets = reg.lineup_offsets(full)  # LINEUP_ORDER
+    if channels and not test:  # the open form's own channels: never the officers' cards in the sheet's channel
+        stamp = {f: channel_value(channels.get(f)) or channel_value(rd.get(f)) for f in SCHEDULE_CHANNELS}
+        if why := channel_clash(reg.config, stamp["sheet_channel"], stamp["officers_channel"]):
+            raise RegistryError(why)
     key = new_run_key(reg, rs, instance)
     lead, lock, confirm = float(rd["signup_lead_hours"]), float(rd["lock_hours_before"]), float(rd["confirm_hours_before"])
     if not own and lock_hours is not None:  # the New event page's Locks choice: the reminder and confirm-by never after it
@@ -1278,6 +1320,11 @@ def ensure_run(reg: Registry, instance: str, start: datetime, by: str = "schedul
     t["rotation_sat_out"] = raid_sat_out(reg, instance)  # what the rotation split read live: the raid's sat_out weight
     occ = (occurrence or occurrence_stamp(reg, start)) if schedule_stamp(sched["id"]) else None
     t.update({"occurrence": occ, "event": key, "part": 0, "starts": 0})
+    if not test:  # the event's own channels: the open form's, else its schedule's (unset = the guild's, never stamped)
+        for f in SCHEDULE_CHANNELS:
+            v = channel_value((channels or {}).get(f)) or channel_value(rd.get(f))
+            if v:
+                t[f] = v
     if not test and (sched.get("virtual") or len(reg.schedules(instance)) > 1):  # the raid's only schedule needs no name on the run
         t["name"] = f"{rd.get('name', instance)} · {sched.get('name') or sched['id']} {reg.local12(start)}"
     if cutoffs:
@@ -1342,7 +1389,7 @@ def closed_run_refusal(rs: "RaidStore", ev: "RaidEvent | None") -> str | None:
 def open_run(reg: Registry, rs: "RaidStore", instance: str, start: datetime, by: str = "scheduler", cutoffs: dict | None = None,
              schedule: str | None = None, follow: dict | None = None, lineup: list[dict] | None = None,
              lock_hours: float | None = None, first_rosters: int | None = None, auto_lock: bool | None = None,
-             auto_lock_fill: bool | None = None) -> "RaidEvent":
+             auto_lock_fill: bool | None = None, channels: dict | None = None) -> "RaidEvent":
     """Open (or find the live) run for `instance` at `start`: a schedule's run is found by its occurrence (live: handed
     back, its missing later raids completed — complete_parts; closed: RegistryError with closed_run_refusal's sentence,
     nothing written), a one-off or a test run by a live run at that minute (live_at); else a new run (ensure_run, then
@@ -1368,7 +1415,7 @@ def open_run(reg: Registry, rs: "RaidStore", instance: str, start: datetime, by:
         return have
     with reg.config_lock:  # one step for a box re-described under the lock (configops.apply_ops `expect`): never half an open
         t = ensure_run(reg, instance, start, by, cutoffs, schedule, follow=follow, rs=rs, lineup=lineup, lock_hours=lock_hours, first_rosters=first_rosters,
-                       auto_lock=auto_lock, auto_lock_fill=auto_lock_fill)
+                       auto_lock=auto_lock, auto_lock_fill=auto_lock_fill, channels=channels)
         ev = open_event(reg, rs, t, start)
         complete_parts(reg, rs, ev)
     return ev
@@ -1615,7 +1662,10 @@ AUTO_LOCK_LOCKED = "Auto Lock and its auto-fill are fixed once the roster locks.
 SWITCH_EMPTY = "Say on or off for that setting."
 PRIORITY_LOCKED = "The priority is fixed once the roster locks, because the roster is already chosen."
 TIMING_ORDER = "The Signup Reminder must go out before Locks, and Confirm by can't come before Locks."
-TIMING_UNKNOWN = ("An event's own settings are its reminder, lock, Auto Lock, confirm-by, asks, confirmation, priority and split.")
+TIMING_UNKNOWN = ("An event's own settings are its reminder, lock, Auto Lock, confirm-by, asks, confirmation, priority, split and channels.")
+CHANNELS_CLOSED = "This event is finished or cancelled, so its channels can't change."
+CHANNELS_SAME = "The event already posts in those channels."
+CHANNELS_BUSY = "The event is still posting its lock or unlock cards, so its channels can't change for a few seconds."
 MOVE_OFFICER_ONLY = "Only an officer moves an event or changes its timing."
 MOVE_CONFIRM_GRACE = timedelta(hours=1)  # a confirm-by the move leaves in the past: within the hour instead (never past the start)
 
@@ -1672,7 +1722,7 @@ def event_rev(reg: Registry, rs: "RaidStore", ev: "RaidEvent") -> str:
     team = run_team(reg, first)
     timing = {k: (team.get(k) if k in team else team_setting(team, k)) for k in sorted(set(EVENT_TIMING.values()) - _OWN_READ)}
     own = [run_weights(reg, first), run_first_come(reg, first), run_confirms(reg, first),
-           [(p.key, run_strategy(reg, p)) for p in event_parts(rs, first) if p.state not in ("done", "cancelled")]]
+           [(p.key, run_strategy(reg, p)) for p in event_parts(rs, first) if p.state not in ("done", "cancelled")], own_channels(reg, first)]
     raw = json.dumps([first.starts_at, first.state, run_lineup(reg, rs, first), timing, own], sort_keys=True, default=str)
     return hashlib.sha1(raw.encode()).hexdigest()[:16]
 
@@ -1731,6 +1781,9 @@ class Moved(BaseModel):
     splits: dict[str, str] = Field(default_factory=dict)  # raid key → its new split (EVENT_TIMING's split_policy)
     lock_moved: bool = False  # the lock time changes while the start stays: who answered gets a notice of the new lock
     seating: Optional[bool] = None  # the seating switched now: True = first to join, False = by priority
+    # the event's own channels set now: SCHEDULE_CHANNELS field → [own before, own after] (ids as text, None = the guild's);
+    # RaidMixin.reschedule_event moves what is posted after the write (move_channels)
+    channels: dict[str, list[Optional[str]]] = Field(default_factory=dict)
 
 
 def run_timing(reg: Registry, first: "RaidEvent") -> dict:
@@ -1805,7 +1858,7 @@ def _timing_values(timing: dict | None) -> dict:
     (`split_policy` left to split_changes); RegistryError(TIMING_UNKNOWN) for any other setting or a value that isn't one."""
     out: dict = {}
     for k, v in (timing or {}).items():
-        if k == "split_policy":
+        if k == "split_policy" or k in SCHEDULE_CHANNELS:  # a split: split_changes; a channel: channel_changes
             continue
         if k.startswith("weight_"):
             out["weights"] = {**out.get("weights", {}), **_weights_value({k: v})}
@@ -1850,14 +1903,70 @@ def timing_changes(reg: Registry, first: "RaidEvent", timing: dict | None) -> di
     return out
 
 
+def own_channels(reg: Registry, ev: "RaidEvent") -> dict[str, str | None]:
+    """The event's own channels {field: id as text | None} (event_channel's, every SCHEDULE_CHANNELS field)."""
+    return {f: (str(c) if (c := event_channel(reg, ev, f)) else None) for f in SCHEDULE_CHANNELS}
+
+
+def schedule_channels(reg: Registry, first: "RaidEvent") -> dict[str, str | None]:
+    """The own channels of the schedule `first`'s event came from, as that schedule holds them NOW ({field: id as text |
+    None}; all None for a one-off or a schedule gone) — what an event's cleared channel goes back to (channel_changes)."""
+    sid = getattr(first, "schedule", None)
+    try:
+        sd = reg.schedule_def(first.instance, sid) if sid and sid not in (ADHOC_SCHEDULE, FOLLOW_SCHEDULE) else {}
+    except (RegistryError, KeyError):
+        sd = {}
+    return {f: channel_value(sd.get(f)) for f in SCHEDULE_CHANNELS}
+
+
+def channel_changes(reg: Registry, first: "RaidEvent", timing: dict | None) -> dict[str, str | None]:
+    """The channel part of an edit's `timing` that changes the event: {field: new own id as text | None (the guild's)},
+    a value equal to the event's own now dropped. An empty value goes back to the event's schedule's channel when that
+    schedule names one (schedule_channels), else to the guild's. A value that is no channel: RegistryError(CHANNEL_WHEN)."""
+    now_ = own_channels(reg, first)
+    back = schedule_channels(reg, first)
+    out = {}
+    for f in SCHEDULE_CHANNELS:
+        if timing and f in timing:
+            v = channel_value(timing[f]) or back[f]
+            if v != now_[f]:
+                out[f] = v
+    return out
+
+
+def channel_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", changes: dict) -> str | None:
+    """Why the event `ev` belongs to can't take its own channels `changes` (channel_changes), else None: it has ended or
+    is cancelled (CHANNELS_CLOSED — open, locked and started events take them), or its officers' cards would share the
+    signup sheet's channel (registry.channel_clash). Not timing: none of Reschedule's start or lock gates apply."""
+    first = first_part(rs, ev)
+    if first.state in ("done", "cancelled"):
+        return CHANNELS_CLOSED
+    after = {**own_channels(reg, first), **changes}
+    return channel_clash(reg.config, after["sheet_channel"], after["officers_channel"])
+
+
+def _is_channel_only(start: datetime | None, first: "RaidEvent", timing: dict | None) -> bool:
+    """An edit that names only channels (no new start, no other setting): Reschedule's start and lock gates stay out."""
+    return (start is None or start == first.start) and bool(timing) and all(k in SCHEDULE_CHANNELS for k in timing)
+
+
 def reschedule_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", start: datetime | None, timing: dict | None,
                        now: datetime | None = None) -> str | None:
     """Why `ev`'s run can't move to `start` / take `timing`, in one sentence, else None — in this order: finished or
     cancelled (MOVE_CLOSED), already started (MOVE_STARTED: neither start nor timing), a start more than
     PAST_GRACE_MINUTES ago (consequences.move_past_sentence), nothing that changes (MOVE_SAME; TIMING_SAME for a timing-only no-op), its
     first raid already has another live run at that minute (MOVE_CLASH), timing on a locked run (TIMING_LOCKED), a
-    reminder after the lock or a confirm-by before it (TIMING_ORDER). Any raid of a run answers for its first raid."""
+    reminder after the lock or a confirm-by before it (TIMING_ORDER). Any raid of a run answers for its first raid.
+    The event's own channels (SCHEDULE_CHANNELS) ride along but are not timing: an edit of channels alone answers
+    channel_refusal only (until the event ends or is cancelled, the start and the lock past or not); with other
+    settings, both refusals apply."""
     first = first_part(rs, ev)
+    try:
+        chans = channel_changes(reg, first, timing)
+    except RegistryError as e:
+        return str(e)
+    if _is_channel_only(start, first, timing):
+        return channel_refusal(reg, rs, first, chans) or (None if chans else CHANNELS_SAME)
     if first.state in ("done", "cancelled"):
         return MOVE_CLOSED
     now = now or reg.now_local()
@@ -1868,11 +1977,13 @@ def reschedule_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", start: d
         splits = split_changes(reg, rs, ev, timing)
     except RegistryError as e:
         return str(e)
+    if chans and (why := channel_refusal(reg, rs, first, chans)):
+        return why
     if start is not None and start < now - timedelta(minutes=PAST_GRACE_MINUTES):
         from .consequences import move_past_sentence
 
         return move_past_sentence(reg, start, first.start)
-    if (start is None or start == first.start) and not values and not splits:
+    if (start is None or start == first.start) and not values and not splits and not chans:
         return TIMING_SAME if timing else MOVE_SAME
     if start is not None and start != first.start:
         other = live_at(rs, first.instance, start, test=bool(first.test))
@@ -1986,6 +2097,8 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
     now_ = reg.now_local()
     values = timing_changes(reg, first, timing)
     splits = split_changes(reg, rs, ev, timing)
+    chans = channel_changes(reg, first, timing)
+    chan_moves = {f: [own_channels(reg, first)[f], v] for f, v in chans.items()}
     t0 = teams.get(first.key)
     old_w = {p.key: run_weights(reg, p) for p in parts}  # each raid's own weights before (a weight edit changes only those picked)
     w_delta = {k: v for k, v in values.get("weights", {}).items() if old_w[first.key].get(k) != v}
@@ -2000,6 +2113,12 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
     for p in parts:
         if p.key in splits:
             p.split_strategy = splits[p.key]
+    for t in (t for t in teams.values() if t is not None and chans):  # one set for the whole event: every raid's dict alike
+        for f, v in chans.items():
+            if v:
+                t[f] = v
+            else:
+                t.pop(f, None)
     for p in parts:
         at = new if p is first else after_minutes(new, p.starts)
         was = p.start
@@ -2032,7 +2151,7 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
     moved = Moved(parts=[p.key for p in parts], old=old.isoformat(), new=new.isoformat(), timing=values, told=told,
                   absence_cleared=cleared, absence_written=written,
                   locks_now=first.state == "open" and hard <= now_ and bool(team_setting(team, "auto_lock")), conflicts=clash,
-                  splits=splits, lock_moved=lock_moved, seating=first_come_now)
+                  splits=splits, lock_moved=lock_moved, seating=first_come_now, channels=chan_moves)
     if not save:
         return moved
     for p in parts:  # an open pre-lock ask's deadline follows the start, the lock time and Auto Lock just set
@@ -2043,6 +2162,8 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
     for k, v in splits.items():
         p = next(x for x in parts if x.key == k)
         what.append(f"{reg.raid_def(p.instance).get('name', p.instance)} split by {v}, set by {by}")
+    if chans:
+        what.append(f"own channels set by {by}: " + ", ".join(f"{f} {v or 'the guild'}" for f, v in chans.items()))
     first.log.extend(what)
     line = "; ".join(what) or f"saved by {by}"
     with reg.store.batch(f"{reg.key}: event {first.key} {line}"):
@@ -6715,7 +6836,7 @@ def open_preview(reg: Registry, rs: "RaidStore", instance: str, value: str | Non
     before = None if live is not None else before_first_open_sentence(reg, [{"raid": instance, "rosters": 1}, *asked], start)
     return {**w, "later": ljson, "follow": ljson[0] if ljson else None, "follow_line": follow_line, "before_open": before,
             "start": start.isoformat(), "label": reg.local12(start), "when_note": dst_words(reg, note, start), "exists": live.state if live else None,
-            "closed": ev.state if ev is not None and closed_run_refusal(rs, ev) else None, "refusal": refusal, "channel": reg.config.signup_channel_id or None, "rules": rules, "past": start < reg.now_local() - timedelta(minutes=PAST_GRACE_MINUTES)}
+            "closed": ev.state if ev is not None and closed_run_refusal(rs, ev) else None, "refusal": refusal, "channel": (event_channel(reg, live, "sheet_channel") if live is not None else None) or schedule_sheet_channel(reg, instance, w["schedule"]), "rules": rules, "past": start < reg.now_local() - timedelta(minutes=PAST_GRACE_MINUTES)}
 
 
 UPCOMING_PER_SCHEDULE = 3  # the Events page's Coming up lists each active schedule's next three nights, whatever the horizon
@@ -6786,11 +6907,11 @@ def upcoming_rows(reg: Registry, rs: "RaidStore", instance: str, now: datetime |
     needs_channel (the sheet is due and no signup channel can take it), can_open, why (open_row_refusal's sentence),
     follow (the schedule's follow-on in words, "Barrow Deeps ×2", or "")}."""
     now = now or reg.now_local()
-    no_channel = not reg.config.signup_channel_id
     out = []
     for s in reg.schedules(instance):
         if s.get("kind") == "pickup" or not s.get("active", True):
             continue
+        no_channel = not schedule_sheet_channel(reg, instance, s["id"])  # its own sheet channel, else the guild's
         lead = float(reg.schedule_def(instance, s["id"])["signup_lead_hours"])
         rows = []
         for t in next_runs_of(reg, instance, s, n + 6, now):

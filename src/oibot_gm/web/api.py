@@ -1189,7 +1189,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                         # the Raids card's "When it runs" block, from the same fields (design §5.54 / §5.56)
                         "live_runs": live_runs_of(reg, rs, rid), "next_run": next_run_of(reg, rs, rid),
                         "open": [e for e in live if e["state"] == "open"], "locked": [e for e in live if e["state"] != "open"], "past": past, "past_total": len(closed),
-                        "upcoming": upcoming, "signup_channel": bool(reg.config.signup_channel_id)})
+                        "upcoming": upcoming, "signup_channel": bool(reg.config.signup_channel_id) or any(rc.schedule_sheet_channel(reg, rid, s["id"]) for s in scheds)})
         orphans = [ev_json(reg, rs, e, full=False) for e in events if e.instance not in reg.profile.raids and e.state not in ("done", "cancelled")][:6]
         # who can be made a regular (the Schedules page's regulars pickers): real members with active characters
         people = [{"uid": str(m.discord_id), "display_name": m.display_name,
@@ -1823,7 +1823,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         MCP's reschedule_run share it): {start?: aware ISO or guild wall time 'YYYY-MM-DD HH:MM' (the datetime-local
         picker; DST-safe, a skipped or doubled wall time refused), timing?: {setting: value} (rc.EVENT_TIMING: the sheet
         timing, confirm, first_come, weights {key: 0-6}, split_policy — a strategy for the raid `key` names, or {raid key:
-        strategy}), edit? (the Events page's Edit event: the box is titled Change … with Save and its diff lines), preview?,
+        strategy}; and the event's own channels sheet_channel / officers_channel / loot_log_channel, a channel id or empty,
+        which are not timing: they change until the event ends and move what is posted), edit? (the Events page's Edit event: the box is titled Change … with Save and its diff lines), preview?,
         seen?, rev?}. Officers, decided live by the verb. `preview` → {sentences (consequences.reschedule_consequence), rev
         (rc.event_rev), box}; nothing written. `seen` = the fp of the box pressed: a box built now with another fp → 409
         with the fresh box. A write carrying `rev` is refused (409, with the fresh rev) when the run changed since. A
@@ -2068,6 +2069,15 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 out[k] = t[k]
         return out
 
+    def channel_args(d: dict) -> dict:
+        """The one-off open form's own channels (design 2026-11-27-event-channels): `channels` {sheet_channel,
+        officers_channel, loot_log_channel}, a channel id (or empty: the guild's) → {field: id as text} for those that
+        name one. A value that is no channel is refused in one sentence (registry.CHANNEL_WHEN)."""
+        from ..registry import SCHEDULE_CHANNELS, channel_value
+
+        t = d.get("channels")
+        return {k: v for k in SCHEDULE_CHANNELS if isinstance(t, dict) and k in t and (v := channel_value(t[k]))}
+
     OPEN_UNREAD = cq.OPEN_UNREAD
     open_box = cq.open_box_for  # the one box /raid open prints too
 
@@ -2115,7 +2125,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         (from the preview; None for a one-off): the schedule's run Open is expected to make — refused (409) with a fresh
         preview when the time now resolves to another. `rosters` / `timing.lock_hours_before` / `timing.auto_lock` /
         `timing.auto_lock_fill` (the New event page): the first raid's rosters, the lock, Auto Lock and its auto-fill of a
-        ONE-OFF; a schedule's night keeps its schedule's own. A refusal answers with its
+        ONE-OFF, and `channels` {sheet_channel, officers_channel, loot_log_channel} its own channels; a schedule's night
+        keeps its schedule's own. A refusal answers with its
         box (400)."""
         v, d = await body(request, officer=True)
         reg = v.reg
@@ -2127,6 +2138,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             later = lineup_arg(reg, rid, d)
             lock_h, first_n = one_off_args(d)
             auto = auto_lock_args(d)
+            chans = channel_args(d)
+            if chans:
+                auto["channels"] = chans
             start, sid, _note = rc.open_when(reg, rid, when, sid)
             rc.refuse_past_start(reg, start, reg.now_local())  # a mistyped year would open a run the scheduler may close at once
             if later:  # the whole lineup's rules (a raid twice, more than four, starts in order) before anything is written
@@ -2237,7 +2251,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         default the signup channel. The sheet's buttons and later refreshes follow the new message."""
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
-        cid = channel_ref(v.reg, d.get("channel")) or v.reg.config.signup_channel_id
+        cid = channel_ref(v.reg, d.get("channel")) or rc.channel_of(v.reg, ev, "sheet_channel")  # the event's own sheet channel, else the guild's
         if not cid:
             return JSONResponse({"error": "no signup channel is set: name the channel to post in"}, status_code=400)
         channel = bot.get_channel(int(cid))

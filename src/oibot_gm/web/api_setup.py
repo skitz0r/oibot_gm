@@ -43,6 +43,17 @@ def discord_ready(bot, reg) -> bool:
     return guild is not None and not getattr(guild, "unavailable", False)
 
 
+def channel_names(bot, reg) -> dict[str, str]:
+    """The server's text channels {id: name} for the Channels sections (a schedule's and an event's own channels), in
+    the Config page's pickers' order — {} while Discord is unreachable or on a client without the guild."""
+    try:
+        if not discord_ready(bot, reg) or not hasattr(bot, "guild_channels"):
+            return {}
+        return {c["id"]: c["name"] for c in bot.guild_channels(reg)}
+    except Exception:  # noqa: BLE001 — a page never fails over channel names
+        return {}
+
+
 def error_dm_choices(reg) -> list[dict]:
     """The people the owner may pick for the error alerts on the Setup card: every registered (non-test) member and the
     owner, by display name — the ids Registry.set_error_dms takes."""

@@ -105,6 +105,55 @@ def _autofill_fact(on: bool) -> dict:
     return _fact(F["autofill"], switch_words("autofill", on), hint="autofill")
 
 
+def channel_label(names: dict | None, cid) -> str:
+    """'#alt-signups' for a channel id (`names` = id → name, from the bot's guild_channels), else the words for a channel
+    the bot can't see (deleted, hidden, or Discord unreachable)."""
+    name = (names or {}).get(str(cid)) if cid else None
+    return f"#{name}" if name else PAGE_WORDS["channel_gone"]
+
+
+def channel_section(reg: Registry, values: dict, names: dict | None, *, back: dict | None = None) -> dict:
+    """The Channels section of the schedule editor, New event and Edit event (design 2026-11-27-event-channels): {title,
+    fields [{key, label, help, value (its own channel id | null), empty (the empty option: the channel it falls back to —
+    "#raid-signups (the guild's)", or "(the schedule's)" when `back` names one)}], options [{value, label, group}] (the
+    server's text channels, as the Config page's pickers list them; never filtered by who can see them)}. `values` =
+    {field: own id | None}; `back` = what an empty value goes back to before the guild's (an event's schedule's)."""
+    from .registry import GUILD_CHANNEL_OF, SCHEDULE_CHANNELS
+
+    fields = []
+    for f in SCHEDULE_CHANNELS:
+        if back and back.get(f):
+            empty = PAGE_WORDS["channel_schedules"].format(channel=channel_label(names, back[f]))
+        elif g := getattr(reg.config, GUILD_CHANNEL_OF[f], None):
+            empty = PAGE_WORDS["channel_guilds"].format(channel=channel_label(names, g))
+        elif f == "officers_channel" and reg.config.ops_channel_id:  # the officers' cards fall back to ops as today
+            empty = PAGE_WORDS["channel_guilds"].format(channel=channel_label(names, reg.config.ops_channel_id))
+        else:
+            empty = PAGE_WORDS["channel_guild_unset"]
+        fields.append({"key": f, "label": F[f], "help": field_help(f, F[f]), "value": values.get(f) or None, "empty": empty})
+    opts = [{"value": str(cid), "label": f"#{name}", "group": None} for cid, name in (names or {}).items()]
+    return {"title": PAGE_WORDS["channels"], "fields": fields, "options": opts}
+
+
+def channel_facts(reg: Registry, own: dict, names: dict | None, *, schedule: dict | None = None) -> list[dict]:
+    """Details rows for the channels that differ from the guild's (none when every place uses the guild's): the editor's
+    label, the channel, and where it comes from — "the schedule's" when `schedule` (its schedule's own now) names the same,
+    else "this event's own". `schedule` None = a schedule's own Details (the value alone)."""
+    from .registry import GUILD_CHANNEL_OF, SCHEDULE_CHANNELS
+
+    out = []
+    for f in SCHEDULE_CHANNELS:
+        v = own.get(f)
+        g = getattr(reg.config, GUILD_CHANNEL_OF[f], None)
+        if not v or (g and str(g) == str(v)):
+            continue
+        label = channel_label(names, v)
+        if schedule is not None:
+            label = PAGE_WORDS["channel_from_schedule" if schedule.get(f) == v else "channel_from_event"].format(channel=label)
+        out.append(_fact(F[f], label, hint=f))
+    return out
+
+
 def auto_lock_facts(auto: bool, fill: bool) -> list[dict]:
     """The Auto Lock row and, while it is On, its Auto-fill on Auto Lock row (issue 14): the editors' labels, On / Off
     and their (?) — an event's, a coming-up night's and a schedule's Details alike."""
@@ -288,7 +337,7 @@ def _discord_links(sheet: dict | None) -> list[dict]:
 
 
 def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: int, *, sheet: Callable | None = None,
-               autofill: Callable | None = None) -> dict:
+               autofill: Callable | None = None, names: dict | None = None) -> dict:
     """EventView: {key (part 0's), title, state, chip, kind (one_off | scheduled), schedule {id, name} | null, details
     [Fact], signups {joined, bench, no_thanks, no_answer, rows {in, sub, out, none}}, parts [PartView], activity [{when,
     line}] (every part's log, newest first), boxes {lock, cancel, reschedule (the pick box)}, actions, lineup, start_iso, timing {setting: value}
@@ -334,8 +383,9 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
         if url:
             details.append(_fact("Signup sheet", PAGE_WORDS["open_in_discord"], url))
         else:
-            details.append(_fact("Signup sheet", PAGE_WORDS["sheet_not_posted"] if reg.config.signup_channel_id else PAGE_WORDS["sheet_waits"]))
+            details.append(_fact("Signup sheet", PAGE_WORDS["sheet_not_posted"] if rc.channel_of(reg, first, "sheet_channel") else PAGE_WORDS["sheet_waits"]))
         details += _discord_links(sheets[0] if sheets else None)
+        details += channel_facts(reg, rc.own_channels(reg, first), names, schedule=rc.schedule_channels(reg, first))
     else:
         rostered = {rc.player_uid(part, p) or p.signup_name for part in parts for p in part.seated()}  # a person once, whatever they played
         details = [_fact("Lineup", rc.lineup_words(reg, lineup)), came, _fact("Rostered", str(len(rostered)))]
@@ -367,7 +417,7 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
             "activity": [{"when": r["when"], "line": r["text"]} for r in activity],
             "boxes": {"lock": cq.lock_box(reg, first, rs) if state == "open" else None, "cancel": cq.cancel_box(reg, first, rs) if live else None,
                       "reschedule": cq.reschedule_pick_box(reg, rs, first) if can_move else None},
-            "actions": {"reschedule": can_move, "edit": can_move, "edit_lineup": state == "open" and first.state == "open",
+            "actions": {"reschedule": can_move, "edit": live and first.state not in CLOSED, "edit_lineup": state == "open" and first.state == "open",
                         "lock": state == "open" and first.state == "open", "cancel": live, "open_now": False,
                         # More › Clear the board: while a raid of the event is still open (its box from POST /api/event/{key}/clear)
                         "clear": any(p.state == "open" for p in parts)},
@@ -381,7 +431,8 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
             "characters": {uid: character_rows(reg, m) for uid in {r["uid"] for rows_ in rows.values() for r in rows_}
                            if (m := reg.members.get(int(uid))) is not None} if answering else {},
             "locks": lock_choices(float(timing["lock_hours_before"])) if can_move and timing.get("lock_hours_before") is not None else [],
-            "edit": edit_options(reg, rs, first, timing) if can_move else None}
+            # Edit event: every setting before the start; once started, its channels alone (until it ends or is cancelled)
+            "edit": edit_options(reg, rs, first, timing, names=names, started=not can_move) if live and first.state not in CLOSED else None}
 
 
 # what Edit event offers once the roster is locked (rc.AFTER_LOCK, in the settings' names): automatic asks and an ask's wait
@@ -390,12 +441,14 @@ EDIT_FIELDS = ("lock_hours_before", "auto_lock", "auto_lock_fill", "nudge", "nud
                "fill_ask_hours", "first_come", "weights", "split_policy")
 
 
-def edit_options(reg: Registry, rs, first: "rc.RaidEvent", timing: dict) -> dict:
+def edit_options(reg: Registry, rs, first: "rc.RaidEvent", timing: dict, *, names: dict | None = None, started: bool = False) -> dict:
     """What the Events page's Edit event starts from and picks from (the owner's tweaks, B): {fields (the settings it
     may change NOW: every one before the lock, EDIT_AFTER_LOCK after it), values (rc.run_timing: the event's own),
     splits [{key, raid, value}] (each live raid's split — rc.run_strategy), hours {setting: [{value, words}]} (the
     schedule editor's choices, the event's own value among them), max_weight, split_policies}. Nothing here writes; the
-    Save is POST /api/run/{key}/reschedule with `edit`."""
+    Save is POST /api/run/{key}/reschedule with `edit`. `channels` = the Channels section (channel_section: the event's
+    own, the empty option its schedule's or the guild's); `started`: the event has started, so `fields` is empty and only
+    the channels change (`note` says so)."""
     from .constants import hours_words
     from .registry import SPLIT_POLICIES
     from .schedule_view import MAX_WEIGHT, editor_options
@@ -409,7 +462,9 @@ def edit_options(reg: Registry, rs, first: "rc.RaidEvent", timing: dict) -> dict
                               key=lambda c: float(c["value"]))
     parts = [p for p in rc.event_parts(rs, first) if p.state not in CLOSED]
     locked = first.state != "open"
-    return {"fields": list(EDIT_AFTER_LOCK if locked else EDIT_FIELDS), "values": timing,
+    return {"fields": [] if started else list(EDIT_AFTER_LOCK if locked else EDIT_FIELDS), "values": timing,
+            "channels": channel_section(reg, rc.own_channels(reg, first), names, back=rc.schedule_channels(reg, first)),
+            "note": PAGE_WORDS["edit_started"] if started else None,
             "splits": [{"key": p.key, "raid": reg.raid_def(p.instance).get("name", p.instance), "value": rc.run_strategy(reg, p)} for p in parts],
             "hours": {f: hours[f] for f in ("lock_hours_before", "nudge_hours_before", "confirm_hours_before", "fill_ask_hours")},
             "max_weight": MAX_WEIGHT, "split_policies": list(SPLIT_POLICIES)}
@@ -449,7 +504,7 @@ def coming_json(reg: Registry, rs: "rc.RaidStore", sid: str, occurrence: str, no
                _fact("Sheet opens", reg.local12(opens)),
                _fact("Locks", locks_value(reg, lock_at, bool(sd.get("auto_lock", True)))),
                *auto_lock_facts(bool(sd.get("auto_lock", True)), bool(sd.get("auto_lock_fill", True)))]
-    box = None if why else cq.open_now_box(reg, t, opens, lock_at, lineup=lineup, channel=bool(reg.config.signup_channel_id),
+    box = None if why else cq.open_now_box(reg, t, opens, lock_at, lineup=lineup, channel=bool(rc.schedule_sheet_channel(reg, raid, sid)),
                                            rev=occurrence)  # consequences.open_box_for's rev: the open route's box is this one
     return {"title": reg.local12(t), "chip": PAGE_WORDS["no_sheet_yet"], "schedule": {"id": sid, "name": name}, "details": details,
             "can_open": why is None, "why": why, "open": {"start_iso": t.isoformat(), "schedule": sid, "occurrence": occurrence, "raid": raid},
@@ -476,12 +531,12 @@ def lock_choices(own: float | None = None) -> list[dict]:
     return [{"hours": int(h) if float(h).is_integer() else h, "words": lock_words(h)} for h in hours]
 
 
-def new_event_options(reg: Registry) -> dict:
+def new_event_options(reg: Registry, names: dict | None = None) -> dict:
     """What the New event page picks from (GET /api/event-new): {today (the GUILD's date, the Day picker's lower bound —
     never the browser's), raids [{id, name, size, hours}] (the palette), lineups [{id, name, lineup [{raid, rosters,
     starts}]}] (Start from › Copy a lineup: each active schedule — never a pickup template — whose raids are all in the game, starts in minutes after
     the first — Registry.lineup_offsets), locks (lock_choices), lineup_max (registry.LINEUP_MAX: the builder holds no copy), lineup_full (LINEUP_MAX_WORDS: the builder's
-    line at a full lineup)}."""
+    line at a full lineup), channels (channel_section: a one-off's own channels, empty = the guild's)}."""
     raids = [{"id": rid, "name": reg.raid_def(rid).get("name", rid), "size": int(reg.raid_def(rid).get("size") or 0),
               "hours": float(reg.raid_def(rid).get("duration_hours") or 0)} for rid in reg.profile.raids]
     lineups = []
@@ -499,7 +554,7 @@ def new_event_options(reg: Registry) -> dict:
         lineups.append({"id": s["id"], "name": s.get("name") or s["id"],
                         "lineup": [{"raid": e["raid"], "rosters": e["rosters"], "starts": off} for e, off in zip(lineup, offsets)]})
     return {"today": reg.now_local().date().isoformat(), "raids": raids, "lineups": lineups, "locks": lock_choices(), "lineup_max": LINEUP_MAX,
-            "lineup_full": LINEUP_MAX_WORDS}
+            "lineup_full": LINEUP_MAX_WORDS, "channels": channel_section(reg, {}, names)}
 
 
 def lineup_edit_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent") -> dict:

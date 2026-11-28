@@ -19,6 +19,7 @@ from .registry import (
     RAID_WEIGHT_DEFAULTS,
     RESERVED_SCHEDULE_IDS,
     SCHEDULE_CADENCE,
+    SCHEDULE_CHANNELS,
     SCHEDULE_TIMING,
     SPLIT_POLICIES,
     Registry,
@@ -60,7 +61,7 @@ NEXT_EVENTS = 3  # Next events: the schedule's next three nights
 CHIPS = {True: "active", False: "paused"}
 GONE_TAIL = ", so this schedule opens no events"  # after rc.gone_sentence's raids: the one sentence the page shows
 # what the editor sends back (`stored`): every setting set_schedule takes, the lineup in place of rosters / follow / then
-STORED_FIELDS = ("name", "kind", "active", "slots", "days", "time", "weights", "lineup") + SCHEDULE_CADENCE
+STORED_FIELDS = ("name", "kind", "active", "slots", "days", "time", "weights", "lineup") + SCHEDULE_CADENCE + SCHEDULE_CHANNELS
 # the editor's sheet-timing choices (hours before the start; a fill ask's wait in hours), each in the words the page
 # prints — a value a schedule, a raid's suggestion or a preset holds is added in its place, so a stored value is never
 # missing from its select
@@ -97,14 +98,14 @@ def _row(reg: Registry, s: dict) -> dict:
     return {"id": s["id"], "name": _name(s), "repeats": repeats_words(reg, s)}
 
 
-def schedule_list(reg: Registry) -> dict:
+def schedule_list(reg: Registry, names: dict | None = None) -> dict:
     """{active: [SRow], paused: [SRow], reserved_ids}: SRow = {id, name, repeats}, in the guild's order — a schedule whose
     raid left the game listed too (its Details say so). `reserved_ids` = the ids no new schedule takes
     (registry.RESERVED_SCHEDULE_IDS: the editor never holds its own copy)."""
     rows = reg.all_schedules()
     return {"active": [_row(reg, s) for s in rows if s.get("active", True)],
             "paused": [_row(reg, s) for s in rows if not s.get("active", True)],
-            "reserved_ids": list(RESERVED_SCHEDULE_IDS), "orphans": orphans(reg), "editor": editor_options(reg)}
+            "reserved_ids": list(RESERVED_SCHEDULE_IDS), "orphans": orphans(reg), "editor": editor_options(reg, names)}
 
 
 def orphans(reg: Registry) -> list[dict]:
@@ -120,13 +121,15 @@ def _num(h):
     return int(h) if float(h).is_integer() else float(h)
 
 
-def editor_options(reg: Registry) -> dict:
+def editor_options(reg: Registry, names: dict | None = None) -> dict:
     """What the schedule editor picks from (New schedule and Edit): {raids (the palette — New event's — with each raid's
     lockout_days, weights (the raid's own, what "Use the raid's" falls back to) and timing (the game's suggestion a new
     schedule starts from)), adhoc {timing, weights} (a pickup's), lineups (Start from › Copy a lineup: New event's),
     lineup_max, lineup_full, hours {field: [{value, words}]} ("5 days before"; a fill ask's wait "2 hours"), presets
-    [{name, values}] (presets.PRESETS), split_policies, max_weight}. Every word the editor's selects show is here."""
-    from .event_view import new_event_options
+    [{name, values}] (presets.PRESETS), split_policies, max_weight, channels (event_view.channel_section: the Channels
+    section's fields, empty = the guild's, and the server's text channels — `names`, id → name)}. Every word the
+    editor's selects show is here."""
+    from .event_view import channel_section, new_event_options
 
     base = new_event_options(reg)
     raids = []
@@ -156,7 +159,7 @@ def editor_options(reg: Registry) -> dict:
                                       "weights": dict(ADHOC_WEIGHTS)},
             "lineups": base["lineups"], "lineup_max": base["lineup_max"], "lineup_full": base["lineup_full"], "hours": hours,
             "presets": [{"name": p[1], "values": dict(zip(CADENCE_FIELDS, p[2:]))} for p in PRESETS],
-            "split_policies": list(SPLIT_POLICIES), "max_weight": MAX_WEIGHT}
+            "split_policies": list(SPLIT_POLICIES), "max_weight": MAX_WEIGHT, "channels": channel_section(reg, {}, names)}
 
 
 def stored_entry(s: dict) -> dict:
@@ -281,7 +284,7 @@ def _people(reg: Registry, sid: str) -> list[dict]:
     return out
 
 
-def schedule_json(reg: Registry, rs: "rc.RaidStore", sid: str, now: datetime | None = None) -> dict:
+def schedule_json(reg: Registry, rs: "rc.RaidStore", sid: str, now: datetime | None = None, names: dict | None = None) -> dict:
     """ScheduleView: {id, name, active, chip, gone (a sentence when a raid of its lineup left the game, else null),
     details [Fact], lineup [{raid, name, rosters, starts, time_words, seats}], timing [Fact], next [{starts, opens, locks,
     key | null}] (empty while paused or gone; `next_empty` says why), regulars (see _regulars) | null, people, boxes
@@ -311,6 +314,9 @@ def schedule_json(reg: Registry, rs: "rc.RaidStore", sid: str, now: datetime | N
         details.append(_fact(F["autofill"], switch_words("autofill", sd.get("autofill")), hint="autofill"))
     if len(lineup) > 1:
         details.append(_fact("Answers", PAGE_WORDS["answers_one"]))
+    from .event_view import channel_facts
+
+    details += channel_facts(reg, {f: s.get(f) for f in SCHEDULE_CHANNELS}, names)  # only those that differ from the guild's
 
     def before(h) -> str:
         return f"{hours_words(h)} before"

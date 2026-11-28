@@ -1309,6 +1309,12 @@ def box_cases(reg, rs, runs, ms, dump):
         assert b["verb"] == "Save" and b["diff"], (case, b)
         add("reschedule_box edit", case, b)
     add("reschedule_box edit", "locked: the automatic asks", cq.reschedule_box(reg, rs, lk, None, {"autofill": False}, edit=True))
+    for case, ev_, timing in (("channels: the sheet", ev, {"sheet_channel": "62001"}),
+                              ("channels: locked, the officers' cards", lk, {"officers_channel": "62002"}),
+                              ("channels: two at once", ev, {"sheet_channel": "62001", "loot_log_channel": "62003"})):
+        b = cq.reschedule_box(reg, rs, ev_, None, timing, edit=True)
+        assert b["verb"] == "Save" and b["diff"], (case, b)
+        add("reschedule_box edit", case, b)
     for case, timing in (("locked: confirmation", {"confirm": False}), ("locked: the priority", {"weights": {"rank": 1}}),
                          ("locked: the split", {"split_policy": "rotation"}), ("locked: the lock", {"lock_hours_before": 6}),
                          ("locked: Auto Lock", {"auto_lock": False})):
@@ -1577,6 +1583,24 @@ def reschedule_cases(reg, rs, runs, ms, dump):
     add("locked: the automatic asks", runs["locked recurring, autofill on"], None, {"autofill": False})
     dump.add("reschedule_event refusal", "a member", rc.MOVE_OFFICER_ONLY)
     dump.add("reschedule_refusal", "started", rc.MOVE_STARTED)
+    # the event's own channels (design 2026-11-27-event-channels): not timing, so open, locked and started alike
+    for case, ev_, timing in (("channels: the sheet", one, {"sheet_channel": "62001"}),
+                              ("channels: the officers' cards", one, {"officers_channel": "62002"}),
+                              ("channels: the loot log", one, {"loot_log_channel": "62003"}),
+                              ("channels: all three", one, {"sheet_channel": "62001", "officers_channel": "62002", "loot_log_channel": "62003"}),
+                              ("channels: locked, the loot log", runs["locked recurring, autofill on"], {"loot_log_channel": "62003"}),
+                              ("channels with the lock", one, {"lock_hours_before": 6, "loot_log_channel": "62003"})):
+        add(case, ev_, None, timing)
+    was = (one.channel_id, one.message_id)
+    one.channel_id, one.message_id = 61001, 61002  # a posted sheet moves with every answer
+    add("channels: a posted sheet", one, None, {"sheet_channel": "62001"})
+    one.channel_id, one.message_id = was
+    for case, ev_, timing in (("channels: officers' cards on the sheet", one, {"sheet_channel": "62001", "officers_channel": "62001"}),
+                              ("channels: the same", one, {"loot_log_channel": ""}),
+                              ("channels: a cancelled event", runs["cancelled"], {"loot_log_channel": "62003"}),
+                              ("channels: not a channel", one, {"loot_log_channel": "raid chat"})):
+        dump.add("reschedule_refusal", case, rc.reschedule_refusal(reg, rs, ev_, None, timing) or "")
+    dump.add("reschedule_refusal", "channels: busy", rc.CHANNELS_BUSY)
 
 
 def lineup_cases(reg, rs, runs, ms, dump, monkeypatch):

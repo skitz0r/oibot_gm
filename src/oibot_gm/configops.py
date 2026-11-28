@@ -142,7 +142,10 @@ Schedules (officer): WHEN a raid runs and its sheet timing. Each schedule has an
   | open_dm (true|false: DM every main when a sheet opens) | confirm (true|false: the lock asks the rostered to confirm)
   | auto_lock (true|false: "Auto Lock" — the bot locks each event at its lock time; false = an officer locks it)
   | auto_lock_fill (true|false: "Auto-fill on Auto Lock" — that lock fills the open seats; false = it rosters the board as it stands)
-  | split_policy — a timing setting given value "inherit" goes back to the game's suggestion; split_policy "inherit" goes back to the raid's.
+  | split_policy | sheet_channel (a #channel: where each event's signup sheet posts) | officers_channel (a #channel only officers
+  see: the health and lock cards, the updates thread) | loot_log_channel (a #channel: the public loot log lines) — a channel
+  given value "none" goes back to the guild's; an event opened later takes the schedule's channels
+  — a timing setting given value "inherit" goes back to the game's suggestion; split_policy "inherit" goes back to the raid's.
   Several schedule_set ops on one schedule in a row are saved together (so "open 48h before and lock 36h before" can't fail half way).
   Runs already open keep their times.
   schedule_remove: target=<schedule id>.
@@ -166,7 +169,9 @@ Runs (officer; target = the event key like bd-k7m2qx from the live-events list, 
     fills the open seats; off = it rosters the board as it stands) | first_come (on = first to join, off = by
     priority) | weight_regular|weight_rank|weight_main|weight_sat_out|weight_signup_order (value 0-6) | split_policy
     (balanced|first|rotation: the target raid's split); and before or after the lock: fill_ask_hours (hours a fill ask waits) |
-    autofill (on|off: the bot asks people for open seats)>, value. Its schedule keeps its own. Several run_reschedule ops on one
+    autofill (on|off: the bot asks people for open seats); and until the event ends, after the lock and the start too:
+    sheet_channel | officers_channel | loot_log_channel (value = a #channel, or none = its schedule's, else the guild's) — the
+    sheet and the officers' cards move there, nobody is DMed>, value. Its schedule keeps its own. Several run_reschedule ops on one
     run in a row are saved together ("move it to 9 PM and lock 12 h before").
   run_lineup: target, value=<the raids after the first one, in order: "<raid id> x<N>, <raid id>" ("barrow_deeps x2, onyxias_lair");
     "none" = the first raid alone> — before lock only: adds, removes or reorders the raids that follow the first one the same
@@ -927,6 +932,9 @@ def _reschedule_args(reg: Registry, op: ConfigOp) -> tuple:
             timing.setdefault("weights", {})[f.removeprefix("weight_")] = (p.value or "").strip()
         elif f in rc.EVENT_TIMING:
             timing[f] = (p.value or "").strip().lower()
+        elif f in rc.SCHEDULE_CHANNELS:  # the event's own channels: a mention or an id, "none" = its schedule's, else the guild's
+            v = (p.value or "").strip()
+            timing[f] = None if _clear_word(v) else (_channel_id(v) or v)
         else:
             raise RegistryError(rc.TIMING_UNKNOWN if f else "Name the new start, or the setting to change.")
     return start, timing
@@ -1154,6 +1162,11 @@ def _schedule_words(reg: Registry, rid: str, fields: dict, sid: str | None = Non
         elif f == "follow":  # the text 'barrow_deeps x2' or the site's {raid, rosters}
             fw = schedule_value(f, v)
             out.append(f"then {reg.follow_words(fw)}" if fw else "no later raid")
+        elif f in ("sheet_channel", "officers_channel", "loot_log_channel"):  # a schedule's own channel, or the guild's
+            from .consequences import channel_words
+            from .registry import channel_value
+
+            out.append(f"{PAGE_WORDS['schedule_fields'][f]}: {channel_words(reg, f, channel_value(v))}")
         elif f == "lineup":  # a new schedule's whole lineup of three or four raids (_schedule_ops)
             from .registry import parse_lineup
 
@@ -2916,7 +2929,8 @@ def _describe_schedule(reg: Registry, op: ConfigOp) -> str:
     if cur is None:
         return f"{name}: new schedule {sid} — {new}{after}"
     own = reg.schedule_def(rid, sid)["schedule"]["own"]
-    now = {f: (own.get(f) if f in own else "inherit") if f not in ("kind", "slots", "days", "time", "rosters", "active", "name", "follow") else cur.get(f) for f in fields}
+    now = {f: (own.get(f) if f in own else "inherit") if f not in ("kind", "slots", "days", "time", "rosters", "active", "name", "follow",
+                                                                   "sheet_channel", "officers_channel", "loot_log_channel") else cur.get(f) for f in fields}
     if "lineup" in fields:  # an edit's whole lineup: the one it has now (its raid, its follow-on, the raids after it)
         from .registry import row_lineup
 
@@ -2944,7 +2958,8 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         start, sid = _open_time(reg, rid, op.value, op.field)
         rs = rc.RaidStore(reg.store, reg.key)
         have = rc.find_run(reg, rs, rid, start, sid)
-        where = f"<#{cfg.signup_channel_id}>" if cfg.signup_channel_id else "nowhere (no signup channel set — /raid sheet can place it)"
+        posts = rc.schedule_sheet_channel(reg, rid, sid) if sid != rc.ADHOC_SCHEDULE else cfg.signup_channel_id  # the schedule's own, else the guild's
+        where = f"<#{posts}>" if posts else "nowhere (no signup channel set — /raid sheet can place it)"
         sname = next((f" · {s['name']}" for s in reg.schedules(rid) if s["id"] == sid and len(reg.schedules(rid)) > 1), "")
         fw = lineup_of_op(reg, rid, op.text)  # the later raids asked for (up to three), each at its start
         then = "".join(f", then {reg.follow_words(e)} at {reg.local12(rc.after_minutes(start, at))}"
@@ -3543,6 +3558,13 @@ async def _apply_async(reg: Registry, op: ConfigOp, by: str, is_owner: bool, pol
         return await asyncio.to_thread(apply, reg, op, by, is_owner, policy_store)
     if bot is not None and op.op in ("policy", "policy_append"):
         return await _apply_policy(reg, op, by, bot, _policy_store(reg, policy_store), by_id)
+    if bot is not None and op.op == "schedule_set" and getattr(bot, "channel_setting_refusal", None) is not None:
+        from .registry import SCHEDULE_CHANNELS, channel_value
+
+        _sid, fields, _raid = _schedule_write_fields(op)  # a schedule's own channel: the check the guild's setting runs
+        chans = {k: channel_value(_channel_id(str(v)) or v) for k, v in fields.items() if k in SCHEDULE_CHANNELS}
+        if chans and (why := await bot.channel_setting_refusal(reg, chans)):
+            raise RegistryError(why)
     if bot is not None and op.op == "set" and op.path in CHANNEL_PATHS and getattr(bot, "set_channel", None) is not None:
         cid = None if _clear_word(op.value) else _channel_id(op.value)
         if cid is None and not _clear_word(op.value):
@@ -5246,7 +5268,13 @@ def _schedule_value_words(reg: Registry, rid: str, setting: str, value, s: dict 
             return PAGE_WORDS["split"].get(str(v), str(v)) if v else PAGE_WORDS["raids_own"]
         if setting == "name":
             return v or ""
+        if setting in SCHEDULE_CHANNELS:  # '#alt-signups', or "The guild's #raid-signups" (an empty value)
+            from .consequences import channel_words
+
+            return _cap(channel_words(reg, setting, v))
         return None
+
+    from .registry import SCHEDULE_CHANNELS
 
     if setting == "weights":  # a map (JSON from a typed draft): every key named, one set to None goes back to the raid's
         import json

@@ -5,6 +5,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
 
 ```
   discord_bot.py       OibotGM client: the gateway events and on_message routing (an addressed message in a council thread → loot_chat);
+                       Channels steps (2026-11-27): flows_event.EditEventWizard offers CHANNELS beside the settings (still after the start; channel_screen = flows_config._text_channel_select + Use the schedule's / guild's channel) and flows_schedule's hub a Channels choice (channels → channel); channel_mention_words = their words.
                        mention_names(message, reg, bot_user) = THE text of every plain-text path (@mention, DM, listening): the bot's own
                        mention/role go, another user's <@id> → their registered name (else Discord's, else "@someone"), <@&id> → "@role name", <#id> kept;
                        on_guild_join (re-attach a parked guild, else ONE DM to host_ids: "I was added to X … Missing permissions: …"), on_guild_remove

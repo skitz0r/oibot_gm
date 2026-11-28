@@ -27,6 +27,7 @@ EXTRA: dict[str, tuple[str, ...]] = {
     "registration": ("manage_messages",),
     "absences": ("manage_messages",),
     "roster": ("create_public_threads", "send_messages_in_threads"),
+    "signup": ("create_public_threads", "send_messages_in_threads"),  # the thread on each sheet (the lock and cancel lines)
     "news": ("read_message_history",),
 }
 # what an owner reads (Discord's names); the reason rides along where it isn't obvious
@@ -37,7 +38,7 @@ WORDS = {
     "create_instant_invite": "Create Invite", "manage_webhooks": "Manage Webhooks", "manage_roles": "Manage Roles",
     "manage_channels": "Manage Channels",
 }
-WHY = {"manage_messages": "to pin the card", "create_public_threads": "for the council and updates threads",
+WHY = {"manage_messages": "to pin the card", "create_public_threads": "for the event and council threads",
        "send_messages_in_threads": "to post in those threads", "read_message_history": "to re-read the news"}
 # not in the invite: the bot does without them and says what they would add
 OPTIONAL = {"manage_roles": "Accept gives the applicant the member role (D31)",

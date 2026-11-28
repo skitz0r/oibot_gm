@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 
 from .. import schedule_view
 from ..registry import RegistryError
+from .api_setup import channel_names
 
 NO_SCHEDULE_HERE = "This schedule is no longer on the Schedules list."
 
@@ -23,7 +24,7 @@ def install_schedules_api(app: FastAPI, bot, *, who) -> None:
     @app.get("/api/schedules")
     async def schedules_list(request: Request):
         v = await who(request, officer=True)
-        return await asyncio.to_thread(schedule_view.schedule_list, v.reg)
+        return await asyncio.to_thread(schedule_view.schedule_list, v.reg, channel_names(bot, v.reg))
 
     @app.get("/api/schedules/{sid}")
     async def schedule_get(request: Request, sid: str):
@@ -33,4 +34,4 @@ def install_schedules_api(app: FastAPI, bot, *, who) -> None:
             v.reg.schedule_entry(sid)
         except RegistryError:
             return JSONResponse({"error": NO_SCHEDULE_HERE}, status_code=404)
-        return await asyncio.to_thread(schedule_view.schedule_json, v.reg, rs, sid)
+        return await asyncio.to_thread(schedule_view.schedule_json, v.reg, rs, sid, None, channel_names(bot, v.reg))

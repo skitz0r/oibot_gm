@@ -754,6 +754,10 @@ def _timing_phrases(reg: Registry, start, changed: dict, team: dict, first_raid:
     return out
 
 
+def _cap(text: str) -> str:
+    return text[:1].upper() + text[1:]
+
+
 def _and(items: list[str]) -> str:
     return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
 
@@ -800,6 +804,8 @@ def reschedule_consequence(reg: Registry, rs, ev: rc.RaidEvent, start, timing: d
     mv = rc.reschedule(reg, rs, first, start=start, timing=timing, by="preview", save=False)
     name = reg.raid_def(first.instance).get("name", first.instance)
     moves = start is not None and start != first.start
+    if mv.channels and not moves and not mv.timing and not mv.splits:  # the channels alone (not timing: no gate, nobody told)
+        return channel_change_consequence(reg, first, mv.channels)
     changed = {**mv.timing, **({"split": [_raid(reg, rs.events[k].instance) for k in mv.splits]} if mv.splits else {})}
     out = [_what_changes(reg, name, first, start, moves, changed)]
     n = len(mv.told)
@@ -837,7 +843,44 @@ def reschedule_consequence(reg: Registry, rs, ev: rc.RaidEvent, start, timing: d
         out.append("Away answers are worked out again for the new day.")
     else:
         out.append("The sheet in Discord shows the new time.")
+    if mv.channels:  # with other settings: what moves, after what changes and before who is told (three at most)
+        out = [out[0], channel_move_sentence(reg, first, mv.channels), out[1]]
     return out
+
+
+CHANNEL_PLACES = {"sheet_channel": "signup sheet", "officers_channel": "officers' cards", "loot_log_channel": "loot log"}
+
+
+def channel_words(reg: Registry, field: str, own) -> str:
+    """Where one place of an event posts, as a confirm names it: '#alt-signups' for its own channel, else "the guild's
+    #raid-signups" (the running client names the channel — perms.CLIENT; without one, Discord's own mention)."""
+    from . import perms
+    from .discord_pool import channel_name
+
+    if own:
+        return channel_name(perms.CLIENT, own)
+    g = rc.channel_of(reg, None, field)
+    return f"the guild's {channel_name(perms.CLIENT, g)}" if g else "the guild's channel"
+
+
+def channel_move_sentence(reg: Registry, first: rc.RaidEvent, moves: dict) -> str:
+    """The first sentence of a channel change on a live event (Moved.channels): what moves where — the sheet with every
+    answer, the officers' cards with a new updates thread, later loot log lines. Several at once: one short sentence."""
+    if len(moves) > 1:
+        return f"The {_and([CHANNEL_PLACES[f] for f in moves])} move to their new channels."
+    (f, (_old, new)), = moves.items()
+    where = channel_words(reg, f, new)
+    if f == "sheet_channel":
+        return f"The signup sheet moves to {where} with every answer." if first.message_id else f"The signup sheet posts in {where}."
+    if f == "officers_channel":
+        return f"The officers' cards move to {where} with a new updates thread."
+    return f"Loot log lines post in {where} from now on."
+
+
+def channel_change_consequence(reg: Registry, first: rc.RaidEvent, moves: dict) -> list[str]:
+    """The confirm of an Edit event that changes only the event's own channels: what moves, that nobody gets a DM, and
+    that it can be changed back until the event ends."""
+    return [channel_move_sentence(reg, first, moves), "Nobody gets a DM.", "You can change it back until the event ends."]
 
 
 # the seating switched by an Edit event: what decides who gets a seat from now on
@@ -868,7 +911,7 @@ def reschedule_box(reg: Registry, rs, ev: rc.RaidEvent, start, timing: dict | No
 
 # the order Edit event's diff lines follow (the editor's sections: when, sheet timing, confirmation, open seats, priority)
 EDIT_LINE_ORDER = ("start", "lock_hours_before", "auto_lock", "auto_lock_fill", "nudge", "nudge_hours_before", "confirm", "confirm_hours_before",
-                   "autofill", "fill_ask_hours", "first_come", "weights", "split_policy")
+                   "autofill", "fill_ask_hours", "first_come", "weights", "split_policy", "sheet_channel", "officers_channel", "loot_log_channel")
 
 
 def event_value_words(setting: str, v) -> str:
@@ -925,6 +968,9 @@ def event_edit_lines(reg: Registry, rs, ev: rc.RaidEvent, start, timing: dict | 
         elif setting:
             label = schedule_line_label(setting) or setting
             out[setting] = f"{label}: {event_value_words(setting, now[setting])} → {event_value_words(setting, v)}"
+    own = rc.own_channels(reg, first)
+    for f, v in rc.channel_changes(reg, first, timing).items():  # the Channels section: where each place posts, before → after
+        out[f] = f"{F[f]}: {_cap(channel_words(reg, f, own[f]))} → {_cap(channel_words(reg, f, v))}"
     parts = [p for p in rc.event_parts(rs, first) if p.state not in ("done", "cancelled")]
     for k, v in rc.split_changes(reg, rs, ev, timing).items():
         p = rs.events[k]

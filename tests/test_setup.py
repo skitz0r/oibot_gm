@@ -205,7 +205,7 @@ class SetupBot(SetupMixin, PoolMixin, AbsencesMixin):
 # ---------------------------------------------------------------- perms: the matrix
 
 @pytest.mark.parametrize("kind,need", [
-    ("signup", {"view_channel", "send_messages", "embed_links"}),
+    ("signup", {"view_channel", "send_messages", "embed_links", "create_public_threads", "send_messages_in_threads"}),  # the thread on each sheet
     ("ops", {"view_channel", "send_messages", "embed_links"}),
     ("registration", {"view_channel", "send_messages", "embed_links", "manage_messages"}),
     ("absences", {"view_channel", "send_messages", "embed_links", "manage_messages"}),
@@ -237,7 +237,7 @@ def test_perms_server_wide_invite_and_words():
 
 def test_set_channel_refuses_a_channel_it_cant_post_in_and_saves_nothing(reg):
     bot = SetupBot(reg)
-    bot.add(50, "raids", view_channel=True, send_messages=True)  # no Embed Links
+    bot.add(50, "raids", view_channel=True, send_messages=True, create_public_threads=True, send_messages_in_threads=True)  # no Embed Links
     with pytest.raises(ValueError, match=r"I can't post in #raids without Embed Links\."):
         run(bot.set_channel(reg, "signup", 50, "Jon"))
     assert reg.config.signup_channel_id is None and bot.ops.lines == []

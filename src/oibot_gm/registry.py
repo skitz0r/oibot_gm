@@ -910,7 +910,15 @@ SCHEDULE_KINDS = ("weekly", "lockout", "pickup")  # weekly slots · day N of eac
 SCHEDULE_CADENCE = ("signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours",
                     "nudge", "autofill", "open_dm", "confirm", "auto_lock", "auto_lock_fill", "split_policy")  # unset = the raid's value (ad hoc: ADHOC_DEFAULTS)
 # `weights`: a partial seat-order map {rank, main, sat_out, signup_order, regular} merged per key over the raid's (ad hoc: ADHOC_WEIGHTS)
-SCHEDULE_FIELDS = ("name", "kind", "active", "slots", "days", "time", "rosters", "weights", "follow", "lineup") + SCHEDULE_CADENCE
+# a schedule's and an event's own Discord channels (design 2026-11-27-event-channels): where its signup sheet, its officers'
+# cards and its loot log lines post. Unset = the guild's (GUILD_CHANNEL_OF); a schedule's are stamped on each event it
+# opens (raidcycle.ensure_run), an event's are read by the one resolver per place (raidcycle.event_channel and its callers)
+SCHEDULE_CHANNELS = ("sheet_channel", "officers_channel", "loot_log_channel")
+GUILD_CHANNEL_OF = {"sheet_channel": "signup_channel_id", "officers_channel": "roster_channel_id", "loot_log_channel": "loot_channel_id"}
+CHANNEL_KIND_OF = {"sheet_channel": "signup", "officers_channel": "roster", "loot_log_channel": "loot"}  # perms / set_channel's kinds
+CHANNEL_WHEN = "Pick the channel from the list."
+OFFICERS_ON_SHEET = "The officers' cards can't go in the channel where the signup sheet is posted. Pick another channel."
+SCHEDULE_FIELDS = ("name", "kind", "active", "slots", "days", "time", "rosters", "weights", "follow", "lineup") + SCHEDULE_CADENCE + SCHEDULE_CHANNELS
 # `lineup` (set_schedule): the whole lineup [{raid, rosters[, starts]}] at once, replacing rosters / follow / then — a
 # schedule row keeps its raids past the second under `then` (to_stored_schedule / from_stored_schedule)
 # the values a schedule OWNS (C7: nine, then issue 14's Auto Lock and its auto-fill): every stored schedule carries them written out in full (write_out_timing), seeded
@@ -1332,10 +1340,42 @@ def lower_schedules(cfg: "GuildConfig", raids: dict | None = None) -> list[str]:
     return [f"{(raids.get(rid) or {}).get('name') or rid}: {n} schedule{'' if n == 1 else 's'}" for rid, n in counts.items()]
 
 
+def channel_value(value) -> str | None:
+    """One channel setting of a schedule or an event in its stored form: the channel id as text (a Discord id is past a
+    browser's whole numbers), from an id, a '<#id>' mention or a channel object. None / '' / 'inherit' = not set (the
+    guild's). Anything else: RegistryError(CHANNEL_WHEN)."""
+    if value is None:
+        return None
+    value = getattr(value, "id", value)
+    raw = str(value).strip()
+    if not raw or raw.lower() in INHERIT_WORDS:
+        return None
+    raw = raw.removeprefix("<#").removesuffix(">")
+    if not raw.isdigit():
+        raise RegistryError(CHANNEL_WHEN)
+    return raw
+
+
+def channel_clash(cfg, sheet: str | None, officers: str | None) -> str | None:
+    """OFFICERS_ON_SHEET when the officers' cards a schedule or an event names (`officers`, its own) would share a channel
+    with its signup sheet (its own `sheet`, else the guild's signup channel) — or when its own sheet channel is the guild's
+    officers' channel it would fall back to. Both unset: None (the guild's own settings are the Config page's)."""
+    guild_sheet = str(cfg.signup_channel_id) if cfg.signup_channel_id else None
+    guild_officers = str(cfg.roster_channel_id) if cfg.roster_channel_id else None
+    eff_sheet = sheet or guild_sheet
+    if officers and officers in {eff_sheet, guild_sheet}:
+        return OFFICERS_ON_SHEET
+    if sheet and not officers and sheet == guild_officers:
+        return OFFICERS_ON_SHEET
+    return None
+
+
 def schedule_value(field: str, value):
     """One schedule setting, validated and in its stored form. None = not set (a cadence field then inherits the raid's)."""
     if field in SCHEDULE_CADENCE and (value is None or str(value).strip().lower() in INHERIT_WORDS):
         return None
+    if field in SCHEDULE_CHANNELS:
+        return channel_value(value)
     if field == "weights":
         return schedule_weights(value)
     if field == "name":
@@ -1490,6 +1530,8 @@ def schedule_def_of(rd: dict, sid: str | None) -> dict:
             eff["nudge_hours_before"] = default_nudge_hours(eff["signup_lead_hours"], eff["lock_hours_before"])
     for k in RAID_BOOL_FIELDS:
         eff[k] = parse_bool(eff[k])
+    for k in SCHEDULE_CHANNELS:  # the schedule's own channel, else None (the guild's): never a raid's
+        eff[k] = s.get(k) or None
     eff["weights"] = {**RAID_WEIGHT_DEFAULTS, **base_w, **own_w}
     eff["class"] = cls
     source = {k: ("own" if k in own else inherited) for k in SCHEDULE_CADENCE}
@@ -5535,6 +5577,8 @@ class Registry:
             full = write_out_timing({k: v for k, v in entry.items() if k != "nudge_hours_before"}, rd)
             if not float(full["lock_hours_before"]) <= float(entry["nudge_hours_before"]) <= float(full["signup_lead_hours"]):
                 entry["nudge_hours_before"] = full["nudge_hours_before"]
+        if set(SCHEDULE_CHANNELS) & set(fields) and (why := channel_clash(self.config, entry.get("sheet_channel"), entry.get("officers_channel"))):
+            raise RegistryError(why)
         self._write_schedules(instance, stored, message=f"schedule {sid} ({instance}): {', '.join(fields)} (by {by})")
         after = next((s for s in self.schedules(instance) if s["id"] == sid), None) or {"id": sid}
         return [f"{rd.get('name', instance)} · {schedule_name(after)}: " + ("new schedule, " if before is None else "") + self.schedule_label(instance, after)]
