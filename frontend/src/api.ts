@@ -305,6 +305,20 @@ export interface PartView {
   strategy: string | null;
 }
 export interface EventPerson { uid: string; display_name: string; character: string; cls: string; spec: string }
+/** One row of the Bot activity tab (event_activity.activity_json): every word is the server's. */
+export interface BotActivityRow {
+  id: string; kind: string; kind_label: string; where: string | null; person: EventPerson | null;
+  people: EventPerson[]; failed_people: EventPerson[]; summary: string | null; failed_summary: string | null;
+  times: { label: string; when: string; rel: string }[]; outcome: string | null; tone: "yes" | "no" | "waiting" | "closed";
+  detail: string | null; delivery: string | null; withdraw: { path: string; uid: string; label: string } | null; uids: string[];
+}
+/** GET /api/event/{key}/activity — the event page's Bot activity tab. */
+export interface BotActivity {
+  key: string; pending_count: number; paused: string[]; pending: BotActivityRow[]; history: BotActivityRow[];
+  pending_title: string; history_title: string; empty_pending: string; empty_history: string; unrecorded: string | null;
+  filters: { kinds: { value: string; label: string }[]; people: { value: string; label: string }[]; all_kinds: string; everyone: string };
+  read_only: boolean;
+}
 /** GET /api/event/{key} (any raid's key answers as its event). */
 export interface EventView {
   key: string; title: string; state: EventRow["state"]; chip: string; kind: "one_off" | "scheduled"; schedule: { id: string; name: string } | null;

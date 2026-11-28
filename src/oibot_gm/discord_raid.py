@@ -855,14 +855,18 @@ class RaidMixin(BoardPostMixin):
         opens, with the same buttons."""
         unix = int(ev.start.timestamp())
         _soft, hard, _confirm = run_times(reg, ev, team)
-        sent = 0
+        sent, failed = [], []
         for m, _c in rc.run_pool(reg, ev):
             if not m.main or m.dm_opt_out:
                 continue
             s = ev.signups.get(str(m.discord_id))
             status = f"You're marked **{rc.LABELS.get(s.status, s.status)}** ({'away that day' if s.source == 'absence' else s.source})" if s else "You haven't answered yet"
             if await self.send_member_dm(reg, m, f"{reg.config.name} · {run_label(reg, ev)} (<t:{unix}:R>). {status}. Join / Bench / No thanks:" + (f" (sheet: <#{ev.channel_id}>)" if ev.channel_id else "") + dm_locks_line(reg, ev, hard), sheet_view(reg, ev.key), ev=ev):
-                sent += 1
+                sent.append(m.discord_id)
+            else:
+                failed.append(m.discord_id)
+        rc.record_dms(ev, "open", sent, failed)  # the Bot activity tab's record: who got it, whom it could not reach
+        sent = len(sent)
         ev.log.append(f"open DMs sent to {sent}")
         rs.save(ev, f"open DMs {sent}")
         return sent
@@ -893,9 +897,14 @@ class RaidMixin(BoardPostMixin):
             # an ad hoc run expects nobody (and its reminder is off by default)
             targets = [m for m, _c in rc.not_answered(reg, ev) if m.discord_id not in ev.nudged and not m.dm_opt_out]
             _soft, hard, _confirm = run_times(reg, ev, team)
+            failed = []
             for m in targets:  # same buttons as the sheet (and the open DM), so they can answer right here
                 if await self.send_member_dm(reg, m, f"{reg.config.name}: the {run_label(reg, ev)} sheet is still waiting for you — Join, Bench or No thanks here or in <#{ev.channel_id}>." + dm_locks_line(reg, ev, hard), sheet_view(reg, ev.key), ev=ev):
                     ev.nudged.append(m.discord_id)
+                else:
+                    failed.append(m.discord_id)
+            # the Bot activity tab's record of this reminder (ev.nudged keeps who got one, never when, nor whom it missed)
+            rc.record_dms(ev, "reminder", [m.discord_id for m in targets if m.discord_id in ev.nudged], failed)
             if targets:
                 rs.save(ev, f"nudged {len(targets)}")
         ev.health_posted = True
@@ -1014,6 +1023,7 @@ class RaidMixin(BoardPostMixin):
         if failed:
             names = ", ".join(a.display_name for a in failed)
             ev.log.append(f"DM failed — waits on the site: {names}")
+            rc.record_dms(ev, "ask", failed=[a.discord_id for a in failed], at=stamp)  # each ask's asked_at: the tab marks it not delivered
             await self.ops.emit(reg.config, "warn", f"{run_title(reg, ev)}: DM failed — waits on the site: {names}")
         return out
 
@@ -1652,6 +1662,7 @@ class RaidMixin(BoardPostMixin):
                                          if ask.get("answer") == "released" else f"You already answered for {run_label(reg, ev)}.")
         elif not ok:  # a failed DM is a channel change, never an answer: the ask waits on the site, same deadline
             ask["channel"] = "web"
+            rc.record_dms(ev, "confirm", failed=[m.discord_id], at=ask["asked_at"])  # the Bot activity tab marks it not delivered
             reg.save(m, f"{m.display_name}'s confirmation for {ev.team} waits on the site (DM failed)")
             ev.log.append(f"DM failed — waits on the site: {m.display_name}'s confirmation")
         return ok
@@ -2666,6 +2677,7 @@ class RaidMixin(BoardPostMixin):
         ev.reminded_at, ev.reminded_by = rc.now(), by  # claimed before the first await (see above)
         team = rc.run_team(reg, ev)
         sent, site, stopped = 0, 0, None
+        reached, missed = [], []  # the Bot activity tab's record of this press (record_dms below)
         for m, ask in rc.open_placement_rows(reg, ev):
             if ev.state != "locked":  # cancelled / ended during the round: nobody after that is reminded
                 stopped = ev.state
@@ -2683,7 +2695,9 @@ class RaidMixin(BoardPostMixin):
             gi = next((k for k, g in enumerate(ev.all_rosters[i].groups) if seat[1].signup_name in g), 0)
             ok, msg = await self.send_member_card(reg, m, None, confirm_layout(reg, ev, team, self.ico, sg, i, gi, m.discord_id, reminder=True), ev=ev)
             if not ok:
+                missed.append(m.discord_id)
                 continue
+            reached.append(m.discord_id)
             cid, mid = self.card_ids(msg)
             if ask.get("answer") is not None or ev.state != "locked":  # closed while this DM was in flight
                 await self.edit_ask_card(reg, cid, mid, f"Cancelled — {run_label(reg, ev)} was cancelled." if ev.state == "cancelled"
@@ -2697,6 +2711,7 @@ class RaidMixin(BoardPostMixin):
                     await self.edit_ask_card(reg, prev[0], prev[1], f"Reminded — see the newer message below for {run_label(reg, ev)}.")
             ask["reminded_at"] = rc.now()
             await asyncio.to_thread(reg.save, m, f"{m.display_name} reminded to confirm {ev.team}")
+        rc.record_dms(ev, "remind", reached, missed, at=ev.reminded_at, by=by)
         ev.log.append(f"reminded the unconfirmed ({sent} by DM) — {by}" + (f"; stopped, the event is {stopped}" if stopped else ""))
         rs.save(ev, f"reminded {sent} by {by}")
         await self.post_run_update(reg, ev, f"🔔 {by} reminded the unconfirmed: {sent} by DM" + (f" · {site} wait on the site" if site else "")

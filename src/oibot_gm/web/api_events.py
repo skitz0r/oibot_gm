@@ -8,6 +8,8 @@ existing topics `run:` (any run saved), `member` and `config` (a schedule edited
 - GET /api/event/{key} → event_view.event_json (any part's key answers as its event; finished and cancelled too): each
   open raid's board is the officers' layout — nothing is solved for a view — with its Auto-fill groups line
   (event_board.AutoFill.state; the page hears `run:<raid key>` when an auto-fill starts or ends)
+- GET /api/event/{key}/activity → event_activity.activity_json (the event page's Bot activity tab: every DM the bot sent
+  for the event and what came back; reads only)
 - POST /api/event/{key}/clear → More › Clear the board: every open raid's groups back to Not placed (pins stay), through
   consequences.clear_board_box (`preview` → {box}; `seen` → 409 with the fresh box; refused → 400 with the refusal box)
 - POST /api/event/{key}/board → Post board (design 2026-11-27-post-board): `preview` → {box} (consequences.board_post_box:
@@ -32,7 +34,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from .. import consequences as cq
-from .. import event_board, event_view
+from .. import event_activity, event_board, event_view
 from .. import ops as ops_mod
 from .. import raid_views as rv
 from .. import raidcycle as rc
@@ -90,6 +92,17 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
         return await asyncio.to_thread(event_view.event_json, v.reg, rs, ev, v.uid,
                                        sheet=lambda p, rosters=None, open_seats=True: ev_json(v.reg, rs, p, rosters=rosters, open_seats=open_seats),
                                        autofill=lambda p: af.state(v.reg, p), names=channel_names(bot, v.reg))
+
+    @app.get("/api/event/{key}/activity")
+    async def event_activity_get(request: Request, key: str):
+        """The event page's Bot activity tab (event_activity.activity_json): every DM the bot sent for the event and
+        what came back. Reads only; nothing here sends."""
+        v = await who(request, officer=True)
+        rs = bot.raids.store(v.reg)
+        ev = rs.events.get(key)
+        if ev is None or ev.dropped:
+            return JSONResponse({"error": NO_EVENT}, status_code=404)
+        return await asyncio.to_thread(event_activity.activity_json, v.reg, rs, ev)
 
     @app.post("/api/event/{key}/clear")
     async def event_clear(request: Request, key: str):

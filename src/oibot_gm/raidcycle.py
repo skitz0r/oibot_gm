@@ -287,6 +287,14 @@ class RaidEvent(BaseModel):
     autofill_paused_by: Optional[str] = None
     reminded_at: Optional[str] = None  # the last "Remind the unconfirmed" (once per hour per run)
     reminded_by: Optional[str] = None
+    # the bot's DMs about this event that no other record holds (design 2026-11-28-event-activity-tab §4), for the Bot
+    # activity tab (event_activity.py): the sheet's opening DMs ("open"), the signup reminders ("reminder"), an officer's
+    # Remind ("remind") — and every ask or Confirm DM that could not be delivered ("ask" / "confirm", `at` = that ask's
+    # asked_at). One entry per send, {kind, at, sent [ids], failed [ids], by}; record_dms is the one writer, the newest
+    # DMS_KEPT stay. `dms_whole`: recorded since the event opened (open_event sets it; an older file reads False and the tab
+    # says its earlier DMs were not recorded)
+    dms: list[dict] = Field(default_factory=list)
+    dms_whole: bool = False
     closed_at: Optional[str] = None  # when it became done / cancelled (cleanup_ephemeral's grace, reopen's window)
     prev_state: Optional[str] = None  # the state before done / cancelled (reopen_run restores it)
     # a later raid of a run (design §5.62; up to LINEUP_MAX raids from one signup): `follows` = the FIRST part's key (on
@@ -2727,6 +2735,25 @@ def stamp_log(ev: RaidEvent) -> None:
 
 # ---------------------------------------------------------------- building an event
 
+DMS_KEPT = 60  # RaidEvent.dms entries kept per event (the newest)
+DM_KINDS = ("open", "reminder", "remind", "ask", "confirm")
+
+
+def record_dms(ev: RaidEvent, kind: str, sent=(), failed=(), *, at: str | None = None, by: str | None = None) -> dict | None:
+    """THE writer of RaidEvent.dms (the Bot activity tab's record): one send of `kind` — who got the DM (`sent`) and
+    whom it could not reach (`failed`), member ids — stamped `at` (default now; an ask's own asked_at for "ask" /
+    "confirm"), `by` the officer whose press sent it. Nothing reached nobody = nothing recorded (None). The caller saves
+    the event. Never sends anything."""
+    if kind not in DM_KINDS:
+        raise ValueError(f"unknown DM kind {kind}")
+    sent, failed = [int(u) for u in sent], [int(u) for u in failed]
+    if not sent and not failed:
+        return None
+    entry = {"kind": kind, "at": at or now(), "sent": sent, "failed": failed, "by": by}
+    ev.dms = (list(ev.dms) + [entry])[-DMS_KEPT:]
+    return entry
+
+
 def open_event(reg: Registry, rs: RaidStore, team: dict, starts_at: datetime) -> RaidEvent:
     """The run file of run dict `team`, keyed with the dict's own key; its identity (`event`, `part`, `starts`,
     `occurrence`, `follows`) comes from the dict as ensure_run stamped it — nothing is read from or built out of a time.
@@ -2745,7 +2772,7 @@ def open_event(reg: Registry, rs: RaidStore, team: dict, starts_at: datetime) ->
     ev = RaidEvent(key=key, team=key, instance=team.get("instance"), schedule=schedule_stamp(team.get("schedule_id")),
                    series=team.get("series"), kind=team.get("kind"), test=bool(team.get("test")), starts_at=starts_at.isoformat(),
                    follows=follows, occurrence=team.get("occurrence"), event=follows or team.get("event") or key,
-                   part=int(team.get("part") or 0), starts=int(team.get("starts") or 0))
+                   part=int(team.get("part") or 0), starts=int(team.get("starts") or 0), dms_whole=True)
     if not ev.follows:  # a follow-on's answers come from its lead (sync_follow), absences included
         prefill(reg, ev, team)
     ev.log.append(f"opened ({run_kind(reg, ev)}); {len(ev.signups)} marked away from absences" if not ev.follows

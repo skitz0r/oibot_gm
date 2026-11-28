@@ -244,8 +244,28 @@ def seed(reg, rs) -> None:
     lk.state, lk.locked_at = "locked", rc.now()
     lk.confirmations_sent_at = lk.locked_at
     lk.confirm_by = (lk.start - timedelta(hours=6)).isoformat()
+    # the locked event's Bot activity tab (design 2026-11-28-event-activity-tab): Confirm asks in several states, an open
+    # seat asked (one not delivered), one withdrawn, the opening DM with one person it missed, an officer's Remind
+    rostered = mains[18:18 + size]
+    for m in rostered[:6]:
+        reg.add_placement_ask(m.discord_id, lk.team, m.main.label, "lock")
+    for m, answer in zip(rostered[1:4], ("yes", "no", "expired")):
+        reg.close_placement_ask(m.discord_id, lk.team, answer)
+    soon = (now + timedelta(hours=5)).isoformat(timespec="seconds")
+    for i, m in enumerate(mains[30:32]):
+        a = rc.FillAsk(discord_id=m.discord_id, display_name=m.display_name, kind="sub", role="healer", character=m.main.label,
+                       spec=m.main.spec, reason="short 1 healer", expires_at=soon, approved_by="Officer")
+        if i:
+            a.answer, a.answered_at, a.answered_by = "withdrawn", rc.now(), "Officer"
+        else:
+            a.channel = "web"
+            rc.record_dms(lk, "ask", failed=[m.discord_id], at=a.asked_at)
+        lk.fill_asks.append(a)
+    rc.record_dms(lk, "open", [m.discord_id for m in mains[18:27]], [mains[27].discord_id])
+    rc.record_dms(lk, "remind", [m.discord_id for m in rostered[4:6]], by="Officer")
+    lk.dms_whole = True
     rs.save(lk, "locked (scratch board)")
-    past = (now - timedelta(days=4)).replace(hour=20, minute=0, second=0, microsecond=0)  # History: its board as it was locked
+    past =(now - timedelta(days=4)).replace(hour=20, minute=0, second=0, microsecond=0)  # History: its board as it was locked
     done = rc.open_run(reg, rs, barrow, past, by="scratch")
     for m in mains[8:18]:
         rc.set_signup(reg, rs, done, m, None, "in", source="officer")

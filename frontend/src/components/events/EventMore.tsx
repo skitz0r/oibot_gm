@@ -1,14 +1,13 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { ActionIcon, Menu, Modal, Text, Tooltip } from "@mantine/core";
-import { IconBell, IconDiamond, IconDots, IconEraser, IconFlagCheck, IconListCheck, IconLockOpen, IconPlayerPause, IconPlayerPlay, IconPlayerTrackNext, IconRotate, IconSend, IconTrash, IconUsersPlus } from "@tabler/icons-react";
+import { ActionIcon, Menu, Text, Tooltip } from "@mantine/core";
+import { IconBell, IconDiamond, IconDots, IconEraser, IconFlagCheck, IconLockOpen, IconPlayerPause, IconPlayerPlay, IconPlayerTrackNext, IconRotate, IconSend, IconTrash, IconUsersPlus } from "@tabler/icons-react";
 import { api, type Box, type EventView, type Meta, type Sheet } from "../../api";
 import { useConfirmBox } from "../ConfirmBox";
 import { boxOf as boxOf_ } from "./shared";
 import { fail, ok } from "../Page";
 import { FillModal } from "../board/FillModal";
 import { RepostSheetModal } from "../board/MemberMenu";
-import { Detail } from "../board/SheetCard";
 import type { NightSheet } from "../board/types";
 import css from "../board/board.module.css";
 
@@ -16,19 +15,19 @@ import css from "../board/board.module.css";
  *  had and the approved mockup does not draw, kept on the event so none is lost — per raid, from the run's own JSON
  *  (`part.sheet`, ev_json): Fill seats… after the lock / Suggest… before it (the fill screen), Remind the unanswered,
  *  Pause / Resume Automated Fill Requests (once, for the whole event), Re-post the sheet… (the first raid's: it holds the sheet), the loot council, End the
- *  run, the asks out (each with Withdraw) and, on a finished event, Reopen an end made by mistake; before the lock, Clear
+ *  run and, on a finished event, Reopen an end made by mistake; before the lock, Clear
  *  the board (every open raid's groups back to Not placed, the server's box — consequences.clear_board_box). Each raid's split
  *  moved to Edit event (the owner's tweaks, B) with the event's other own settings. Each verb is named as
  *  on Discord (meta.run_labels); what can't be pressed is greyed with the server's reason under it; Remind and End ask
  *  first with the server's box (remind_box, end_box); Unlock and Start now (issue 14) once for the whole event, with unlock_box and
  *  start_now_box — Start now sits right under the first raid's greyed End whose note says it hasn't started; the fill and
- *  re-post screens are the board's own. Nothing here composes a sentence. */
+ *  re-post screens are the board's own. The asks out and the callouts are the event's Bot activity tab (BotActivity), no
+ *  longer an item here. Nothing here composes a sentence. */
 export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; onChanged: () => void }) {
   const [ask, dialog] = useConfirmBox(["run:", "loot"]);
   const [fill, setFill] = useState<NightSheet | null>(null);
   const [repost, setRepost] = useState<string | null>(null);
-  const [asks, setAsks] = useState<NightSheet | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);  // what is being written: "more", or Detail's `withdraw<key><uid>`
+  const [busy, setBusy] = useState<string | null>(null);  // "more" while a press is being written
   const L = meta.run_labels;
   const live = ev.state === "open" || ev.state === "locked";
   const parts = ev.parts.filter((p) => p.sheet).map((p) => ({ p, s: p.sheet as unknown as NightSheet }));
@@ -76,9 +75,6 @@ export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; 
       if (i === 0) out.push(<Menu.Item key={`${p.key}:repost`} leftSection={<IconSend size={14} />} onClick={() => setRepost(s.key)}>Re-post the sheet…</Menu.Item>);
       if (s.loot?.may_open) out.push(<Menu.Item key={`${p.key}:loot`} leftSection={<IconDiamond size={14} />} onClick={() => post(`/api/loot/${encodeURIComponent(s.key)}/open`)}>{L.loot}</Menu.Item>);
       else if (s.loot?.open) out.push(<Menu.Item key={`${p.key}:loot`} leftSection={<IconDiamond size={14} />} component={Link} to="/loot">{L.loot}</Menu.Item>);
-      if ((s.fill_asks || []).length + (s.callouts || []).length > 0) {
-        out.push(<Menu.Item key={`${p.key}:asks`} leftSection={<IconListCheck size={14} />} onClick={() => setAsks(s)}>Asks and callouts…</Menu.Item>);
-      }
       if (locked) out.push(<Menu.Item key={`${p.key}:end`} color="red" leftSection={<IconFlagCheck size={14} />} disabled={!s.may_end} onClick={() => end(s)}>{L.end}{why(s.may_end ? null : s.end_note)}</Menu.Item>);
       // Start now acts on the whole event (RaidMixin.start_now): once, right under the first raid's greyed End whose note
       // says it hasn't started, while the server offers it (locked, before the start); the box is consequences.start_now_box
@@ -124,10 +120,6 @@ export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; 
       </Menu>
       {fill && <FillModal e={fill as unknown as Sheet} meta={meta} opened onClose={() => setFill(null)} onSent={async () => { onChanged(); }} />}
       <RepostSheetModal run={repost || ""} opened={!!repost} onClose={() => setRepost(null)} onDone={onChanged} />
-      <Modal opened={!!asks} onClose={() => setAsks(null)} title={asks ? `Asks and callouts · ${several ? ev.parts.find((p) => p.key === asks.key)?.raid_name || ev.title : ev.title}` : ""} centered size="lg">
-        {asks && <Detail e={{ ...asks, log_rows: [], log: [] }} meta={meta} busy={busy} open
-          onAct={async (k, path, payload) => { if (busy) return; await post(path, payload, k); setAsks(null); }} />}
-      </Modal>
       {dialog}
     </>
   );

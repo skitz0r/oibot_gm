@@ -43,6 +43,9 @@ understands; it answers in the words below.
   nobody confirms twice. *Leaving after …* on the Me page (or `/raid out`, picking the later raid) frees that place and
   keeps your other seats; *I'm staying* on the Me page undoes it. Cancelling any raid of the event cancels the whole
   event.
+- **Bot activity** — the event page's second tab: every DM the bot sent for that event (Confirm asks, open seats,
+  asks before the lock, role switches, the opening DM, reminders) and what came back, what it still waits on first.
+  Officers only; the event's own **Activity** log is a different list (what changed on the event).
 - **One-off** — an event an officer opens for one night: with **New event**, or from a schedule an officer opens
   (*Opened by an officer*). It has no regulars; by default it is first come and locks 2 hours before, and it asks
   nobody to confirm.
@@ -1280,8 +1283,8 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    several, each named as on the Discord card: **Suggest…** before the lock and **Fill seats…** after it (the fill
    screen: each seat with its alternates, then *Send N asks*), **Remind the unanswered** and **Pause Automated Fill Requests** /
    **Resume Automated Fill Requests** once locked, **Re-post the sheet…** (it moves the sheet to another channel), **Loot** (open
-   the loot council; once open, a link to Loot › Tonight), **Asks and callouts…** (every fill ask with its answer, an
-   ask still out with **Withdraw**, callouts with their notes) and **End the event** once locked. What can't be pressed
+   the loot council; once open, a link to Loot › Tonight) and **End the event** once locked. The fill asks and the
+   callouts are on the **Bot activity** tab (below), no longer in this menu. What can't be pressed
    yet is greyed with the bot's reason under it. Remind and End show the bot's own box first; when it changed while open
    (someone answered, a drop was distributed) the new box comes back and waits again, and nothing is sent or ended; on a finished event
    **More** has **Reopen** for an end made by mistake, within the hour. A scheduled lock that failed shows its
@@ -1291,6 +1294,27 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    *another split like this*) and **Place the rest** — **Auto-fill groups** is the lock's own placement, and **Clear the
    board** is in the event's More menu; plain text, MCP (`propose_split`, `set_layout`, `autofill`) and a test event's card
    on the Test bench keep the older tools.
+   **Bot activity** — the event page has two tabs at the top: **Event** (everything above) and **Bot activity**, with
+   the number of DMs still waiting for an answer beside it when there are any. Open, locked and finished events have it;
+   a link to `/events/<event>#bot-activity` opens it. It shows every DM the bot sent for this event and what came back,
+   nothing an officer could not already see on the event. **Waiting for an answer** comes first, soonest deadline first:
+   *Confirm* (the lock asked a rostered person to confirm), *Open seat* (a fill ask after the lock), *Could you come?*
+   (an officer's ask before the lock) and *Role switch* (an ask to switch role or character). Each row has the person
+   (their character with its spec icon), the kind, the raid it is for and, on a raid of several rosters, the roster (only
+   on an event of several raids or rosters), when it was sent and when it closes, each with how long ago or how long to
+   go. While Automated Fill Requests are paused, one line above the list says so and who paused them. A waiting
+   *Open seat*, *Could you come?* or *Role switch* has **Withdraw**: the ask closes and the DM card says so, as before
+   (a *Confirm* has none; taking someone off the roster is the board's job). **Sent and answered** follows, newest
+   first: each ask with how it ended (*said yes*, *said no* / *can't make it*, *no answer in time*, *withdrawn by
+   Kara*, *closed when the event was cancelled*, *closed when the event locked again without them*), the sheet's
+   **Sheet Opening DM** and each **Signup Reminder** as one row with *Sent to 6 people.* (press it for the names),
+   each **Remind the unanswered** press likewise with who pressed it, and every *Can't make it* with its note. A DM
+   the bot could not deliver (the person's DMs are closed) says *Not delivered, so it waits on their Me page.*; a send to
+   many says *Not delivered to 1 person.* Two filters narrow the list: by kind and by person. With nothing to show it
+   says *The bot is not waiting on anyone for this event.* / *The bot has sent no DMs for this event yet.* The bot
+   records its opening DMs, reminders and failed DMs from 28 Nov 2026 on; an event opened earlier shows its asks and
+   answers and says the rest was not recorded. Board moves, settings, channels, the lock itself and loot are not here
+   (the event's **Activity** log has them). Nothing on this tab sends a DM.
    **Post board** (under the board, open or locked events) posts the event's board to a Discord channel: a box with
    only its title, one select **Post to** — it opens on the event's *Board posts* channel (§2; with none set, the
    signup sheet's channel) and lists the server's text channels — and **Back** · **Post**. Picking another channel

@@ -215,6 +215,8 @@ PY_FILES = ["raid_views.py", "wizard.py", "inbox.py", "consequences.py", "discor
             "discord_auctions.py", "prices.py",
             # the Events page's read model and its routes (phase 4)
             "event_view.py", "web/api_events.py",
+            # the event page's Bot activity tab (design 2026-11-28-event-activity-tab): every row's words
+            "event_activity.py",
             # phase 6 (event words): every other module that builds text a person reads — the shared word tables, the
             # run buttons' labels, the Schedules / Raids pages' read models, the scheduler's and loot's lines, the routes'
             # sentences. Not here: web/api.py and web/api_agents.py (old-lint hits in MCP-facing errors and the Agents

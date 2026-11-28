@@ -19,6 +19,7 @@ import { useRescheduleBox } from "../components/events/RescheduleBox";
 import { useLockBox } from "../components/events/LockBox";
 import { boxOf, EventHead } from "../components/events/shared";
 import { EventMore } from "../components/events/EventMore";
+import { EventTabs } from "../components/events/BotActivity";
 import { guardNav } from "../components/LeaveGuard";
 import type { NightSheet } from "../components/board/types";
 import { useLive } from "../hooks/useLive";
@@ -94,7 +95,7 @@ function EventPane({ evKey, meta, tick, onChanged }: { evKey: string; meta: Meta
     api.get<EventView>(`/api/event/${encodeURIComponent(evKey)}`).then((v) => afterDrag(() => {  // never redrawn under a drag
       if (n !== seq.current) return;  // a newer GET was sent meanwhile: its answer is the one drawn
       setEv(v); setSentAt(at); setGone(null);
-      if (v.key !== evKey) navigate(`/events/${encodeURIComponent(v.key)}`, { replace: true });
+      if (v.key !== evKey) navigate(`/events/${encodeURIComponent(v.key)}${window.location.hash}`, { replace: true });  // the tab's hash stays
     })).catch((e) => {
       if (n !== seq.current) return;
       if (e instanceof ApiError && e.status === 404) setGone((e.body as { error?: string } | undefined)?.error || e.message);
@@ -158,14 +159,17 @@ function LiveEvent({ ev, meta, onChanged, sentAt }: { ev: EventView; meta: Meta;
       {ev.parts.map((p) => (p.sheet as unknown as NightSheet | null)?.lock_error ? (
         <div key={p.key} className={css.sect}><Alert color="red" variant="light" p="xs"><Text size="sm">{(p.sheet as unknown as NightSheet).lock_error}</Text></Alert></div>
       ) : null)}
-      <EventDetails details={ev.details} />
-      <SignupsSection ev={ev} meta={meta} onDone={onChanged} />
-      <RoleSwitches meta={meta} view={ev} onReload={onChanged} />
-      <EventBoard meta={meta} view={ev} onReload={onChanged} sentAt={sentAt} />
-      {/* Post board (design 2026-11-27-post-board): under the board, the server's word and box */}
-      <BoardPostButton ev={ev} onChanged={onChanged} />
-      <ActivitySection activity={ev.activity}
-        action={ev.actions.cancel && ev.boxes.cancel ? <Button variant="subtle" color="gray" size="xs" onClick={cancel}>Cancel event</Button> : undefined} />
+      {/* two top tabs (design 2026-11-28-event-activity-tab): Event — every section below, untouched — and Bot activity */}
+      <EventTabs ev={ev} meta={meta} onChanged={onChanged}>
+        <EventDetails details={ev.details} />
+        <SignupsSection ev={ev} meta={meta} onDone={onChanged} />
+        <RoleSwitches meta={meta} view={ev} onReload={onChanged} />
+        <EventBoard meta={meta} view={ev} onReload={onChanged} sentAt={sentAt} />
+        {/* Post board (design 2026-11-27-post-board): under the board, the server's word and box */}
+        <BoardPostButton ev={ev} onChanged={onChanged} />
+        <ActivitySection activity={ev.activity}
+          action={ev.actions.cancel && ev.boxes.cancel ? <Button variant="subtle" color="gray" size="xs" onClick={cancel}>Cancel event</Button> : undefined} />
+      </EventTabs>
       {dialog}
       {rescheduleDialog}
       {lockDialog}

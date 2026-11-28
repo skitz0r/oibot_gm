@@ -305,11 +305,12 @@ def test_the_event_confirms_print_only_the_servers_sentence():
 def test_the_events_more_menu_keeps_every_raid_night_lever():
     """Phase 4, Task 10 (the capability inventory): what the Rosters page's card offered on a raid night and the approved
     mockup does not draw stays on the event, in one compact More menu in its header — Fill seats / Suggest (the fill
-    screen), Remind, Pause / Resume automatic asks, Re-post the sheet, the loot council, End, the asks out (Withdraw) and,
-    on a finished event, Reopen — each per raid from the run's own JSON (part.sheet), greyed with the server's reason
-    when it can't, and asking first with the server's sentence where the Rosters card did."""
+    screen), Remind, Pause / Resume automatic asks, Re-post the sheet, the loot council, End and, on a finished event,
+    Reopen — each per raid from the run's own JSON (part.sheet), greyed with the server's reason when it can't, and asking
+    first with the server's sentence where the Rosters card did. The asks out (Withdraw) and the callouts moved to the
+    event's Bot activity tab (design 2026-11-28-event-activity-tab; tests/test_event_activity.py)."""
     more = _code_only((SRC / "components" / "events" / "EventMore.tsx").read_text())
-    for needle in ("<FillModal", "<RepostSheetModal", "/remind`", "/pause`", "/api/loot/${", "/end`", "/reopen`", "<Detail e={{ ...asks, log_rows: [], log: [] }}",
+    for needle in ("<FillModal", "<RepostSheetModal", "/remind`", "/pause`", "/api/loot/${", "/end`", "/reopen`",
                    "s.may_remind", "s.remind_note", "s.may_end", "s.end_note", "s.may_reopen", "s.loot?.may_open", "classNames={{ item: css.menuItem }}"):
         assert needle in more, needle
     page = _code_only((SRC / "pages" / "Events.tsx").read_text())
@@ -1522,7 +1523,7 @@ def test_nothing_points_a_reader_at_a_page_or_control_that_is_gone():
 def test_the_event_page_shows_its_raid_night_facts_and_split_strategy():
     """Fix round 1: the restored raid-night facts are the server's Details (the page adds none), the time zone line and
     the test run chip are the server's words; More's Split strategy… asks through the server's box with the choices it
-    sends and presses with the box's fp; Withdraw spins on its own key; Remind and End name the run as the server does;
+    sends and presses with the box's fp; Withdraw (the Bot activity tab's) spins on its own row; Remind and End name the run as the server does;
     Edit lineup's draft counts against the event's own lineup and lands on the encoded key."""
     page = _code_only((SRC / "pages" / "Events.tsx").read_text())
     assert "intro={list.tz_words}" in page and "tag={ev.test_chip}" in page
@@ -1532,7 +1533,8 @@ def test_the_event_page_shows_its_raid_night_facts_and_split_strategy():
     assert "Split strategy…" not in more and "/strategy`" not in more
     edit = _code_only((SRC / "components" / "events" / "EditEvent.tsx").read_text())
     assert "split_policy" in edit and "e.splits.map(" in edit
-    assert "busy={busy}" in more and 'busy ? "withdraw" : null' not in more and "post(path, payload, k)" in more
+    tab = _code_only((SRC / "components" / "events" / "BotActivity.tsx").read_text())
+    assert "setBusy(r.id)" in tab and "busy={busy === r.id}" in tab and "<Detail" not in more
     assert "${L.remind} for" not in more and "End ${s.run_title}?" not in more and " on ${name}?" not in more, "the run is named in the server's box"
     lineup = _code_only((SRC / "pages" / "LineupPage.tsx").read_text())
     edit = lineup[lineup.index("function EditLineup"):]
