@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMediaQuery } from "@mantine/hooks";
 import { Anchor, Box as MBox, Button, Group, MultiSelect, SegmentedControl, Select, Stack, Text, Title } from "@mantine/core";
-import { api, ApiError, type Box, type Fact, type Meta, type ScheduleEditorOptions, type ScheduleList, type ScheduleView } from "../api";
+import { api, ApiError, type Box, type ChannelSection, type Fact, type Meta, type ScheduleEditorOptions, type ScheduleList, type ScheduleView } from "../api";
 import { fail, ok } from "../components/Page";
 import { Facts, ViewSection } from "../components/Facts";
 import { BoxBody, BoxButtons, useConfirmBox } from "../components/ConfirmBox";
@@ -14,6 +14,7 @@ import { NameFields } from "../components/schedules/NameFields";
 import { PRIORITY_KEYS, PriorityFields, TimingFields } from "../components/schedules/SettingsFields";
 import { LineupBuilder, type LineupEntry, type PaletteRaid } from "../components/lineup/LineupBuilder";
 import { LineupPicture, type PictureStep } from "../components/lineup/LineupPicture";
+import { ChannelFields } from "../components/ChannelFields";
 import type { OpenPreview } from "../components/board/types";
 import { clearDirty, useDirty } from "../hooks/useDirty";
 import { useLive } from "../hooks/useLive";
@@ -24,6 +25,8 @@ import css from "./listpage.module.css";
 type Options = {
   today: string; raids: PaletteRaid[]; lineups: { id: string; name: string; lineup: LineupEntry[] }[];
   locks: { hours: number; words: string }[]; lineup_max: number; lineup_full: string;
+  /** a one-off's own channels (empty = the guild's) */
+  channels: ChannelSection;
 };
 /** POST /api/raid/{rid}/open/preview with the New event fields (event_view.new_event_view): "What this makes" in the
  *  server's words — facts, each step's start, notes, the refusal box (a night already open, a past time) and, for a
@@ -61,6 +64,8 @@ function NewEvent({ meta }: { meta: Meta }) {
   const [lock, setLock] = useState<string>("2");
   // a one-off's Auto Lock and its auto-fill (issue 14): both On until the officer switches one off
   const [auto, setAuto] = useState<{ auto_lock: boolean; auto_lock_fill: boolean }>({ auto_lock: true, auto_lock_fill: true });
+  // a one-off's own channels by place (null = the guild's); a schedule's night posts where its schedule says
+  const [chans, setChans] = useState<Record<string, string | null>>({});
   // what the page started with (the first schedule's lineup, no day or time, the first Locks choice): the leave guard
   // counts what differs from it, so an edit undone holds nothing to lose
   const [seed, setSeed] = useState<{ from: string; lineup: LineupEntry[]; lock: string } | null>(null);
@@ -82,7 +87,9 @@ function NewEvent({ meta }: { meta: Meta }) {
     }).catch(fail);
   }, []);
   useLive(() => setTick((t) => t + 1), ["run:", "config"]);  // an event opened elsewhere, a schedule edited: ask again
+  const channels = Object.fromEntries(Object.entries(chans).filter(([, v]) => v)) as Record<string, string>;
   const changes = !seed ? 0 : [from !== seed.from, day !== null, time !== null, lock !== seed.lock, !auto.auto_lock, !auto.auto_lock_fill].filter(Boolean).length
+    + Object.keys(channels).length
     + Array.from({ length: Math.max(lineup.length, seed.lineup.length) }, (_, k) => k)
       .filter((k) => JSON.stringify(lineup[k] ?? null) !== JSON.stringify(seed.lineup[k] ?? null)).length;
   useDirty("lineup:new", changes > 0, { n: changes, name: "New event" });
@@ -133,7 +140,7 @@ function NewEvent({ meta }: { meta: Meta }) {
     }
     setBusy(true);
     try {
-      opened(await api.post<Opened>(url, { ...sent, rosters: lineup[0].rosters, lineup: later, timing }));
+      opened(await api.post<Opened>(url, { ...sent, rosters: lineup[0].rosters, lineup: later, timing, channels }));
     } catch (e) {
       const b = boxOf(e);
       if (b) await ask({ box: b }); else fail(e);
@@ -176,6 +183,12 @@ function NewEvent({ meta }: { meta: Meta }) {
             <div style={{ marginTop: 12 }}>
               <TimingFields words={meta.page_words} values={auto} hours={{}} shown={(k) => k === "auto_lock" || k === "auto_lock_fill"}
                 onChange={(k, v) => setAuto((a) => ({ ...a, [k]: v === true }))} />
+            </div>
+          )}
+          {!scheduled && (  /* where this one-off posts: collapsed, empty = the guild's channels */
+            <div style={{ marginTop: 12 }}>
+              <ChannelFields section={opts.channels} values={chans} about={meta.page_words.help_about} gone={meta.page_words.channel_gone}
+                onChange={(k, v) => setChans((c) => ({ ...c, [k]: v }))} />
             </div>
           )}
         </ViewSection>
@@ -355,7 +368,10 @@ type Opts = ScheduleEditorOptions;
 type SchedDraft = {
   name: string; id: string; idTyped: boolean; kind: string; slots: string[]; days: string[]; time: string;
   lineup: LineupEntry[]; timing: Record<string, number | boolean>; split: string; weights: Record<string, string>;
+  /** its own channels by place (null = the guild's) */
+  channels: Record<string, string | null>;
 };
+const CHANNEL_KEYS = ["sheet_channel", "officers_channel", "loot_log_channel"] as const;
 const TIMING_HOURS = ["signup_lead_hours", "nudge_hours_before", "lock_hours_before", "confirm_hours_before", "fill_ask_hours"] as const;
 const TIMING_SWITCHES = ["nudge", "autofill", "open_dm", "confirm", "auto_lock", "auto_lock_fill"] as const;
 /** a pickup template opens when an officer opens it and reminds nobody: these mean nothing there */
@@ -390,18 +406,20 @@ function seedOf(opts: Opts, view: ScheduleView | null, from: string): SchedDraft
       lineup: view.lineup.map((s) => ({ raid: s.raid, rosters: s.rosters, starts: s.starts })),
       timing: Object.fromEntries([...TIMING_HOURS, ...TIMING_SWITCHES].filter((k) => st[k] !== undefined && st[k] !== null).map((k) => [k, st[k] as number | boolean])),
       split: String(st.split_policy || ""), weights,
+      channels: Object.fromEntries(CHANNEL_KEYS.map((k) => [k, (st[k] as string | null | undefined) || null])),
     };
   }
   const lineup = (opts.lineups.find((l) => l.id === from)?.lineup || []).map((e) => ({ ...e }));
   return { name: "", id: "", idTyped: false, kind: "weekly", slots: [], days: [], time: "20:00", lineup, timing: suggested(opts, "weekly", lineup[0]?.raid),
-    split: "", weights: Object.fromEntries(PRIORITY_KEYS.map((k) => [k, ""])) };
+    split: "", weights: Object.fromEntries(PRIORITY_KEYS.map((k) => [k, ""])), channels: Object.fromEntries(CHANNEL_KEYS.map((k) => [k, null])) };
 }
 /** A new schedule's edits against its seed: one per field that differs (the weights one per key; `idTyped` is how the
  *  id came, not an edit). */
 function newEdits(d: SchedDraft, seed: SchedDraft): number {
-  return (Object.keys(d) as (keyof SchedDraft)[]).filter((k) => k !== "idTyped" && k !== "weights")
+  return (Object.keys(d) as (keyof SchedDraft)[]).filter((k) => k !== "idTyped" && k !== "weights" && k !== "channels")
     .filter((k) => JSON.stringify(d[k]) !== JSON.stringify(seed[k])).length
-    + Object.keys(d.weights).filter((k) => d.weights[k] !== seed.weights[k]).length;
+    + Object.keys(d.weights).filter((k) => d.weights[k] !== seed.weights[k]).length
+    + CHANNEL_KEYS.filter((k) => d.channels[k] !== seed.channels[k]).length;
 }
 
 /** New schedule (`sid` undefined) and a schedule's Edit (`/schedules/<id>/edit`): Start from (new only: Copy a lineup),
@@ -478,6 +496,7 @@ function ScheduleEditor({ meta, edit }: { meta: Meta; edit: boolean }) {
       if (d.split) fields.split_policy = d.split;
       const w = Object.fromEntries(Object.entries(d.weights).filter(([, v]) => v !== "").map(([k, v]) => [k, Number(v)]));
       if (Object.keys(w).length) fields.weights = w;
+      for (const k of CHANNEL_KEYS) if (d.channels[k]) fields[k] = d.channels[k];
       return fields;
     }
     if (d.name.trim() !== base.name) fields.name = d.name.trim() || null;
@@ -489,6 +508,7 @@ function ScheduleEditor({ meta, edit }: { meta: Meta; edit: boolean }) {
     if (d.split !== base.split) fields.split_policy = d.split || null;
     const w = Object.fromEntries(Object.entries(d.weights).filter(([k, v]) => v !== base.weights[k]).map(([k, v]) => [k, v === "" ? null : Number(v)]));
     if (Object.keys(w).length) fields.weights = w;
+    for (const k of CHANNEL_KEYS) if (d.channels[k] !== base.channels[k]) fields[k] = d.channels[k];  // null = back to the guild's
     return fields;
   }
 
@@ -577,6 +597,11 @@ function ScheduleEditor({ meta, edit }: { meta: Meta; edit: boolean }) {
           {/* the ONE Sheet timing component Edit event uses too (components/schedules/SettingsFields) */}
           <TimingFields words={W} values={d.timing} hours={opts.hours} shown={(k) => shown(k)} onChange={setTiming}
             presets={pickup ? undefined : opts.presets} onPreset={(values) => { setTimingTyped(true); set({ timing: { ...d.timing, ...values } }); }} />
+          {/* where the events it opens post: collapsed, empty = the guild's (events already open keep theirs) */}
+          <div style={{ marginTop: 16 }}>
+            <ChannelFields section={opts.channels} values={d.channels} about={W.help_about} gone={W.channel_gone}
+              onChange={(k, v) => set({ channels: { ...d.channels, [k]: v } })} />
+          </div>
         </ViewSection>
         <ViewSection title={F.weights} action={<Button variant="subtle" size="sm" onClick={() => set({ weights: Object.fromEntries(Object.keys(d.weights).map((k) => [k, ""])), split: "" })}>{useRaids}</Button>}>
           <PriorityFields words={W} weights={d.weights} maxWeight={opts.max_weight} policies={opts.split_policies}

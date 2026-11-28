@@ -9,11 +9,14 @@ import { guardNav } from "../LeaveGuard";
 import { PRIORITY_KEYS, PriorityFields, TimingFields, type TimingDraft } from "../schedules/SettingsFields";
 import { clearDirty, useDirty } from "../../hooks/useDirty";
 import { boxOf } from "./shared";
+import { ChannelFields } from "../ChannelFields";
 import css from "../../pages/listpage.module.css";
 
 /** What the editor holds: the sheet timing and switches by setting, the five weights as strings (a select's value),
  *  the seating, each raid's split by its key. */
-type Draft = { timing: TimingDraft; weights: Record<string, string>; firstCome: boolean; splits: Record<string, string> };
+type Draft = { timing: TimingDraft; weights: Record<string, string>; firstCome: boolean; splits: Record<string, string>;
+  /** the event's own channels by place (null = the empty choice: its schedule's, else the guild's) */
+  channels: Record<string, string | null> };
 
 const TIMING = ["lock_hours_before", "auto_lock", "auto_lock_fill", "nudge", "nudge_hours_before", "confirm", "confirm_hours_before", "autofill", "fill_ask_hours"];
 
@@ -26,6 +29,7 @@ function seedOf(ev: EventView): Draft {
     weights: Object.fromEntries(PRIORITY_KEYS.map((k) => [k, w[k] != null ? String(w[k]) : "0"])),
     firstCome: v.first_come === true,
     splits: Object.fromEntries(e.splits.map((s) => [s.key, s.value])),
+    channels: Object.fromEntries(e.channels.fields.map((f) => [f.key, f.value])),
   };
 }
 
@@ -44,6 +48,8 @@ function changesOf(d: Draft, seed: Draft, fields: string[]): Record<string, unkn
     const s = Object.fromEntries(Object.entries(d.splits).filter(([k, v]) => v !== seed.splits[k]));
     if (Object.keys(s).length) out.split_policy = s;
   }
+  // the channels are not timing: they change until the event ends, after the lock and the start too ("" = the empty choice)
+  for (const [k, v] of Object.entries(d.channels)) if (v !== seed.channels[k]) out[k] = v ?? "";
   return out;
 }
 /** how many edits the leave guard counts: each setting, each weight and each raid's split that differs from the seed */
@@ -124,12 +130,19 @@ export function EditEvent({ evKey, meta }: { evKey: string; meta: Meta }) {
           <div className={css.sect}><Text size="sm" c="dimmed">{W.edit_over}</Text></div>
         ) : (
           <>
-            {ev.state !== "open" && <div className={css.sect}><Text size="sm">{W.edit_locked}</Text></div>}
-            <ViewSection title="Sheet timing">
-              {/* the schedule editor's own component: the same labels, choices and order */}
-              <TimingFields words={W} values={d.timing} hours={e.hours} shown={may}
-                onChange={(k, v) => set({ timing: { ...d.timing, [k]: v } })} />
-            </ViewSection>
+            {e.note ? <div className={css.sect}><Text size="sm">{e.note}</Text></div>
+              : ev.state !== "open" && <div className={css.sect}><Text size="sm">{W.edit_locked}</Text></div>}
+            {fields.length > 0 && (
+              <ViewSection title="Sheet timing">
+                {/* the schedule editor's own component: the same labels, choices and order */}
+                <TimingFields words={W} values={d.timing} hours={e.hours} shown={may}
+                  onChange={(k, v) => set({ timing: { ...d.timing, [k]: v } })} />
+              </ViewSection>
+            )}
+            <div className={css.sect}>
+              <ChannelFields section={e.channels} values={d.channels} about={W.help_about} gone={W.channel_gone}
+                onChange={(k, v) => set({ channels: { ...d.channels, [k]: v } })} />
+            </div>
             {may("weights") && (
               <ViewSection title={F.weights}>
                 <PriorityFields words={W} weights={d.weights} maxWeight={e.max_weight} policies={e.split_policies}

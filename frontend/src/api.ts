@@ -161,9 +161,14 @@ export interface PageWords {
   /** a setting's name: the schedule editor's labels and the Save box's lines (configops) say the same */
   schedule_fields: Record<"name" | "kind" | "slots" | "days" | "time" | "lineup" | "rosters" | "active" | "signup_lead_hours" | "nudge"
     | "nudge_hours_before" | "lock_hours_before" | "confirm" | "confirm_hours_before" | "autofill" | "fill_ask_hours" | "open_dm"
-    | "split_policy" | "weights" | "first_come" | "auto_lock" | "auto_lock_fill", string>;
+    | "split_policy" | "weights" | "first_come" | "auto_lock" | "auto_lock_fill" | "sheet_channel" | "officers_channel" | "loot_log_channel", string>;
   /** the (?) beside each Sheet timing switch: exactly who gets what, when and where */
-  schedule_field_help: Record<"nudge" | "confirm" | "autofill" | "open_dm" | "auto_lock" | "auto_lock_fill", string>; help_about: string;
+  schedule_field_help: Record<"nudge" | "confirm" | "autofill" | "open_dm" | "auto_lock" | "auto_lock_fill" | "sheet_channel" | "officers_channel"
+    | "loot_log_channel", string>; help_about: string;
+  /** the Channels section (event_view.channel_section): its title, the empty choice's words, a Details row's value, a
+   *  channel the bot can't see */
+  channels: string; channel_guilds: string; channel_schedules: string; channel_guild_unset: string; channel_from_schedule: string;
+  channel_from_event: string; channel_gone: string;
   /** Auto Lock's On / Off, and the Details Locks row when Auto Lock is off (issue 14) */
   switch_on: string; switch_off: string; officer_locks: string;
   raid_fields: Record<string, string>; split: Record<string, string>; on: string; off: string; raids_own: string; suggested: string;
@@ -174,7 +179,7 @@ export interface PageWords {
   new_event_no_time: string; schedule_no_lineup: string; activity_empty: string; repost_sheet: string; nothing_applies: string;
   weight_same: string;
   /** Edit event (the owner's tweaks, B): the seating choice beside first_to_join, and the editor's one-line states */
-  by_priority: string; edit_locked: string; edit_over: string;
+  by_priority: string; edit_locked: string; edit_over: string; edit_started: string;
   /** the members' Events page (member_event_view.py): a key it doesn't list, an empty list, the ⚑ tooltip, no character yet */
   event_over_member: string; member_events_empty: string; called_out: string; answer_needs_character: string;
   /** the Signups tabs (SignupTabs): each tab's label and the sentence its empty list says */
@@ -229,6 +234,8 @@ export interface ScheduleEditorOptions {
   hours: Record<string, { value: number; words: string }[]>;
   presets: { name: string; values: Record<string, number> }[];
   split_policies: string[]; max_weight: number;
+  /** the Channels section of New schedule and Edit schedule (empty = the guild's) */
+  channels: ChannelSection;
 }
 export interface ScheduleList { active: ScheduleRow[]; paused: ScheduleRow[]; reserved_ids: string[]; orphans: OrphanRegular[]; editor: ScheduleEditorOptions }
 /** GET /api/schedules/{id} (schedule_view.schedule_json). `next` is empty while paused or gone (`next_empty` says why);
@@ -324,7 +331,7 @@ export interface EventView {
   test_chip: string | null;
   /** Split strategy…'s choices in the server's words */
   strategies: { id: string; label: string; words: string }[];
-  /** Edit event (event_view.edit_options), null once it has started or is over: the settings it may change NOW (every
+  /** Edit event (event_view.edit_options), null once it is over (after the start: its channels alone): the settings it may change NOW (every
    *  one before the lock, the automatic asks and an ask's wait after it), its own values (rc.run_timing), each raid's
    *  split, the schedule editor's hour choices (its own value among them), the highest weight and the split policies */
   edit: EventEdit | null;
@@ -333,6 +340,16 @@ export interface EventEdit {
   fields: string[]; values: Record<string, number | boolean | Record<string, number>>;
   splits: { key: string; raid: string; value: string }[]; hours: Record<string, { value: number; words: string }[]>;
   max_weight: number; split_policies: string[];
+  /** the event's own channels (they change until it ends); `note` = the started event's one line (only the channels change) */
+  channels: ChannelSection; note: string | null;
+}
+/** The Channels section (event_view.channel_section): each place's label, (?), own channel id (null = the fallback) and
+ *  the empty choice's words; the server's text channels. */
+export interface ChannelSection {
+  title: string;
+  fields: { key: "sheet_channel" | "officers_channel" | "loot_log_channel"; label: string; help: { key: string; text: string; about: string } | null;
+    value: string | null; empty: string }[];
+  options: { value: string; label: string; group: string | null }[];
 }
 /** One move a short raid could take (rc.event_switches): `from` / `to` in words ('Shadow', 'Nyx, Shadow', 'no answer yet'),
  *  `button` the server's word (Switch · Answer for them · Ask), `raids` the raids it helps, `box` its confirmation box;
