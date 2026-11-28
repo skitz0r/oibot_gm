@@ -290,7 +290,9 @@ understands; it answers in the words below.
 - **Roster channel (officers)** — health cards, roster cards at lock, fill progress (🧩 lines). Here and in the ops
   channel an event is always named by its raid and start time (*Barrow Deeps Tue 8 Dec 7:30 PM*), never by an internal id.
   A roster channel that is also the signup channel is never used for these: the officers' cards then go to the ops
-  channel. Each event has one **updates thread**, under its first raid's officer card, where every ask, answer, freed
+  channel. A signup channel where the bot can post but can't start threads gets a warning on the ops feed (not an error
+  alert): the sheets still post, but the lock and cancel lines can't. Saving a signup channel asks for the thread
+  permissions too. Each event has one **updates thread**, under its first raid's officer card, where every ask, answer, freed
   seat, confirmation, expiry, pause, move and cancel (with its reason) is logged — every raid of the event writes there,
   and an archived thread is opened again rather than replaced. Before the event has a card, or when its card was
   deleted, those lines go to the ops feed instead; they never go to the signup channel. The
@@ -321,8 +323,10 @@ understands; it answers in the words below.
   already open. They are set in a folded **Channels** section under the timing on New schedule, Edit schedule, New event
   (a one-off) and Edit event, each select's empty choice naming where it falls back to (*#raid-signups (the guild's)*, or
   *(the schedule's)* on an event from a schedule that names one); in Discord a **Channels** step in `/gm schedule` and
-  `/raid edit` with Discord's own channel picker; in plain text and MCP as `sheet_channel`, `officers_channel` and
-  `loot_log_channel` on the schedule and event settings. A schedule's own sheet channel lets it open even when the guild
+  `/raid edit` and the one-off of `/raid open` with Discord's own channel picker (a channel the bot can't post in is
+  named at once, as on the Config page); in plain text and MCP as `sheet_channel`, `officers_channel` and
+  `loot_log_channel` on the schedule and event settings and on a one-off's open (*"open Barrow Deeps Friday 8 PM with
+  its sheet in #alt-signups"*). A schedule's own sheet channel lets it open even when the guild
   has no signup channel. The officers' cards can never share the sheet's channel (*"The officers' cards can't go in the
   channel where the signup sheet is posted. Pick another channel."*), and a channel is checked as the Config page checks
   the guild's (the bot can see it and post there, threads included for the sheet). An event's channels change until it
@@ -330,8 +334,12 @@ understands; it answers in the words below.
   is posted in the new channel with every answer and the old one is deleted (on a locked event the *is locked* line is
   written again in the new sheet's thread); the officers' cards of every raid move and a new updates thread starts there,
   the old thread getting one last line (*"Updates for this event continue in #alt-officers."*) before it is archived;
-  later loot log lines go to the new channel and lines already posted stay. Nobody gets a DM, and DMs already sent keep
-  their old channel link. A channel later deleted or closed to the bot falls back to the guild's, with one line on the
+  later loot log lines go to the new channel and lines already posted stay. A loot council already open keeps its thread
+  where it is; the next council opens in the new channel. The new posts go up first: when the bot can't post in the new
+  channel nothing old is touched, the event's channel for that place goes back to what it was, the reply says it did not
+  move and why, and the ops feed says so once. A move a restart cut off finishes by itself when the bot is back (or
+  within a minute), and saving the same channel again finishes it too. A lock waits a few seconds for a move still
+  posting. Nobody gets a DM, and DMs already sent keep their old channel link. A channel later deleted or closed to the bot falls back to the guild's, with one line on the
   ops feed. The ops feed itself always stays the guild's. Details on the Events and Schedules pages show these channels
   only when one differs from the guild's, with where it comes from.
 - **News channel** — a Wowhead webhook posts game news there. The bot reads only the post itself (title and

@@ -127,10 +127,8 @@ def test_channels_change_after_the_lock_and_the_start_but_not_once_ended_or_canc
     rs.save(ev, "locked (test)")
     assert rc.reschedule_refusal(reg, rs, ev, None, {"loot_log_channel": str(ALT_LOOT)}) is None
     assert rc.reschedule_refusal(reg, rs, ev, None, {"lock_hours_before": 3}) == rc.TIMING_LOCKED, "timing keeps its gate"
-    started = reg.now_local() + timedelta(hours=1)
     assert rc.reschedule_refusal(reg, rs, ev, None, {"loot_log_channel": str(ALT_LOOT)}, now=ev.start + timedelta(minutes=5)) is None
     assert rc.reschedule_refusal(reg, rs, ev, None, {"loot_log_channel": str(ALT_LOOT), "fill_ask_hours": 3}, now=ev.start + timedelta(minutes=5)) == rc.MOVE_STARTED
-    assert started  # (the start itself never moves here)
     for state in ("done", "cancelled"):
         ev.state = state
         assert rc.reschedule_refusal(reg, rs, ev, None, {"loot_log_channel": str(ALT_LOOT)}) == rc.CHANNELS_CLOSED
@@ -417,7 +415,7 @@ def test_the_channels_reach_every_surface():
     route (a one-off's) — the site's editors, Discord's /gm schedule and /raid edit, plain text and MCP each name them."""
     from pathlib import Path
 
-    from oibot_gm import configops, flows_event, flows_schedule
+    from oibot_gm import configops, flows_event, flows_raid, flows_schedule
     from oibot_gm import mcp_server as ms
     from oibot_gm.registry import SCHEDULE_FIELDS
     from oibot_gm.schedule_view import STORED_FIELDS
@@ -428,6 +426,238 @@ def test_the_channels_reach_every_surface():
         assert k in flows_event.CHANNELS and k in flows_schedule.CHANNELS, k  # Discord's two wizards
         assert k in configops.SCHEMA_TEXT, k  # plain text: schedule_set names them; run_reschedule says "sheet_channel | …"
         assert k in ms.schedule_set.__doc__ and k in ms.reschedule_run.__doc__ and k in ms.open_run.__doc__, k
+        assert k in flows_raid.OpenWizard.one_off_channels.__code__.co_names or k in flows_event.CHANNELS, k  # /raid open's one-off step
+        assert configops._open_channels(f"{k} <#1>") == {k: "1"}, k  # plain text's run_open
     tsx = (src / "components" / "ChannelFields.tsx").read_text()
     assert "channels" in (src / "pages" / "LineupPage.tsx").read_text() and "ChannelFields" in (src / "components" / "events" / "EditEvent.tsx").read_text()
     assert "fields" in tsx and "empty" in tsx, "labels and empty options come from the server"
+
+
+# ---------------------------------------------------------------- fix round 1 (review of 2026-11-27)
+
+def test_a_schedules_channel_is_checked_on_the_path_every_surface_uses(reg, rs):
+    """The site, the Discord wizard, plain text and MCP all write through configops.apply_ops: the permission check must
+    run there, not only in apply_async called directly."""
+    from oibot_gm import configops
+    from oibot_gm.configops import ConfigOp
+
+    sid = sched(reg)
+    bot = ChanBot(reg, rs)
+    asked = []
+
+    async def refuse(reg_, chans):
+        asked.append(chans)
+        return "I can't post in #alt-officers without Send Messages."
+    bot.channel_setting_refusal = refuse
+    res = run(configops.apply_ops(reg, [ConfigOp(op="schedule_set", target=sid, field="officers_channel", value=str(ALT_CARDS))],
+                                  by="Jon", by_id=None, bot=bot))
+    assert asked and not res["applied"] and "Send Messages" in res["results"][0]["line"]
+    assert "officers_channel" not in reg.schedule_entry(sid)
+
+
+def _failing(room):
+    async def send(*a, **k):
+        raise RuntimeError("Missing Permissions")
+    room.send = send
+
+
+def test_a_sheet_that_cant_post_in_the_new_channel_stays_and_the_setting_goes_back(reg, rs):
+    bot = ChanBot(reg, rs)
+    ev, _ms = live(reg, rs, bot)
+    old = ev.message_id
+    _failing(bot.rooms[ALT_SHEET])
+    said = run(bot.reschedule_event(reg, rs, ev, timing={"sheet_channel": str(ALT_SHEET)}, by="Kara"))
+    ev = rs.events[ev.key]
+    assert ev.channel_id == SIGNUP and ev.message_id == old and old in bot.rooms[SIGNUP].msgs, "the old sheet stays"
+    assert rc.event_channel(reg, ev, "sheet_channel") is None, "the setting goes back"
+    assert "did not move" in said[0] and "has moved" not in said[0], said
+    assert any("did not move" in t for _l, t in bot.ops.lines)
+    assert not rc.pending_moves(reg, ev)
+
+
+def test_cards_that_cant_post_in_the_new_channel_stay_with_their_buttons(reg, rs):
+    from test_event_threads import card_in
+
+    bot = ChanBot(reg, rs)
+    ev, _ms = live(reg, rs, bot)
+    card = card_in(bot, rs, ev, ROSTER, "health")
+    _failing(bot.rooms[ALT_CARDS])
+    said = run(bot.reschedule_event(reg, rs, ev, timing={"officers_channel": str(ALT_CARDS)}, by="Kara"))
+    ev = rs.events[ev.key]
+    assert ev.cards == {"health": card.id} and ev.cards_channel_id == ROSTER and card.id not in bot.rooms[ROSTER].deleted
+    assert rc.event_channel(reg, ev, "officers_channel") is None and "did not move" in said[0]
+
+
+def test_a_move_cut_off_by_a_restart_heals_and_a_re_save_retries_it(reg, rs):
+    bot = ChanBot(reg, rs)
+    ev, _ms = live(reg, rs, bot)
+    rc.reschedule(reg, rs, ev, timing={"sheet_channel": str(ALT_SHEET)}, by="Kara")  # written; the process stopped before the move
+    assert rc.pending_moves(reg, ev) == ["sheet_channel"] and rs.events[ev.key].channel_id == SIGNUP
+    assert rc.reschedule_refusal(reg, rs, ev, None, {"sheet_channel": str(ALT_SHEET)}) is None, "an unfinished move is never 'already'"
+    run(bot.finish_channel_moves(reg))
+    ev = rs.events[ev.key]
+    assert ev.channel_id == ALT_SHEET and not rc.pending_moves(reg, ev)
+    n = len(bot.rooms[ALT_SHEET].sent)
+    run(bot.finish_channel_moves(reg))
+    assert len(bot.rooms[ALT_SHEET].sent) == n, "idempotent"
+    # a re-save of the same channel finishes an unfinished move too
+    ev2_bot = ChanBot(reg, rs)
+    rc.reschedule(reg, rs, ev, timing={"loot_log_channel": str(ALT_LOOT), "officers_channel": str(ALT_CARDS)}, by="Kara")
+    assert set(rc.pending_moves(reg, ev)) == {"loot_log_channel", "officers_channel"}
+    run(ev2_bot.reschedule_event(reg, rs, ev, timing={"officers_channel": str(ALT_CARDS)}, by="Kara"))
+    assert not rc.pending_moves(reg, ev)
+
+
+def test_a_mixed_edit_keeps_the_warning_that_it_locks_at_once(reg, rs):
+    from oibot_gm import consequences as cq
+
+    reg.config.signup_channel_id, reg.config.roster_channel_id = SIGNUP, ROSTER
+    ev = open_from(reg, rs, sched(reg))
+    hours = (ev.start - reg.now_local()).total_seconds() / 3600 + 24  # the lock time raised past now
+    timing = {"lock_hours_before": round(hours), "nudge": False, "confirm": False, "loot_log_channel": str(ALT_LOOT)}
+    assert rc.reschedule_refusal(reg, rs, ev, None, timing) is None
+    lines = cq.reschedule_consequence(reg, rs, ev, None, timing)
+    assert len(lines) <= 3 and any("locks within a minute" in x for x in lines), lines
+    box = cq.reschedule_box(reg, rs, ev, None, timing, edit=True)
+    assert any(x.startswith("Loot log: ") for x in box["diff"]), "what moves is on its own diff line"
+
+
+def test_a_lock_waits_for_a_move_still_running(reg, rs):
+    import asyncio
+
+    bot = ChanBot(reg, rs)
+    ev, _ms = live(reg, rs, bot)
+
+    async def go():
+        gate = asyncio.Event()
+        task = asyncio.get_running_loop().create_task(gate.wait())
+        bot.__dict__.setdefault("_move_finishing", {})[(reg.key, ev.key)] = task
+        try:
+            with pytest.raises(RegistryError, match="still moving"):
+                await bot.lock_run(reg, rs, ev, by="scheduler")
+        finally:
+            gate.set()
+            await task
+    run(go())
+    assert rs.events[ev.key].state == "open"
+
+
+def test_the_edge_cases_a_legacy_channel_the_lock_lines_words_and_a_part_ended_lineup(reg, rs):
+    from datetime import datetime
+
+    bot = ChanBot(reg, rs)
+    ev, ms = live(reg, rs, bot)
+    ev.layout = [[m.display_name for m in ms[:5]], [m.display_name for m in ms[5:10]]]
+    rs.save(ev, "board (test)")
+    run(bot.lock_run(reg, rs, rs.events[ev.key], by="Jon", fill=False))
+    ev = rs.events[ev.key]
+    ev.confirm_by = (datetime.now(ev.start.tzinfo) - timedelta(minutes=5)).isoformat()  # the confirm-by has passed
+    rs.save(ev, "confirm-by past (test)")
+    run(bot.reschedule_event(reg, rs, ev, timing={"sheet_channel": str(ALT_SHEET)}, by="Kara"))
+    line = bot.rooms[rs.events[ev.key].lock_line[0]].lines()[-1]
+    assert "confirm in your DMs" not in line, line
+    # a lineup whose first raid has ended while a later raid plays still changes its channels
+    unlock_hyjal(reg)
+    reg.set_schedule("pair", {"kind": "weekly", "slots": "Tue 18:30", "follow": {"raid": FOLLOW, "rosters": 1}}, "t", raid=LEAD)
+    lead = rc.open_run(reg, rs, LEAD, first_slot(reg, LEAD), by="t", schedule="pair")
+    later = rc.later_parts(rs, lead)[0]
+    later.channel_id = SIGNUP  # an older file's later raid carrying the sheet's channel
+    lead.state, later.state = "done", "locked"
+    rs.save(later, "legacy (test)")
+    rs.save(lead, "ended (test)")
+    assert rc.reschedule_refusal(reg, rs, later, None, {"loot_log_channel": str(ALT_LOOT)}) is None
+
+
+def test_a_later_raids_legacy_channel_follows_the_sheet(reg, rs):
+    unlock_hyjal(reg)
+    bot = ChanBot(reg, rs)
+    reg.set_schedule("pair", {"kind": "weekly", "slots": "Tue 18:30", "follow": {"raid": FOLLOW, "rosters": 1}}, "t", raid=LEAD)
+    lead = run(bot.open_run_and_post(reg, rs, LEAD, first_slot(reg, LEAD), by="t", schedule="pair"))
+    later = rc.later_parts(rs, lead)[0]
+    later.channel_id = lead.channel_id
+    rs.save(later, "legacy (test)")
+    run(bot.reschedule_event(reg, rs, lead, timing={"sheet_channel": str(ALT_SHEET)}, by="Kara"))
+    assert rs.events[later.key].channel_id == ALT_SHEET
+
+
+def test_the_clash_reads_where_the_cards_really_go(reg):
+    reg.config.signup_channel_id, reg.config.roster_channel_id, reg.config.ops_channel_id = SIGNUP, None, OPS
+    sid = sched(reg)
+    with pytest.raises(RegistryError, match="officers' cards can't go"):
+        reg.set_schedule(sid, {"sheet_channel": str(OPS)}, "t")  # no roster channel: the cards go to ops
+
+
+def test_a_signup_channel_without_thread_permissions_is_a_warning_not_an_error(reg):
+    from test_setup import SetupBot
+
+    bot = SetupBot(reg)
+    bot.add(50, "raids", view_channel=True, send_messages=True, embed_links=True)  # no thread permissions
+    reg.config.signup_channel_id = 50
+    run(bot.check_channel_perms(reg))
+    (lvl, text), = [(lvl, t) for _k, lvl, t in bot.ops.lines]
+    assert lvl == "warn" and "lock and cancel lines" in text, text
+
+
+def test_the_new_event_preview_reads_the_forms_own_sheet_channel(reg, rs, web_bot):
+    from test_raid_night import H
+
+    reg.config.signup_channel_id = None
+    when = (reg.now_local() + timedelta(days=4)).replace(hour=13, minute=15).strftime("%Y-%m-%d %H:%M")
+    p = web_bot.c.post(f"/api/raid/{RID}/open/preview", json={"when": when, "channels": {"sheet_channel": str(ALT_SHEET)}}, headers=H()).json()
+    assert p["channel"] == str(ALT_SHEET) or p["channel"] == ALT_SHEET
+    assert "No signup channel" not in p["posts"]
+
+
+def test_plain_text_run_open_takes_the_channels(reg, rs):
+    from oibot_gm import configops
+    from oibot_gm.configops import ConfigOp
+
+    bot = ChanBot(reg, rs)
+    when = (reg.now_local() + timedelta(days=4)).replace(hour=13, minute=15).strftime("%Y-%m-%d %H:%M")
+    op = ConfigOp(op="run_open", target=RID, value=when, path=f"sheet_channel <#{ALT_SHEET}>, loot_log_channel <#{ALT_LOOT}>")
+    run(configops.apply_async(reg, op, "Jon", True, bot=bot))
+    ev = next(iter(rs.events.values()))
+    assert rc.event_channel(reg, ev, "sheet_channel") == ALT_SHEET and rc.event_channel(reg, ev, "loot_log_channel") == ALT_LOOT
+    assert ev.channel_id == ALT_SHEET
+
+
+def test_a_discord_picker_warns_at_pick_time_when_the_bot_cant_post(reg, rs, monkeypatch):
+    import discord
+    from test_reschedule import OFFICER_ID
+    from test_setup import Chan, FakeGuild, pick_widget
+    from types import SimpleNamespace
+    from wizard_harness import Harness
+
+    from oibot_gm import discord_registry, flows_config, flows_schedule  # noqa: F401
+    from oibot_gm.wizard import FLOWS
+
+    monkeypatch.setattr(discord_registry, "is_officer", lambda *a, **k: True)
+    sid = sched(reg)
+    bot = ChanBot(reg, rs)
+    mute = Chan(ALT_CARDS, "alt-officers", FakeGuild(reg.config.discord_guild_id), view_channel=True, send_messages=True)
+    bot.rooms[ALT_CARDS] = mute
+    h = Harness(reg, rs, user=SimpleNamespace(id=OFFICER_ID, display_name="Officer", mention="@Officer"), client=bot)
+    run(FLOWS["schedule"](h.command(), reg, raid=RID))
+    run(h.pick("Pick a schedule", sid))
+    run(h.pick("Change", "channels"))
+    run(h.pick("Channels", "officers_channel"))
+    run(pick_widget(h, discord.ui.ChannelSelect, "Pick the channel", mute))
+    assert "I can't post in #alt-officers" in h.text
+
+
+def test_a_gone_channel_is_not_reported_before_the_client_is_ready(reg, rs):
+    import asyncio
+
+    bot = ChanBot(reg, rs)
+    ev = open_from(reg, rs, sched(reg, sheet_channel=str(GONE)))
+    bot.is_ready = lambda: False
+
+    async def twice():
+        bot.sheet_channel(reg, ev)
+        await asyncio.sleep(0)
+        assert not [t for _l, t in bot.ops.lines if "gone or closed" in t], "a cache not ready yet is no evidence"
+        bot.is_ready = lambda: True
+        bot.sheet_channel(reg, ev)
+        await asyncio.sleep(0)
+    run(twice())
+    assert len([t for _l, t in bot.ops.lines if "gone or closed" in t]) == 1

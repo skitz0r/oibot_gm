@@ -29,6 +29,19 @@ CHANNELS = ("sheet_channel", "officers_channel", "loot_log_channel")  # the Chan
 PICK_CHANNEL = "Pick the channel"
 
 
+def channel_pick_note(client, field: str, cid) -> str:
+    """The warning a channel picker shows at once (flows_config's channels hub says the same): the bot can't post in the
+    picked channel for that place, so the Save would refuse it. '' when it can (or the channel can't be seen)."""
+    from . import perms
+    from .registry import CHANNEL_KIND_OF
+
+    ch = client.get_channel(int(cid)) if cid and getattr(client, "get_channel", None) else None
+    missing = perms.missing_for(ch, CHANNEL_KIND_OF[field]) if ch is not None else []
+    if not missing:
+        return ""
+    return f"⚠ {perms.cant_post(getattr(ch, 'name', cid), missing)} Save would refuse it, so fix the permission first or pick another channel."
+
+
 def channel_mention_words(reg: Registry, field: str, own, back: dict | None = None) -> str:
     """One of an event's or a schedule's own channels as a Discord screen says it: its mention, or the empty choice's
     words — the channel it falls back to, '<#raid-signups> (the guild's)' or '(the schedule's)'."""
@@ -288,7 +301,7 @@ class EditEventWizard(EventWizard):
     async def start(self, interaction: discord.Interaction) -> None:
         await self.hub(interaction)
 
-    async def hub(self, interaction: discord.Interaction) -> None:
+    async def hub(self, interaction: discord.Interaction, note: str = "") -> None:
         ev = self.ev()
         if ev is None or ev.state not in ("open", "locked"):
             await self.finish(interaction, PAGE_WORDS["edit_over"])
@@ -300,7 +313,10 @@ class EditEventWizard(EventWizard):
         self.prune_weights(opts)
         head = [f"**{run_title(self.reg, ev)}**"] + ([opts["note"]] if opts.get("note") else [PAGE_WORDS["edit_locked"]] if ev.state != "open" else [])
         if dropped:  # said once: the next hub has nothing left to drop
-            head.append(f"The roster locked while you edited, so your change to {join_words(dropped)} was dropped.")
+            why = "The event started" if ev.start <= self.reg.now_local() else "The roster locked"
+            head.append(f"{why} while you edited, so your change to {join_words(dropped)} was dropped.")
+        if note:
+            head.append(note)
         # Auto-fill on Auto Lock sits under Auto Lock and changes nothing while Auto Lock is off (issue 14): not offered then
         choices = [Opt(f, setting_label(f)) for f in opts["fields"]
                    if not (f == "auto_lock_fill" and self.value(opts, "auto_lock") is False)] + [Opt(f, setting_label(f)) for f in CHANNELS]
@@ -364,8 +380,9 @@ class EditEventWizard(EventWizard):
         back = rc.schedule_channels(self.reg, ev)
 
         async def picked(i: discord.Interaction, chans: list) -> None:
-            self._put_channel(f, str(chans[0].id) if chans else "", own)
-            await self.hub(i)
+            cid = str(chans[0].id) if chans else ""
+            self._put_channel(f, cid, own)
+            await self.hub(i, channel_pick_note(i.client, f, cid))
 
         async def cleared(i: discord.Interaction) -> None:
             self._put_channel(f, "", own)

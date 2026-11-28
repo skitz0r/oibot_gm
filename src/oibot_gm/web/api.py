@@ -2103,6 +2103,9 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
                 p = rc.open_preview(v.reg, rs, rid, p["start"], p["schedule"])
         except RegistryError as e:
             return box_refused(e)
+        own = channel_args(d).get("sheet_channel")  # the New event form's own sheet channel: a one-off posts there
+        if own and p.get("schedule") in (None, rc.ADHOC_SCHEDULE) and not p.get("exists"):
+            p["channel"] = int(own)
         ch = bot.get_channel(int(p["channel"])) if p.get("channel") else None
         p["channel_name"] = getattr(ch, "name", None)
         # where the sheet goes, in one sentence from code (the confirm prints it; the page composes none)

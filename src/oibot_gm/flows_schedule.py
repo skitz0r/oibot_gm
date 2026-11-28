@@ -320,8 +320,8 @@ class ScheduleWizard(LineupBlock, OwnerWizard):
             await self.split(i)
 
     # ---- Channels: where the events it opens post (Discord's own channel picker, a widget; empty = the guild's)
-    async def channels(self, i: discord.Interaction) -> None:
-        text = [f"**{self.name()}**"] + [f"{self.label(f)}: {self.words(f, self.draft.get(f))}" for f in CHANNELS]
+    async def channels(self, i: discord.Interaction, note: str = "") -> None:
+        text = [f"**{self.name()}**"] + ([note] if note else []) + [f"{self.label(f)}: {self.words(f, self.draft.get(f))}" for f in CHANNELS]
 
         async def picked(it: discord.Interaction, values: list[str]) -> None:
             await self.channel(it, values[0])
@@ -334,8 +334,10 @@ class ScheduleWizard(LineupBlock, OwnerWizard):
         cur = self.draft.get(f)
 
         async def picked(it: discord.Interaction, chans: list) -> None:
+            from .flows_event import channel_pick_note
+
             self.draft[f] = str(chans[0].id) if chans else None
-            await self.channels(it)
+            await self.channels(it, channel_pick_note(it.client, f, self.draft[f]))
 
         async def cleared(it: discord.Interaction) -> None:
             self.draft[f] = None

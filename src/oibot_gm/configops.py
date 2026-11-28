@@ -160,6 +160,8 @@ Runs (officer; target = the event key like bd-k7m2qx from the live-events list, 
     its next run, or with a time its settings (a pickup template needs the time)>, text=<optional later raids "<raid id> x<N>, <raid id>"
     — up to three more raids the same night from the same signup, each starting when the one before it ends ("10 man barrow deeps
     splits afterwards" = "barrow_deeps x2")>
+    , path=<optional, a one-off only: its own channels "sheet_channel <#id>, officers_channel <#id>, loot_log_channel <#id>"
+    — where its sheet, its officers' cards and its loot log lines post instead of the guild's>
     — opens the sheet now and posts it in the signup channel.
   run_reschedule: target, field=start with value=<"YYYY-MM-DD HH:MM" in guild time: the run's new start> — moves the whole run
     (every raid of it keeps its offset), answers stand, everyone who answered sees a notice, nobody is DMed; or field=<one of this
@@ -277,7 +279,7 @@ class ConfigOp(BaseModel):
     op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, confirm_for, run_remind, run_pause, run_withdraw, run_reopen, run_unlock, run_start, run_reschedule, run_lineup, character, absence_clear, dm, regular, test, recruit, application, proposal, job, policy, plain, loot, wishlist, tier, loot_weights")
     member: Optional[str] = Field(default=None, description="member display name, mention <@id>, or one of their character names; empty = the requester; application: the applicant")
     character: Optional[str] = Field(default=None, description="a character name: the one to act on (character, rank, confirm, set_main) or the one they'd play (run_answer); empty on character add = a planned character")
-    path: Optional[str] = Field(default=None, description="for op=set only: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|loot_channel|loot_log|public|news_keywords|ask_audience|about|error_dms")
+    path: Optional[str] = Field(default=None, description="run_open: the one-off's own channels 'sheet_channel <#id>, officers_channel <#id>, loot_log_channel <#id>'; op=set: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|loot_channel|loot_log|public|news_keywords|ask_audience|about|error_dms")
     target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, run_open, regular, comp_target*, comp_groups), schedule id alone (schedule_set, schedule_remove), event key (run_*, pin, comp_groups, loot), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default | listen <#channel> | remember <#channel> (plain), item name or id (tier)")
     field: Optional[str] = Field(default=None, description="set timezone: keep|move (the events already open); raid_set/aura_set/family_set/schedule_set: the setting name from the schema (schedule_set: raid = a new schedule's first raid); run_open / regular: a schedule id; run_reschedule: start or a timing setting; run_answer: the spec they play (optional); comp_target*: the slot (role, Class or Class:Spec); character: REQUIRED on every character op, one of add|spec|offspec|name|rank|main|retire|delete|flex (naming the character alone is not a change); recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use; loot: open|tick|distribute|award|confirm|discard|reason|correct|end|retire; wishlist: add|remove; tier: the spec key Class:Spec | Class:* | role:<role>; loot_weights: the weight's path (tier_weight.S, attendance.weight, wishlist.rank_bonus.1 …)")
     value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: the minimum as a whole number; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; run_reschedule start: 'YYYY-MM-DD HH:MM'; run_lineup: 'barrow_deeps x2, onyxias_lair'|'none'; run_move: g<N>|<roster>.<group>|bench|a member to swap with; run_propose: a strategy or empty; dm: on|off; test: `seed N`|`run <raid> [quick|standard|slow] [dm]`|`answer join N bench N out N`|`clear`; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply; plain: who list or act|self|answer|ignore|clear, listen: watch|reply|off, remember: shared|channel|off; set <channel>: a mention or none; loot_weights: a number or default)")
@@ -914,6 +916,14 @@ def _open_time(reg: Registry, rid: str, value: str | None, schedule: str | None 
 
     start, sid, _note = rc.open_when(reg, rid, value, schedule)
     return start, sid
+
+
+_OPEN_CHANNEL_RE = re.compile(r"(sheet_channel|officers_channel|loot_log_channel)\s*[=:]?\s*(<#\d+>|\d+)")
+
+
+def _open_channels(text: str | None) -> dict[str, str]:
+    """run_open's `path`: a one-off's own channels 'sheet_channel <#id>, loot_log_channel <#id>' → {field: id as text}."""
+    return {f: v.strip("<#>") for f, v in _OPEN_CHANNEL_RE.findall(text or "")}
 
 
 def _reschedule_args(reg: Registry, op: ConfigOp) -> tuple:
@@ -2978,7 +2988,11 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         why = rc.open_refusal(reg, rs, rid, start, sid)  # a schedule's night: refused here as the open itself refuses it
         if why is not None:
             raise RegistryError(why)
-        return f"open {reg.raid_def(rid).get('name', rid)}{sname} {reg.local12(start)}{then} now: sheet posted in {where}, absences pre-filled"
+        chans = _open_channels(op.path) if sid == rc.ADHOC_SCHEDULE else {}
+        if chans.get("sheet_channel"):
+            where = f"<#{chans['sheet_channel']}>"
+        own = "".join(f", its {f.replace('_channel', '').replace('_', ' ')} in <#{v}>" for f, v in chans.items() if f != "sheet_channel")
+        return f"open {reg.raid_def(rid).get('name', rid)}{sname} {reg.local12(start)}{then} now: sheet posted in {where}{own}, absences pre-filled"
     if op.op == "test":
         kind, arg = _test_op(op.value)
         n = len(reg.test_members())
@@ -3084,7 +3098,13 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
         why = rc.reschedule_refusal(reg, rs, first, start, timing)
         if why:
             raise RegistryError(why)
-        return f"{run_words(reg, first)}: " + " ".join(reschedule_consequence(reg, rs, first, start, timing))
+        said = " ".join(reschedule_consequence(reg, rs, first, start, timing))
+        if set(timing) & set(rc.SCHEDULE_CHANNELS):  # what moves, on its own lines (Edit event's diff lines say the same)
+            from .consequences import event_edit_lines
+
+            labels = {PAGE_WORDS["schedule_fields"][f] for f in rc.SCHEDULE_CHANNELS}
+            said += "".join(f" · {ln}" for ln in event_edit_lines(reg, rs, first, start, timing) if ln.split(":")[0] in labels)
+        return f"{run_words(reg, first)}: {said}"
     if op.op == "run_lineup":
         from .consequences import lineup_consequence
 
@@ -3868,8 +3888,9 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
         rid = op.target or ""
         start, sid = _open_time(reg, rid, op.value, op.field)
         later = lineup_of_op(reg, rid, op.text) or []  # one later raid travels as `follow` (the verb's older keyword), more as `lineup`
+        chans = _open_channels(op.path) if rc.which_run(reg, rid, start, sid)["schedule"] == rc.ADHOC_SCHEDULE else {}  # a one-off's own
         ev = await bot.open_run_and_post(reg, rs, rid, start, by, follow=later[0] if len(later) == 1 else None, schedule=sid,
-                                         **({"lineup": later} if len(later) > 1 else {}))
+                                         **({"lineup": later} if len(later) > 1 else {}), **({"channels": chans} if chans else {}))
         return f"opened {run_words(reg, ev)}" + ("" if ev.message_id else " (no signup channel set — sheet not posted; /raid sheet places it)")
     if op.op == "absence_clear":  # THE "I'm back" verb (discord_people.im_back): the absence goes, its sheets re-open
         from . import discord_people
@@ -5634,6 +5655,9 @@ async def apply_ops(reg: Registry, ops: list[ConfigOp], *, by: str, by_id: int |
             return False  # moves live runs: the loop's own run store (rule L3), then every sheet is redrawn (_apply_async)
         if op.op == "recruit" and not isinstance(op, MergedOp) and (op.field or "").strip().lower() == "invite_create":
             return False
+        if op.op == "schedule_set" and bot is not None and getattr(bot, "channel_setting_refusal", None) is not None \
+                and any(f in _schedule_write_fields(op)[1] for f in ("sheet_channel", "officers_channel", "loot_log_channel")):
+            return False  # a schedule's own channel: the bot checks it can post there first (_apply_async), as the guild's setting
         return True
 
     def run_chunk(chunk: list) -> list | None:

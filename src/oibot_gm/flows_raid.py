@@ -136,7 +136,8 @@ class OpenWizard(Wizard, LineupBlock):
         super().__init__(reg, owner_id, title="Open an event", guard=officer_guard(reg))
         self.rs = rs
         self.draft = {"raid": None, "start": None, "note": "", "day0": reg.now_local().date(), "schedule": None,
-                      "lock": event_view.NEW_EVENT_LOCKS[0], "here": False, "auto_lock": True, "auto_lock_fill": True}
+                      "lock": event_view.NEW_EVENT_LOCKS[0], "here": False, "auto_lock": True, "auto_lock_fill": True,
+                      "channels": {}}  # a one-off's own channels (the Channels step, skippable): {field: id as text}
         self.lineup: list[dict] = []
         self.lineup_page = 0
 
@@ -394,6 +395,8 @@ class OpenWizard(Wizard, LineupBlock):
         later = [dict(e) for e in self.lineup[1:]]
         n = int(self.lineup[0].get("rosters") or 1)
         p = rc.open_preview(self.reg, self.rs, self.rid, self.draft["start"].isoformat(), ADHOC_SCHEDULE, lineup=later, first_rosters=n)
+        if self.draft["channels"].get("sheet_channel"):  # its own sheet channel: it posts there
+            p["channel"] = int(self.draft["channels"]["sheet_channel"])
         p["posts"] = "" if p.get("channel") else cq.no_channel_sentence(self.draft["here"])
         p["when_note"] = p.get("when_note") or rc.dst_words(self.reg, self.draft.get("note") or "", self.draft["start"])  # the picked wall time's
         return event_view.new_event_view(self.reg, self.rs, self.rid, p, n)
@@ -410,6 +413,10 @@ class OpenWizard(Wizard, LineupBlock):
         lines = [f"**{WHAT_THIS_MAKES}**"] + [f"{f['label']}: {f['value']}" for f in view["facts"]] + [f"-# {n}" for n in view["notes"]]
         lines += [f"{i}. {e['name']} · {e['rosters']} roster{'s' if e['rosters'] != 1 else ''} · {e['time_words']}"
                   for i, e in enumerate(view["lineup"], 1)]
+        from .flows_event import CHANNELS, channel_mention_words
+
+        F = PAGE_WORDS["schedule_fields"]
+        lines += [f"{F[f]}: {channel_mention_words(self.reg, f, self.draft['channels'][f])}" for f in CHANNELS if self.draft["channels"].get(f)]
         lock, k = self.draft["lock"], int(self.lineup[0].get("rosters") or 1)
         locks = [Opt(str(c["hours"]), c["words"], default=c["hours"] == lock) for c in event_view.lock_choices()]
         rosters = [Opt(str(r), f"{r} roster{'s' if r != 1 else ''}", default=r == k) for r in range(1, MAX_SCHEDULE_ROSTERS + 1)]
@@ -432,7 +439,40 @@ class OpenWizard(Wizard, LineupBlock):
         await self.show(interaction, "\n".join(lines), self.select("Locks", locks, set_lock), self.select("Rosters", rosters, set_rosters),
                         self.select(PAGE_WORDS["schedule_fields"]["auto_lock"], auto, set_auto),
                         self.button("Open the sheet", self.press_open_one_off, discord.ButtonStyle.success),
-                        self.button("Change", self.lineup_hub), self.button("Back", self.shortlist))
+                        self.button("Change", self.lineup_hub), self.button(PAGE_WORDS["channels"], self.one_off_channels),
+                        self.button("Back", self.shortlist))
+
+    async def one_off_channels(self, interaction: discord.Interaction, note: str = "") -> None:
+        """The one-off's Channels step (skippable): pick the place, then Discord's own channel picker or the guild's."""
+        from .flows_event import CHANNELS, channel_mention_words
+
+        F = PAGE_WORDS["schedule_fields"]
+        text = [f"**{PAGE_WORDS['channels']}**"] + ([note] if note else []) + [
+            f"{F[f]}: {channel_mention_words(self.reg, f, self.draft['channels'].get(f))}" for f in CHANNELS]
+
+        async def picked(i: discord.Interaction, values: list[str]) -> None:
+            await self.one_off_channel(i, values[0])
+        await self.show(interaction, "\n".join(text), self.select(PAGE_WORDS["channels"], [Opt(f, F[f]) for f in CHANNELS], picked),
+                        self.button("Back", self.one_off))
+
+    async def one_off_channel(self, interaction: discord.Interaction, f: str) -> None:
+        from .flows_config import _text_channel_select
+        from .flows_event import channel_mention_words, channel_pick_note
+
+        F = PAGE_WORDS["schedule_fields"]
+        cur = self.draft["channels"].get(f)
+
+        async def picked(i: discord.Interaction, chans: list) -> None:
+            cid = str(chans[0].id) if chans else None
+            self.draft["channels"][f] = cid
+            await self.one_off_channels(i, channel_pick_note(i.client, f, cid))
+
+        async def cleared(i: discord.Interaction) -> None:
+            self.draft["channels"].pop(f, None)
+            await self.one_off_channels(i)
+        await self.show(interaction, f"{F[f]}: {channel_mention_words(self.reg, f, cur)}\n-# {PAGE_WORDS['schedule_field_help'][f]}",
+                        _text_channel_select("Pick the channel", picked), self.button("Use the guild's channel", cleared, disabled=not cur),
+                        self.button("Back", self.one_off_channels))
 
     async def press_open_one_off(self, interaction: discord.Interaction) -> None:
         try:
@@ -451,7 +491,8 @@ class OpenWizard(Wizard, LineupBlock):
             ev = await interaction.client.open_run_and_post(self.reg, self.rs, self.rid, self.draft["start"], by=interaction.user.display_name,
                                                             schedule=ADHOC_SCHEDULE, lineup=later or None, lock_hours=float(self.draft["lock"]),
                                                             first_rosters=int(self.lineup[0].get("rosters") or 1),
-                                                            auto_lock=self.draft["auto_lock"], auto_lock_fill=self.draft["auto_lock_fill"])
+                                                            auto_lock=self.draft["auto_lock"], auto_lock_fill=self.draft["auto_lock_fill"],
+                                                            channels={k: v for k, v in self.draft["channels"].items() if v} or None)
         except RegistryError as e:
             await self.finish(interaction, str(e))
             return

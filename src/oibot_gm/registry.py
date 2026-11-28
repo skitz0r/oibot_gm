@@ -1358,14 +1358,15 @@ def channel_value(value) -> str | None:
 
 def channel_clash(cfg, sheet: str | None, officers: str | None) -> str | None:
     """OFFICERS_ON_SHEET when the officers' cards a schedule or an event names (`officers`, its own) would share a channel
-    with its signup sheet (its own `sheet`, else the guild's signup channel) — or when its own sheet channel is the guild's
-    officers' channel it would fall back to. Both unset: None (the guild's own settings are the Config page's)."""
+    with its signup sheet (its own `sheet`, else the guild's signup channel) — or when its own sheet channel is where the
+    cards would really go, read as RaidMixin.officer_channel does (its own, else the roster channel, else the ops
+    channel, never the guild's signup channel). Both unset: None (the guild's own settings are the Config page's)."""
     guild_sheet = str(cfg.signup_channel_id) if cfg.signup_channel_id else None
-    guild_officers = str(cfg.roster_channel_id) if cfg.roster_channel_id else None
     eff_sheet = sheet or guild_sheet
     if officers and officers in {eff_sheet, guild_sheet}:
         return OFFICERS_ON_SHEET
-    if sheet and not officers and sheet == guild_officers:
+    cards = next((str(c) for c in (officers, cfg.roster_channel_id, cfg.ops_channel_id) if c and str(c) != guild_sheet), None)
+    if sheet and sheet == cards:
         return OFFICERS_ON_SHEET
     return None
 

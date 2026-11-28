@@ -843,8 +843,12 @@ def reschedule_consequence(reg: Registry, rs, ev: rc.RaidEvent, start, timing: d
         out.append("Away answers are worked out again for the new day.")
     else:
         out.append("The sheet in Discord shows the new time.")
-    if mv.channels:  # with other settings: what moves, after what changes and before who is told (three at most)
-        out = [out[0], channel_move_sentence(reg, first, mv.channels), out[1]]
+    if mv.channels:  # with other settings: folded into the first sentence when it fits; the warnings after it always stay
+        move = channel_move_sentence(reg, first, mv.channels)
+        folded = f"{out[0][:-1]}, and {move[0].lower()}{move[1:]}"
+        if _words(folded) <= 20:
+            out[0] = folded
+        # else Edit event's box lists the move on its own diff line (event_edit_lines); the three sentences stand
     return out
 
 

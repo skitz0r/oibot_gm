@@ -1666,6 +1666,7 @@ TIMING_UNKNOWN = ("An event's own settings are its reminder, lock, Auto Lock, co
 CHANNELS_CLOSED = "This event is finished or cancelled, so its channels can't change."
 CHANNELS_SAME = "The event already posts in those channels."
 CHANNELS_BUSY = "The event is still posting its lock or unlock cards, so its channels can't change for a few seconds."
+LOCK_MOVING = "The event's sheet and cards are still moving to their new channels, so it can't lock for a few seconds."
 MOVE_OFFICER_ONLY = "Only an officer moves an event or changes its timing."
 MOVE_CONFIRM_GRACE = timedelta(hours=1)  # a confirm-by the move leaves in the past: within the hour instead (never past the start)
 
@@ -1934,12 +1935,49 @@ def channel_changes(reg: Registry, first: "RaidEvent", timing: dict | None) -> d
     return out
 
 
+def pending_moves(reg: Registry, ev: "RaidEvent") -> list[str]:
+    """The places of `ev`'s event whose own channel was written but whose posts have not finished moving there
+    (`channels_pending` on the run dicts: {field: own channel before}) — RaidMixin.move_channels clears them, and
+    RaidMixin.finish_channel_moves finishes them after a restart. [] = nothing left to move."""
+    return sorted((reg.config.team(ev.team) or {}).get("channels_pending") or {})
+
+
+def pending_before(reg: Registry, ev: "RaidEvent") -> dict[str, str | None]:
+    """{field: the own channel before} of the unfinished moves (pending_moves) — what a failed move puts back."""
+    return dict((reg.config.team(ev.team) or {}).get("channels_pending") or {})
+
+
+def finish_moves(reg: Registry, rs: "RaidStore", ev: "RaidEvent", done: list[str], back: dict[str, str | None]) -> None:
+    """The end of a channel move on every raid's dict: each place in `done` is no longer pending; each place in `back`
+    ({field: own channel}) failed to move and takes that channel again (the move never happened). One config save."""
+    if not done and not back:
+        return
+    for p in event_parts(rs, first_part(rs, ev)):
+        t = reg.config.team(p.team)
+        if t is None:
+            continue
+        pend = dict(t.get("channels_pending") or {})
+        for f in [*done, *back]:
+            pend.pop(f, None)
+        for f, v in back.items():
+            if v:
+                t[f] = v
+            else:
+                t.pop(f, None)
+        if pend:
+            t["channels_pending"] = pend
+        else:
+            t.pop("channels_pending", None)
+    reg.save_config(f"event {first_part(rs, ev).key}: channel move finished" + (f", {', '.join(back)} put back" if back else ""), notify=False)
+
+
 def channel_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", changes: dict) -> str | None:
-    """Why the event `ev` belongs to can't take its own channels `changes` (channel_changes), else None: it has ended or
-    is cancelled (CHANNELS_CLOSED — open, locked and started events take them), or its officers' cards would share the
-    signup sheet's channel (registry.channel_clash). Not timing: none of Reschedule's start or lock gates apply."""
+    """Why the event `ev` belongs to can't take its own channels `changes` (channel_changes), else None: every raid of it
+    has ended or is cancelled (CHANNELS_CLOSED — open, locked and started events take them, and a lineup whose first raid
+    ended while a later one plays), or its officers' cards would share the signup sheet's channel
+    (registry.channel_clash). Not timing: none of Reschedule's start or lock gates apply."""
     first = first_part(rs, ev)
-    if first.state in ("done", "cancelled"):
+    if all(p.state in ("done", "cancelled") for p in event_parts(rs, first)):
         return CHANNELS_CLOSED
     after = {**own_channels(reg, first), **changes}
     return channel_clash(reg.config, after["sheet_channel"], after["officers_channel"])
@@ -1966,7 +2004,8 @@ def reschedule_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", start: d
     except RegistryError as e:
         return str(e)
     if _is_channel_only(start, first, timing):
-        return channel_refusal(reg, rs, first, chans) or (None if chans else CHANNELS_SAME)
+        # an unfinished move (a restart cut it off) is never "already": the same save finishes it
+        return channel_refusal(reg, rs, first, chans) or (None if chans or pending_moves(reg, first) else CHANNELS_SAME)
     if first.state in ("done", "cancelled"):
         return MOVE_CLOSED
     now = now or reg.now_local()
@@ -2114,11 +2153,14 @@ def reschedule(reg: Registry, rs: "RaidStore", ev: "RaidEvent", *, start: dateti
         if p.key in splits:
             p.split_strategy = splits[p.key]
     for t in (t for t in teams.values() if t is not None and chans):  # one set for the whole event: every raid's dict alike
+        pend = dict(t.get("channels_pending") or {})
         for f, v in chans.items():
+            pend.setdefault(f, chan_moves[f][0])  # what a failed move puts back: the channel before the FIRST unfinished change
             if v:
                 t[f] = v
             else:
                 t.pop(f, None)
+        t["channels_pending"] = pend
     for p in parts:
         at = new if p is first else after_minutes(new, p.starts)
         was = p.start

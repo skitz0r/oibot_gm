@@ -220,6 +220,10 @@ class RaidSchedulerMixin:
                 await self.open_run_and_post(reg, rs, sched["raid"], start, by="scheduler", schedule=sched["id"])
             except RegistryError as e:  # a refused open (a follow-on raid gone — design §5.62)
                 await self._warn_open_refused(reg, sched, start, e)
+        try:  # a channel move a restart cut off (or one that stopped part way) finishes before any lock this minute
+            await self.finish_channel_moves(reg)
+        except Exception:  # noqa: BLE001 — never stops the guild's minute
+            log.exception("channel moves not finished for %s", reg.key)
         # every live run is processed even when its sheet channel can't be resolved: the steps that post to a
         # channel (refresh_sheet, post_run_update, cards) fail soft on their own
         for ev in rs.live():  # an open cut off between its raids (a restart) gets its missing later raids, once

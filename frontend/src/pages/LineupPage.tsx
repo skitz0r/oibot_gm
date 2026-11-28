@@ -96,7 +96,7 @@ function NewEvent({ meta }: { meta: Meta }) {
 
   const later = lineup.slice(1).map((e) => ({ raid: e.raid, rosters: e.rosters, starts: e.starts }));
   const timing = { lock_hours_before: Number(lock), ...auto };
-  const body = lineup.length && day && time ? { when: wallTime(day, time), schedule: "", rosters: lineup[0].rosters, lineup: later, timing } : null;
+  const body = lineup.length && day && time ? { when: wallTime(day, time), schedule: "", rosters: lineup[0].rosters, lineup: later, timing, channels } : null;
   const asked = JSON.stringify([lineup[0]?.raid, body]);
   useEffect(() => {
     const n = ++seq.current;

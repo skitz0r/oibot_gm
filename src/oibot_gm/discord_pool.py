@@ -804,7 +804,10 @@ class SetupMixin:
                 out[kind] = f"the {CHANNEL_LABELS[kind][0].lower()} channel <#{cid}> is gone (deleted, or I can't see it)"
                 continue
             missing = perms.missing_for(ch, kind)
-            if missing:
+            if missing and kind == "signup" and not set(missing) & set(perms.BASE):  # threads only: sheets still post
+                out["signup_threads"] = (f"I can't start the thread on each sheet in #{getattr(ch, 'name', cid)} without "
+                                         f"{perms.words(missing)}, so the lock and cancel lines can't be posted")
+            elif missing:
                 out[kind] = perms.cant_post(getattr(ch, "name", str(cid)), missing)
         return out
 
@@ -876,6 +879,8 @@ class SetupMixin:
                              "test": f"config.{attr}"})
             elif kind in problems:
                 rows.append({"key": f"channel:{kind}", "label": label, "state": "bad", "text": problems[kind], "test": f"perms.missing_for(<#{cid}>, {kind!r})"})
+            elif f"{kind}_threads" in problems:  # the sheets post, their threads can't be made: a warning, never an error
+                rows.append({"key": f"channel:{kind}", "label": label, "state": "warn", "text": problems[f"{kind}_threads"], "test": f"perms.missing_for(<#{cid}>, {kind!r})"})
             else:
                 rows.append({"key": f"channel:{kind}", "label": label, "state": "ok", "text": f"<#{cid}>", "test": f"perms.missing_for(<#{cid}>, {kind!r})"})
         roles = reg.officer_role_names()

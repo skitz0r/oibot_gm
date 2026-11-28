@@ -80,7 +80,7 @@ def test_a_one_off_with_a_second_raid_opens_one_sheet(reg, rs, officer, channel)
     assert h.selects() == ["Pick a step", "Add a raid"]
     run(h.pick("Add a raid", RAID_B))
     run(h.press("Review changes"))
-    assert h.selects() == ["Locks", "Rosters", "Auto Lock"] and h.buttons() == ["Open the sheet", "Change", "Back"]
+    assert h.selects() == ["Locks", "Rosters", "Auto Lock"] and h.buttons() == ["Open the sheet", "Change", "Channels", "Back"]
     assert not bot.calls
     assert [o.label for o in next(s for s in h._items() if getattr(s, "placeholder", None) == "Locks").options] == [
         x["words"] for x in event_view.lock_choices()]
@@ -194,3 +194,29 @@ def test_open_wizard_is_a_lineup_block_and_the_block_stands_alone():
     tree = ast.parse(inspect.getsource(flows_lineup))
     names = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)} | {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
     assert not names & {"flows_raid", "flows_event", "oibot_gm.flows_raid", "oibot_gm.flows_event"}
+
+
+def test_a_one_offs_channels_step_is_skippable_and_reaches_the_open(reg, rs, officer, channel):  # noqa: F811
+    """Every open surface takes the event's own channels (design 2026-11-27-event-channels): /raid open's one-off gets a
+    Channels step with Discord's own channel picker."""
+    import discord
+    from types import SimpleNamespace
+
+    from test_setup import pick_widget
+
+    h, bot = harness(reg, rs)
+    day = (reg.now_local() + timedelta(days=3)).date().isoformat()
+    run(FLOWS["raid_open"](h.command(), reg))
+    run(h.pick("Pick the raid", RID))
+    run(h.press("One-off event"))
+    run(h.submit(h.modal, day=day, hour="20", minute="0"))
+    run(h.press("Review changes"))
+    run(h.press("Channels"))
+    run(h.pick("Channels", "loot_log_channel"))
+    run(pick_widget(h, discord.ui.ChannelSelect, "Pick the channel", SimpleNamespace(id=62004, name="alt-loot")))
+    assert "Loot log: <#62004>" in h.text
+    run(h.press("Back"))
+    assert "Loot log: <#62004>" in h.text
+    run(h.press("Open the sheet"))
+    kw = bot.calls[0][5]
+    assert kw["channels"] == {"loot_log_channel": "62004"}

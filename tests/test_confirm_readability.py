@@ -1601,6 +1601,7 @@ def reschedule_cases(reg, rs, runs, ms, dump):
                               ("channels: not a channel", one, {"loot_log_channel": "raid chat"})):
         dump.add("reschedule_refusal", case, rc.reschedule_refusal(reg, rs, ev_, None, timing) or "")
     dump.add("reschedule_refusal", "channels: busy", rc.CHANNELS_BUSY)
+    dump.add("lock_run refusal", "a channel move still posting", rc.LOCK_MOVING)
 
 
 def lineup_cases(reg, rs, runs, ms, dump, monkeypatch):

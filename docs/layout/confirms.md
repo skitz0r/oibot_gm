@@ -5,7 +5,7 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
 
 ```
   consequences.py      consequence(verb, reg, ev) for lock / cancel / clear / release, the board's move / roster / swap / substitute ({name} / {other} /
-                       Channels (2026-11-27): channel_words (THE '#alt-signups' / "the guild's #raid-signups"), channel_move_sentence, channel_change_consequence (what moves · Nobody gets a DM. · You can change it back until the event ends.); reschedule_consequence answers a channels-only edit with it and puts the move sentence second when mixed; event_edit_lines prints 'Signup sheet: #a → #b' (EDIT_LINE_ORDER ends with the three).
+                       Channels (2026-11-27): channel_words (THE '#alt-signups' / "the guild's #raid-signups"), channel_move_sentence, channel_change_consequence (what moves · Nobody gets a DM. · You can change it back until the event ends.); reschedule_consequence answers a channels-only edit with it; mixed with timing it folds the move into the first sentence when that stays ≤ 20 words, else the box's diff line carries it — the timing box's three sentences (locks within a minute, seating, undo) always stand; event_edit_lines prints 'Signup sheet: #a → #b' (EDIT_LINE_ORDER ends with the three).
                        {to} tokens the board fills — shared.fillNames), remind and end (Reopen's window from rc.REOPEN_GRACE_HOURS; LootMixin.end_consequence
                        puts the council's part in front), regular_remove(reg, m, key): the ONE confirm sentence from code (design §5.33, §5.56 phase 3);
                        ev_json.consequences carries it to the site (the board's verbs on the Events page and the Test bench card), wizard.decide shows it in Discord

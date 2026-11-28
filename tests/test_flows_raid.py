@@ -75,14 +75,15 @@ class FakeBot(LootMixin):
         self.calls.append(("emit", level, text))
 
     async def open_run_and_post(self, reg, rs, instance, start, by, schedule=None, follow=None, lineup=None, lock_hours=None, first_rosters=None,
-                                auto_lock=None, auto_lock_fill=None):
-        """Recorded as (name, raid, start, by[, schedule][, {lineup, lock_hours, first_rosters, auto_lock, auto_lock_fill}]): the
-        last only for a one-off's choices."""
+                                auto_lock=None, auto_lock_fill=None, channels=None):
+        """Recorded as (name, raid, start, by[, schedule][, {lineup, lock_hours, first_rosters, auto_lock, auto_lock_fill,
+        channels}]): the last only for a one-off's choices."""
         if (why := rc.open_refusal(reg, rs, instance, start, schedule)) is not None:  # RaidMixin's own refusal
             raise RegistryError(why)
         ev = rc.open_run(reg, rs, instance, start, by=by, schedule=schedule, lineup=lineup, lock_hours=lock_hours, first_rosters=first_rosters,
-                         auto_lock=auto_lock, auto_lock_fill=auto_lock_fill)
-        kw = {"lineup": lineup, "lock_hours": lock_hours, "first_rosters": first_rosters, "auto_lock": auto_lock, "auto_lock_fill": auto_lock_fill}
+                         auto_lock=auto_lock, auto_lock_fill=auto_lock_fill, channels=channels)
+        kw = {"lineup": lineup, "lock_hours": lock_hours, "first_rosters": first_rosters, "auto_lock": auto_lock, "auto_lock_fill": auto_lock_fill,
+              **({"channels": channels} if channels else {})}
         self.calls.append(("open_run_and_post", instance, start, by) + ((schedule,) if schedule else ())
                           + ((kw,) if any(v is not None for v in kw.values()) else ()))
         return ev
