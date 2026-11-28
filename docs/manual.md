@@ -1303,8 +1303,8 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    **Update board post** (it redraws the post now, or moves it when you pick another channel: posted in the new
    channel first, the old messages deleted after, the old kept when the bot can't post there); changing *Board posts*
    in Edit event moves it the same way. When the event ends or is cancelled the post is edited once more (*Finished*
-   over the roster, or *Cancelled*) and stays, no longer updated. **More › Remove board post** deletes the messages
-   and stops the updates. Nobody gets a DM or a notice; the first post, a move and a removal write one line in the
+   over the roster, or *Cancelled*) and stays, no longer updated. **More › Remove board post** (while a post is up,
+   an ended event's too) deletes the messages and stops the updates. Nobody gets a DM or a notice; the first post, a move and a removal write one line in the
    event's log and the ops feed, the updates none. Not on an ended or cancelled event (*This event is over, so its
    board can't be posted.*).
    **Edit lineup** (until the roster locks) opens the lineup builder on the event, `/events/<event>/lineup`: its first

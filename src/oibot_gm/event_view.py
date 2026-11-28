@@ -425,6 +425,7 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
                         "clear": any(p.state == "open" for p in parts)},
             # Post board (design 2026-11-27-post-board): the button under the board while the event is live — Post board,
             # or Update board post while a post is up (its box: POST /api/event/{key}/board) — and More › Remove board post
+            # while a post is up (an ended event's too)
             "board_post": _board_post_words(first, live),
             "switches": rc.event_switches(reg, rs, first, viewer=viewer) if live else {"short": [], "rows": [], "revs": {}},
             "lineup": lineup, "start_iso": first.start.isoformat(), "timing": timing, "people": people, "sheet_url": url,
@@ -441,14 +442,15 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
 
 
 def _board_post_words(first: "rc.RaidEvent", live: bool) -> dict | None:
-    """event_json's `board_post`: {button (Post board | Update board post), remove (Remove board post while a post is
-    up, else null)} on a live event; null once it has ended or is cancelled (a post up keeps its last state)."""
+    """event_json's `board_post`: {button (Post board | Update board post; null once the event is over), remove (Remove
+    board post while a post is up, else null)}; null when there is neither (an ended event with no post up). A post up on
+    an ended event keeps its last state and can still be removed."""
     from .board_post import BOARD_POST, BOARD_REMOVE, BOARD_UPDATE
 
-    if not live:
-        return None
     up = bool(first.board_channel_id)
-    return {"button": BOARD_UPDATE if up else BOARD_POST, "remove": BOARD_REMOVE if up else None}
+    if not live and not up:
+        return None
+    return {"button": (BOARD_UPDATE if up else BOARD_POST) if live else None, "remove": BOARD_REMOVE if up else None}
 
 
 # what Edit event offers once the roster is locked (rc.AFTER_LOCK, in the settings' names): automatic asks and an ask's wait

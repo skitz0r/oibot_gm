@@ -423,6 +423,12 @@ def test_the_box_is_refused_on_an_ended_event(reg, rs, site):
     r = site.c.post(f"/api/event/{ev.key}/board", json={"preview": True}, headers=H())
     assert r.status_code == 400 and r.json()["box"]["sentences"] == [BOARD_OVER] and r.json()["box"]["verb"] is None
     assert site.c.get(f"/api/event/{ev.key}", headers=H()).json()["board_post"] is None
+    start = (reg.now_local() + timedelta(days=4)).replace(hour=13, minute=15, second=0, microsecond=0)
+    ev2 = rc.open_run(reg, rs, BD_RAID, start, by="t")  # a one-off
+    run(site.bot.post_board(reg, rs, ev2, by="Kara"))
+    run(site.bot.cancel_run(reg, rs, rs.events[ev2.key], by="Jon", reason=None, notify=False))
+    assert site.c.get(f"/api/event/{ev2.key}", headers=H()).json()["board_post"] == {"button": None, "remove": "Remove board post"}, \
+        "a post up on an ended event can still be removed"
 
 
 def test_a_member_who_is_not_an_officer_is_refused(reg, rs, monkeypatch):

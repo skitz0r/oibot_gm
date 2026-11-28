@@ -13,6 +13,7 @@ import { ComingUpView } from "../components/events/ComingUpView";
 import { HistoryView } from "../components/events/HistoryView";
 import { RoleSwitches } from "../components/events/RoleSwitches";
 import { EventBoard } from "../components/events/EventBoard";
+import { BoardPostButton } from "../components/events/BoardPost";
 import { useAfterDrag } from "../components/board/shared";
 import { useRescheduleBox } from "../components/events/RescheduleBox";
 import { useLockBox } from "../components/events/LockBox";
@@ -161,6 +162,8 @@ function LiveEvent({ ev, meta, onChanged, sentAt }: { ev: EventView; meta: Meta;
       <SignupsSection ev={ev} meta={meta} onDone={onChanged} />
       <RoleSwitches meta={meta} view={ev} onReload={onChanged} />
       <EventBoard meta={meta} view={ev} onReload={onChanged} sentAt={sentAt} />
+      {/* Post board (design 2026-11-27-post-board): under the board, the server's word and box */}
+      <BoardPostButton ev={ev} onChanged={onChanged} />
       <ActivitySection activity={ev.activity}
         action={ev.actions.cancel && ev.boxes.cancel ? <Button variant="subtle" color="gray" size="xs" onClick={cancel}>Cancel event</Button> : undefined} />
       {dialog}

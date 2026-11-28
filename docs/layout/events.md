@@ -376,8 +376,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        send_plan(…, seats=) (one ask: the Events page's Switch after the lock); open_run_and_post(…, lock_hours=, first_rosters=);
                        the lock's failure line names its conflict (escaped for Discord)
   event_view.py        the Events page's read model (§5.67 phase 4), PURE builders over the existing readers (nothing solves, writes or composes
-                       Post board (2026-11-27): event_json's `board_post` {button: Post board | Update board post, remove: Remove board post
-                       | null} on a live event, null once over (board_post's words).
+                       Post board (2026-11-27): event_json's `board_post` {button: Post board | Update board post (null once over), remove:
+                       Remove board post while a post is up (an ended event's too) | null}, null when neither (board_post's words).
                        Channels (2026-11-27): channel_section(reg, values, names, back=) = THE Channels section (labels, (?), the empty choice naming the fallback — the guild's, or the schedule's — and the server's text channels from web/api_setup.channel_names); channel_facts = Details rows only for a channel that differs from the guild's (the schedule's / this event's own); edit_options carries `channels` and `note` and, once started, empty `fields` (Edit event = the channels alone until the event ends); new_event_options carries a one-off's channels.
                        a fact of its own; words from PAGE_WORDS; a run key only as an id): event_list(reg, rs, now, offset) → {open (open AND locked,
                        soonest first), coming (coming_nights: each active schedule's next COMING_PER_SCHEDULE 3 nights with no event, through

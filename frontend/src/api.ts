@@ -212,7 +212,9 @@ export interface MemberEventView {
 /** `scope` (the Role switches box before the lock, issue 15): where the switch reaches — one raid or the whole event —
  *  its label, the value on screen and the options in the server's words; a change asks the server's box again. */
 export interface Box { title: string; sentences: string[]; verb: string | null; danger: boolean; diff: string[]; fp: string; choice?: { label: string; value: boolean };
-  scope?: { label: string; value: string; options: { value: string; label: string }[] }; done?: boolean }
+  scope?: { label: string; value: string; options: { value: string; label: string }[] }; done?: boolean;
+  /** Post board's one select (consequences.board_post_box): where it opens and the server's text channels */
+  channel?: { label: string; value: string | null; options: { value: string; label: string }[] } }
 /** A Details line (event_view): the label, its value in words, and where it links (a site path or a Discord jump link).
  *  `links` = several places at once (the Raids page's Played in: each schedule with its href); `level` = a chip's level. */
 /** a Details row; `help` = the editors' (?) for the setting it names (constants.field_help: key, the sentence, its screen-reader name) */
@@ -335,6 +337,9 @@ export interface EventView {
    *  one before the lock, the automatic asks and an ask's wait after it), its own values (rc.run_timing), each raid's
    *  split, the schedule editor's hour choices (its own value among them), the highest weight and the split policies */
   edit: EventEdit | null;
+  /** Post board (design 2026-11-27-post-board): the button under the board (Post board | Update board post; null once
+   *  the event is over) and More's Remove board post while a post is up (an ended event's too); null when neither */
+  board_post: { button: string | null; remove: string | null } | null;
 }
 export interface EventEdit {
   fields: string[]; values: Record<string, number | boolean | Record<string, number>>;
@@ -347,7 +352,7 @@ export interface EventEdit {
  *  the empty choice's words; the server's text channels. */
 export interface ChannelSection {
   title: string;
-  fields: { key: "sheet_channel" | "officers_channel" | "loot_log_channel"; label: string; help: { key: string; text: string; about: string } | null;
+  fields: { key: "sheet_channel" | "officers_channel" | "loot_log_channel" | "board_channel"; label: string; help: { key: string; text: string; about: string } | null;
     value: string | null; empty: string }[];
   options: { value: string; label: string; group: string | null }[];
 }

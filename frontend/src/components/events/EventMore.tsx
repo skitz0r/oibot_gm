@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ActionIcon, Menu, Modal, Text, Tooltip } from "@mantine/core";
-import { IconBell, IconDiamond, IconDots, IconEraser, IconFlagCheck, IconListCheck, IconLockOpen, IconPlayerPause, IconPlayerPlay, IconPlayerTrackNext, IconRotate, IconSend, IconUsersPlus } from "@tabler/icons-react";
+import { IconBell, IconDiamond, IconDots, IconEraser, IconFlagCheck, IconListCheck, IconLockOpen, IconPlayerPause, IconPlayerPlay, IconPlayerTrackNext, IconRotate, IconSend, IconTrash, IconUsersPlus } from "@tabler/icons-react";
 import { api, type Box, type EventView, type Meta, type Sheet } from "../../api";
 import { useConfirmBox } from "../ConfirmBox";
 import { boxOf as boxOf_ } from "./shared";
@@ -106,6 +106,9 @@ export function EventMore({ ev, meta, onChanged }: { ev: EventView; meta: Meta; 
   const head = parts[0]?.s;
   if (live && head && (head.may_unlock || head.unlock_note)) {
     all.push(<Menu.Divider key="unlock:div" />, <Menu.Item key="unlock" leftSection={<IconLockOpen size={14} />} disabled={!head.may_unlock} onClick={() => unlock(head)}>{L.unlock}{head.may_unlock ? null : <Text size="xs" c="dimmed">{head.unlock_note}</Text>}</Menu.Item>);
+  }
+  if (ev.board_post?.remove) {  // Post board's messages taken down and the updates stopped (the server's word)
+    all.push(<Menu.Divider key="board:div" />, <Menu.Item key="board" leftSection={<IconTrash size={14} />} onClick={() => post(`/api/event/${encodeURIComponent(ev.key)}/board/remove`)}>{ev.board_post.remove}</Menu.Item>);
   }
   if (ev.actions.clear) {  // the whole event's board, once: every open raid's groups back to Not placed (pins stay)
     all.push(<Menu.Divider key="clear:div" />, <Menu.Item key="clear" leftSection={<IconEraser size={14} />} onClick={clear}>Clear the board…</Menu.Item>);
