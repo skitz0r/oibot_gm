@@ -826,7 +826,10 @@ class RaidMixin(BoardPostMixin):
                     n += 1
                 except Exception as e:  # noqa: BLE001
                     log.warning("sheet restore failed (%s %s): %s", reg.key, ev.key, e)
-            await self.boards_restore(reg)  # every board post too (an event that ended while the bot was down: its last edit)
+            try:  # every board post too (an event that ended while the bot was down: its last edit)
+                await self.boards_restore(reg)
+            except Exception as e:  # noqa: BLE001 — a board post never stops the sheets
+                log.warning("board posts not restored (%s): %s", reg.key, e)
         return n
 
     async def post_sheet(self, reg, rs, ev, channel, *, dm: bool = True) -> None:
