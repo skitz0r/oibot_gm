@@ -480,7 +480,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        _REMOVED (answers). Nobody DMed or told; post / move / remove = one log + ops line, a redraw none.
                        Issue 16 (the other surfaces, the SAME verbs): module board_where(reg, first) (the method calls it) = where the box opens;
                        remove_refusal(rs, first) = Remove's one sentence (BOARD_NONE / BOARD_STAYS) — remove_board_post and plain text's review
-                       read it. Callers: POST /api/event/{key}/board[/remove], raid_buttons.board_post_decide (/raid board), configops
+                       read it. remove_board_post(seen=, fp=) checks the box under the post lock as post_board does (rc.BoardChanged).
+                       BOARD_MOVE "Move board post" = plain text's review of a press that moves a post up elsewhere. Callers: POST /api/event/{key}/board[/remove], raid_buttons.board_post_decide (/raid board), configops
                        run_board_post / run_board_remove, MCP post_board / remove_board_post (through the routes).
   raid_views.py        pure rendering: sheet_message (the signup sheet is an EMBED: inline fields are the only columns Discord has — a class per column open, a group per column locked, one member per line) / health_layout / lock_layout / confirm_layout / fill_layout / closed_layout (Discord layout components:
                        container/section/thumbnail/text/separators/buttons, real icons as app emojis via discord_bot.ensure_icon_emojis → ico()),
@@ -502,9 +503,10 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        unlock_decide (cq.unlock_box: Unlock · Back, or the refusal; then unlock_run) / start_decide (cq.start_now_box: Start now · Back,
                        or the refusal; then start_now — end_decide's "hasn't started" refusal keeps a Start now button that opens it) / board_post_decide
                        (issue 16: cq.board_post_box through decide_box with `above` = flows_config._text_channel_select(BOARD_POST_TO,
-                       current=board_where) — a pick shows the screen again, nothing written; Post → post_board(channel=pick, seen=box fp,
-                       fp=); Remove board post (BOARD_REMOVE) in `extra` while a post is up → remove_board_post; rc.BoardChanged → the box again
-                       under the changed line) / end_decide = THE lock, cancel, remind, unlock, start and end screens: the server's
+                       current=board_where) — a pick shows the screen again, nothing written; Post → post_board(channel = the channel the
+                       picker SHOWS, seen = the fp of the box on screen, fp=); Remove board post (BOARD_REMOVE) in `extra` while a post is up →
+                       remove_board_post(seen, fp); a changed box — decide_box's check through `redraw`, or rc.BoardChanged from the engine — is
+                       drawn again from what is true now: the pick dropped, the picker on where the post is, Remove only while one is up) / end_decide = THE lock, cancel, remind, unlock, start and end screens: the server's
                        box through Wizard.decide_box — cq.lock_box (a complete board: Lock · Preview lock; with the fill choice two verbs, RUN_WORDS
                        lock_as_is / lock_fill: Lock as it stands · Lock and auto-fill · Preview lock, Lock and auto-fill opening its own
                        screen with the fill box, an empty board's refusal with Lock and auto-fill + Back; the preview = the shown choice's roster as decide_box's embed),

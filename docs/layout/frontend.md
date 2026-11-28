@@ -55,7 +55,10 @@ frontend/              React + Mantine app (Vite). components/board/* (SheetCard
                        (BoardView.movesFor → MemberMenu `moves`, the owner 2026-11-28: ONE "Move to…" Menu.Sub (PAGE_WORDS move_to) → a
                        Menu.Sub per group (its count right, the name's own group greyed) + Not placed / Not rostered as a plain item → in a
                        group An open seat (move_here, only with room) then under the swap_with label one item per person there (swapWith);
-                       the submenus are controlled and open on a press — a tap, Enter (focusInto moves the focus in) — not on hover alone)
+                       the submenus are controlled: hover opens them and a press does too — a tap, Enter (focusInto moves the focus in); both
+                       levels open to the left (left-start, offset 4) so none covers the main menu; ArrowLeft puts the focus back on
+                       the row that opened the level (backToRow: Mantine's own focusParentItem looks for an id no element has); An open
+                       seat carries no aria-label, its visible words are its name)
                        (a 409 draws the fresh box and board); New event / New schedule count edits that differ from their seed (the leave guard); RescheduleBox.tsx (useRescheduleBox: the picker inside box 3, Locks only while open); LockBox.tsx (useLockBox(meta, onDone) = THE lock box of
                        the Events page's Lock now AND the SheetCard's Lock / Preview lock — SheetCard's own LockModal is gone: the server's box
                        (POST /lock preview `fill`) with box.choice as a checkbox, unticked, re-asked through replace on change; Preview lock =

@@ -2223,7 +2223,7 @@ def _board_post_line(reg: Registry, op: ConfigOp, rs, ev) -> str:
     post is up), the event and the channel ("Post board for Barrow Deeps Wed 9 Dec 10 PM in #board."). A refusal is the
     engine's one sentence (the box's, or board_post.remove_refusal)."""
     from . import perms
-    from .board_post import BOARD_NOWHERE, BOARD_REMOVE, board_where, remove_refusal
+    from .board_post import BOARD_MOVE, BOARD_NOWHERE, BOARD_REMOVE, board_where, remove_refusal
     from .discord_pool import channel_name
 
     first = _first_raid(ev, rs)
@@ -2235,7 +2235,10 @@ def _board_post_line(reg: Registry, op: ConfigOp, rs, ev) -> str:
     b = _box_of(reg, op, rs, first)
     if b["verb"] is None:
         raise RegistryError(b["sentences"][0])
-    where = _board_pick(reg, op) or board_where(reg, first)
+    pick = _board_pick(reg, op)
+    if pick and first.board_channel_id and int(pick) != int(first.board_channel_id):  # a post up elsewhere: it moves
+        return f"{BOARD_MOVE} for {name} to {channel_name(perms.CLIENT, pick)}."
+    where = pick or board_where(reg, first)
     if not where:
         raise RegistryError(BOARD_NOWHERE)
     return f"{b['title']} for {name} in {channel_name(perms.CLIENT, where)}."

@@ -57,7 +57,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        always; found by _unlock_event through ANY_EVENT_OPS = BOX_OPS | BOARD_POST_OPS). run_board_post is in BOX_OPS: _box_of =
                        consequences.board_post_box, so Apply's `seen` is that box's fp (post_board re-checks it under the post lock; rc.BoardChanged
                        → rc.RUN_CHANGED). The review line (_board_post_line) = the box's title, the event and the channel ("Post board for <event>
-                       in #board."; Remove: "Remove board post for <event> from #board."), a refusal = the engine's one sentence.
+                       in #board."; a post up elsewhere and another channel named: "Move board post for <event> to #new." (BOARD_MOVE); Remove: "Remove
+                       board post for <event> from #board."), a refusal = the engine's one sentence.
                        Phase 4 (§5.67): op_box(reg, ops, diff, rs=) → Described.box (and each line's) for one schedule's or one raid's write (boxes
                        13–17 and 19); Described.asks_first (a box with a verb: the site's Save always previews) beside review, and Described.quiet (a
                        routine box's sentences never make the TIERED Save reviewed alone); Described.fingerprint covers the box's title, sentences and

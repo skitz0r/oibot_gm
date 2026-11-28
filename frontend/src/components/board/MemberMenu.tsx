@@ -93,7 +93,17 @@ function usePlayAs(run: string, onDone: () => Promise<void> | void) {
 export type MoveTarget = { key: string; label: string; disabled?: boolean; hint?: string; aria?: string; onPick?: () => void; swaps?: MoveTarget[] };
 
 /** A submenu opened by Enter or Space (a click with no pointer, `detail` 0): the focus goes to its first item, as
- *  ArrowRight does — Mantine opens a Menu.Sub on hover and ArrowRight only, so the press opens it here (a tap too). */
+ *  ArrowRight does — Mantine opens a Menu.Sub on hover and ArrowRight; a press (a tap, a click, Enter) opens it too. */
+/** ArrowLeft in a submenu: Mantine closes it but looks for its row under an id no element has (`<id>-target`), so the
+ *  focus would be lost — this puts it back on the row that opened it (the dropdown's id less "-dropdown"). Only a key
+ *  from this dropdown's own items: one from a deeper submenu bubbles past and is that one's. */
+function backToRow(ev: React.KeyboardEvent<HTMLDivElement>) {
+  const box = ev.currentTarget;
+  if (ev.key !== "ArrowLeft" || (ev.target as HTMLElement).closest("[data-menu-dropdown]") !== box) return;
+  const row = box.id.replace(/-dropdown$/, "");
+  window.setTimeout(() => document.getElementById(row)?.focus(), 20);
+}
+
 function focusInto(ev: React.MouseEvent<HTMLButtonElement>) {
   if (ev.detail !== 0) return;
   const id = `${ev.currentTarget.id.replace(/-target$/, "")}-dropdown`;  // Popover: the target's id, its dropdown's id + "-dropdown"
@@ -134,23 +144,24 @@ export function MemberMenu({ run, uid, name, onDone, moves, onAnswer, switches, 
         <Menu.Dropdown>
           {moves && moves.length > 0 && (
             <>
-              <Menu.Sub opened={sub} onChange={(o) => { setSub(o); if (!o) setGroup(null); }}>
+              <Menu.Sub opened={sub} onChange={(o) => { setSub(o); if (!o) setGroup(null); }} position="left-start" offset={4}>
                 <Menu.Sub.Target>
                   <Menu.Sub.Item leftSection={<IconArrowsMove size={14} />} onClick={(ev) => { setSub(true); focusInto(ev); }}>{w.move_to}</Menu.Sub.Item>
                 </Menu.Sub.Target>
-                <Menu.Sub.Dropdown>
+                <Menu.Sub.Dropdown onKeyDown={backToRow}>
                   {moves.map((m) => {
                     const hint = m.hint ? <Text size="xs" c="dimmed">{m.hint}</Text> : undefined;
                     if (!m.swaps) return <Menu.Item key={m.key} disabled={m.disabled} aria-label={m.aria} rightSection={hint} onClick={m.onPick}>{m.label}</Menu.Item>;
                     if (m.disabled) return <Menu.Item key={m.key} disabled rightSection={hint}>{m.label}</Menu.Item>;
                     return (
-                      <Menu.Sub key={m.key} opened={group === m.key} onChange={(o) => setGroup((g) => (o ? m.key : g === m.key ? null : g))}>
+                      <Menu.Sub key={m.key} opened={group === m.key} onChange={(o) => setGroup((g) => (o ? m.key : g === m.key ? null : g))}
+                        position="left-start" offset={4}>
                         <Menu.Sub.Target>
                           <Menu.Sub.Item rightSection={<Group gap={4} wrap="nowrap">{hint}<IconChevronRight size={14} /></Group>}
                             onClick={(ev) => { setGroup(m.key); focusInto(ev); }}>{m.label}</Menu.Sub.Item>
                         </Menu.Sub.Target>
-                        <Menu.Sub.Dropdown>
-                          {m.onPick && <Menu.Item aria-label={m.aria} onClick={m.onPick}>{w.move_here}</Menu.Item>}
+                        <Menu.Sub.Dropdown onKeyDown={backToRow}>
+                          {m.onPick && <Menu.Item onClick={m.onPick}>{w.move_here}</Menu.Item>}
                           {m.swaps.length > 0 && <Menu.Label>{w.swap_with}</Menu.Label>}
                           {m.swaps.map((x) => <Menu.Item key={x.key} aria-label={x.aria} onClick={x.onPick}>{x.label}</Menu.Item>)}
                         </Menu.Sub.Dropdown>

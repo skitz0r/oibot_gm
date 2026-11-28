@@ -381,7 +381,8 @@ class Wizard(discord.ui.View):
                          refresh: Callable[[], dict | Awaitable[dict]] | None = None, note: Sequence[Field] = (),
                          extra: Sequence[discord.ui.Item] = (), back: Callable[[discord.Interaction], Awaitable[None]] | None = None,
                          hint: str | None = None, changed: bool = False, embed: discord.Embed | None = None,
-                         refused: Sequence[discord.ui.Item] = (), above: Sequence[discord.ui.Item] = ()) -> None:
+                         refused: Sequence[discord.ui.Item] = (), above: Sequence[discord.ui.Item] = (),
+                         redraw: Callable[[discord.Interaction, dict], Awaitable[None]] | None = None) -> None:
         """The server's box (consequences.box) on one screen — the same box the site prints (§7b). The text is
         `box_text(box)` in place of the wizard's own title. Buttons: the box's verb (red iff `danger`), `<verb> with a
         note` when `note` (a Form of those Fields whose Submit is the write), `extra` (reads only), then Back (`back`, or
@@ -394,13 +395,14 @@ class Wizard(discord.ui.View):
         `embed`: shown under the box on this screen only (the lock's preview roster); a box shown again goes without it.
         `refused`: buttons a refusal box keeps before Back (the lock's empty board keeps Lock and auto-fill). `above`: the
         box's own field, drawn above its buttons and only when it has a verb (Post board's channel select: a pick shows
-        the screen again, nothing written)."""
+        the screen again, nothing written). `redraw(interaction, fresh)`: a box that changed is drawn by the caller, so a
+        screen whose fields come from the box (Post board's picker and Remove) is rebuilt from what is true now."""
         verb = box.get("verb")
         if verb is not None and verb != button_label(verb):
             box = {**box, "verb": button_label(verb)}
             verb = box["verb"]
         note = list(note)
-        again = dict(do=do, refresh=refresh, note=note, extra=extra, back=back, hint=hint, refused=refused, above=above)
+        again = dict(do=do, refresh=refresh, note=note, extra=extra, back=back, hint=hint, refused=refused, above=above, redraw=redraw)
 
         async def go(i: discord.Interaction, values: dict[str, str]) -> None:
             worked = False
@@ -415,6 +417,9 @@ class Wizard(discord.ui.View):
                     from .consequences import refusal_box_for  # consequences → raidcycle; imported where it is needed
                     fresh = refusal_box_for(str(e))
                 if fresh.get("fp") != box.get("fp"):
+                    if redraw is not None:
+                        await redraw(i, fresh)
+                        return
                     await self.decide_box(i, fresh, changed=fresh.get("verb") is not None, **again)
                     return
             if not worked:

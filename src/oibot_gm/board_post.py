@@ -45,6 +45,7 @@ BOARD_DEBOUNCE_S = 3.0  # a burst of changes (a drag, Auto-fill groups, a lock's
 BOARD_POST = "Post board"
 BOARD_UPDATE = "Update board post"
 BOARD_REMOVE = "Remove board post"
+BOARD_MOVE = "Move board post"  # plain text's review of a Post board that moves an existing post to another channel
 BOARD_OVER = "This event is over, so its board can't be posted."
 BOARD_NONE = "This event has no board post to remove."
 BOARD_NOWHERE = "No channel is set for board posts or the signup sheet, so pick one from the list."
@@ -244,16 +245,20 @@ class BoardPostMixin:
                               + (f" and made {where} its Board posts channel" if own else ""), via=via, by_id=by_id)
         return BOARD_POSTED.format(channel=where)
 
-    async def remove_board_post(self, reg, rs, ev, *, by: str, by_id: int | None = None, via: str = "web") -> str:
+    async def remove_board_post(self, reg, rs, ev, *, by: str, by_id: int | None = None, via: str = "web",
+                                seen: str | None = None, fp=None) -> str:
         """More › Remove board post on a live event: every raid's messages deleted (a later raid's and a removed raid's
         too) and the updates stop; nobody is told. Refused (RegistryError) when there is none, and once the event is over
-        (nothing could post it again: its last state stays). → the answer."""
+        (nothing could post it again: its last state stays). `seen` / `fp` as post_board's: the box the press was made
+        on, checked under the post lock (rc.BoardChanged, nothing removed). → the answer."""
         first = rc.first_part(rs, ev)
         if why := remove_refusal(rs, first):
             raise RegistryError(why)
         from .discord_pool import channel_name
 
         async with self._board_post_lock(reg, first.key):
+            if fp is not None and seen is not None and fp(rs.events.get(first.key) or first) != seen:
+                raise rc.BoardChanged()
             async with self._boards_held(reg, rs, first):
                 first = rs.events.get(first.key) or first
                 cid = first.board_channel_id

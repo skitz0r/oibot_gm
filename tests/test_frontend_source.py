@@ -337,7 +337,9 @@ def test_move_to_nests_group_then_seat():
     every swap "gets a bit crazy"). One Menu.Sub "Move to…"; in it one entry per group (its count on the right; the
     member's own group greyed) and Not placed / Not rostered as a plain item; in a group's submenu An open seat when it
     has room, then under the Swap with label one item per member there. The words are the server's (PAGE_WORDS); every
-    submenu opens on a press (a tap, Enter), not on hover alone, and Enter carries the focus into it."""
+    submenu opens on hover and on a press (a tap, Enter), and Enter carries the focus into it. Fix round 1: both levels
+    open to the left (the main menu grows left from the ⋮, so a level opening right would cover it); ArrowLeft puts the
+    focus back on the row that opened a level; An open seat's accessible name is its visible words (WCAG 2.5.3)."""
     from oibot_gm.constants import PAGE_WORDS
     view = _code_only((SRC / "components" / "board" / "BoardView.tsx").read_text())
     menu = _code_only((SRC / "components" / "board" / "MemberMenu.tsx").read_text())
@@ -348,7 +350,9 @@ def test_move_to_nests_group_then_seat():
     assert "{w.move_to}" in menu and "{w.move_here}" in menu and "<Menu.Label>{w.swap_with}</Menu.Label>" in menu
     assert "Move {name} to…" not in menu, "the flat list's label is gone"
     assert "swaps?: MoveTarget[]" in menu and "m.swaps.map(" in menu
-    assert "opened={sub}" in menu and "opened={group === m.key}" in menu, "controlled: a press opens it, not hover alone"
+    assert "opened={sub}" in menu and "opened={group === m.key}" in menu, "controlled: a press opens it too"
+    assert menu.count('position="left-start" offset={4}') == 2 and menu.count("<Menu.Sub.Dropdown onKeyDown={backToRow}>") == 2
+    assert "<Menu.Item onClick={m.onPick}>{w.move_here}</Menu.Item>" in menu, "no aria-label hiding the visible words"
     assert menu.count("focusInto") >= 3, "Enter opens a submenu and moves the focus into it"
     assert "onClose={() => { setSub(false); setGroup(null); }}" in menu
     moves = view[view.index("const movesFor"):view.index("const swapWith")]

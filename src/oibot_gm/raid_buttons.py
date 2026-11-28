@@ -404,9 +404,11 @@ async def board_post_decide(interaction: discord.Interaction, bot, reg, rs, ev, 
     (consequences.board_post_box — its title, Post · Back, no sentences: the owner's exception) through
     Wizard.decide_box, with Discord's own channel select above it, open on where the post is or would go
     (BoardPostMixin.board_where). A pick shows the screen again and writes nothing; Post presses
-    BoardPostMixin.post_board — the site's press — with the box's fp as `seen` and the pick: a first post, an update in
-    place, or a move. While a post is up Remove board post presses remove_board_post. A refusal is the box's one sentence,
-    Back alone; another officer's press first shows the box again under the changed line. Nobody is DMed."""
+    BoardPostMixin.post_board — the site's press — with the channel the picker SHOWS and the fp of the box on screen as
+    `seen`: a first post, an update in place, or a move. While a post is up Remove board post presses remove_board_post
+    with that fp too. A refusal is the box's one sentence, Back alone. A box that changed meanwhile (decide_box's check,
+    or the engine's under its lock) is drawn again from what is true now — the picker on where the post is now, Remove
+    only while one is up — under the changed line. Nobody is DMed."""
     from .board_post import BOARD_POST, BOARD_REMOVE
     from .consequences import BOARD_POST_TO, board_post_box
     from .flows_config import _text_channel_select
@@ -414,6 +416,7 @@ async def board_post_decide(interaction: discord.Interaction, bot, reg, rs, ev, 
     key = rc.first_part(rs, ev).key
     wiz = wiz or officer_wizard(bot, reg, interaction, BOARD_POST)
     pick: dict[str, int] = {}
+    shown: dict = {}  # the box on screen and the channel its picker shows
 
     def first() -> rc.RaidEvent:
         return rs.events.get(key) or ev
@@ -425,22 +428,30 @@ async def board_post_decide(interaction: discord.Interaction, bot, reg, rs, ev, 
         return box_of(first())
 
     async def show(i: discord.Interaction, *, changed: bool = False) -> None:
+        if changed:
+            pick.clear()  # a changed box opens on what is true now, never on a pick made against the old one
         b, f = box(), first()
         where = pick.get("channel") or bot.board_where(reg, f)
+        shown.update(box=b, where=where)
         above = [_text_channel_select(BOARD_POST_TO, picked, current=where)]
         extra = [wiz.button(BOARD_REMOVE, remove)] if f.board_channel_id else []
-        await wiz.decide_box(i, b, do=post, refresh=box, above=above, extra=extra, changed=changed)
+        await wiz.decide_box(i, b, do=post, refresh=box, above=above, extra=extra, changed=changed, redraw=redraw)
+
+    async def redraw(i: discord.Interaction, _fresh: dict) -> None:
+        await show(i, changed=True)
 
     async def picked(i: discord.Interaction, chans: list) -> None:
         if chans:
             pick["channel"] = int(chans[0].id)
         await show(i)
 
+    def fp(f) -> str:
+        return box_of(f)["fp"]
+
     async def post(i: discord.Interaction, _values: dict) -> None:
-        seen = box()["fp"]  # decide_box has just checked it is the box on screen
         try:
-            line = await bot.post_board(reg, rs, first(), channel=pick.get("channel"), by=i.user.display_name, by_id=i.user.id,
-                                        via="discord", seen=seen, fp=lambda f: box_of(f)["fp"])
+            line = await bot.post_board(reg, rs, first(), channel=shown["where"], by=i.user.display_name, by_id=i.user.id,
+                                        via="discord", seen=shown["box"]["fp"], fp=fp)
         except rc.BoardChanged:
             await show(i, changed=True)
             return
@@ -449,9 +460,17 @@ async def board_post_decide(interaction: discord.Interaction, bot, reg, rs, ev, 
         await wiz.finish(i, line)
 
     async def remove(i: discord.Interaction) -> None:
+        seen = shown["box"]["fp"]
+        if box()["fp"] != seen:  # changed before the press: drawn again, nothing removed
+            await show(i, changed=True)
+            return
         await wiz.working(i)
         try:
-            line = await bot.remove_board_post(reg, rs, first(), by=i.user.display_name, by_id=i.user.id, via="discord")
+            line = await bot.remove_board_post(reg, rs, first(), by=i.user.display_name, by_id=i.user.id, via="discord",
+                                               seen=seen, fp=fp)
+        except rc.BoardChanged:
+            await show(i, changed=True)
+            return
         except RegistryError as e:
             line = str(e)
         await wiz.finish(i, line)

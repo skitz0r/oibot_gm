@@ -191,7 +191,7 @@ export function BoardView({ e, meta, onBoard, onHide, onReload, variant, bankAct
       if (!own && locked && g.length === 0 && r.groups.findIndex((x) => x.length === 0) !== gi) return;  // as drawn: one empty group to move into
       const full = g.length >= board.group_size;
       out.push({
-        key: `${ri}:${gi}`, label: groupName(ri, gi), disabled: own, hint: `${g.length}/${board.group_size}`, aria: `Move ${name} to ${groupName(ri, gi)}`,
+        key: `${ri}:${gi}`, label: groupName(ri, gi), disabled: own, hint: `${g.length}/${board.group_size}`,
         onPick: full ? undefined : () => place(name, from, { r: ri, g: gi, i: g.length }, "menu"),
         swaps: own ? [] : g.map((o, oi) => swapWith(name, from, o.display_name, ri, gi, oi)),  // a phone can't drag onto someone
       });

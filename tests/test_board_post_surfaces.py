@@ -120,6 +120,70 @@ def test_a_box_changed_while_open_is_shown_again_and_nothing_is_posted(reg, rs, 
     assert len(bot.rooms[BOARD].sent) == n and BOARD_UPDATE in h.text and "Post" in h.buttons()
 
 
+def test_a_changed_box_is_drawn_again_from_what_is_true_now(reg, rs, officer):
+    """Fix round 1 (B1): another officer posts in #alt-board while this screen is open; the box drawn again opens its
+    picker on #alt-board and offers Remove, so Post updates the post the officer sees — never a channel not shown."""
+    bot = BoardBot(reg, rs)
+    ev, ms_ = one_raid(reg, rs, bot)
+    h = _open(reg, rs, bot)
+    assert [d.id for d in _select(h).default_values] == [BOARD]
+    run(bot.post_board(reg, rs, ev, channel=ALT_BOARD, by="Other"))
+    run(h.press("Post"))
+    assert BOARD_UPDATE in h.text and h.buttons() == ["Post", BOARD_REMOVE, "Back"], (h.text, h.buttons())
+    assert [d.id for d in _select(h).default_values] == [ALT_BOARD], "preset to where the post is now"
+    sent = len(bot.rooms[ALT_BOARD].sent)
+    run(h.press("Post"))
+    assert len(bot.rooms[ALT_BOARD].sent) == sent and not bot.rooms[BOARD].sent, "an update in place, where it was shown"
+
+
+def test_a_post_moved_away_can_be_picked_back(reg, rs, officer):
+    bot = BoardBot(reg, rs)
+    ev, ms_ = one_raid(reg, rs, bot)
+    run(bot.post_board(reg, rs, ev, by="Kara"))
+    h = _open(reg, rs, bot)
+    run(bot.post_board(reg, rs, rs.events[ev.key], channel=ALT_BOARD, by="Other"))  # moved while the screen is open
+    run(h.press("Post"))
+    assert [d.id for d in _select(h).default_values] == [ALT_BOARD]
+    run(pick_widget(h, discord.ui.ChannelSelect, cq.BOARD_POST_TO, bot.rooms[BOARD]))
+    run(h.press("Post"))
+    assert rs.events[ev.key].board_channel_id == BOARD, h.text
+
+
+def _race(monkeypatch, work):
+    """`work()` runs while the press is being answered (Wizard.working's round trip), after decide_box's check."""
+    from oibot_gm.wizard import Wizard
+
+    real = Wizard.working
+
+    async def working(self, i, text="Working…"):
+        await real(self, i, text)
+        await work()
+    monkeypatch.setattr(Wizard, "working", working)
+
+
+def test_post_sends_the_fingerprint_of_the_box_on_screen(reg, rs, officer, monkeypatch):
+    """Fix round 1 (B2): a post landing during the press's round trip is caught — the press sends the fp of the box the
+    officer saw, so the engine refuses it and the box is drawn again; nothing more is posted."""
+    bot = BoardBot(reg, rs)
+    ev, ms_ = one_raid(reg, rs, bot)
+    h = _open(reg, rs, bot)
+    _race(monkeypatch, lambda: bot.post_board(reg, rs, rs.events[ev.key], by="Other"))
+    run(h.press("Post"))
+    assert len(bot.rooms[BOARD].sent) == 1 and BOARD_UPDATE in h.text and "Post" in h.buttons(), h.text
+
+
+def test_remove_sends_the_fingerprint_of_the_box_on_screen(reg, rs, officer, monkeypatch):
+    bot = BoardBot(reg, rs)
+    ev, ms_ = one_raid(reg, rs, bot)
+    run(bot.post_board(reg, rs, ev, by="Kara"))
+    h = _open(reg, rs, bot)
+    _race(monkeypatch, lambda: bot.post_board(reg, rs, rs.events[ev.key], channel=ALT_BOARD, by="Other"))
+    run(h.press(BOARD_REMOVE))
+    ev = rs.events[ev.key]
+    assert ev.board_channel_id == ALT_BOARD and ev.board_posts, "the post moved meanwhile stays up"
+    assert [d.id for d in _select(h).default_values] == [ALT_BOARD], h.text
+
+
 def test_an_ended_event_is_the_engines_one_sentence_back_alone(reg, rs, officer):
     from oibot_gm.raid_buttons import board_post_decide
 
@@ -191,6 +255,19 @@ def test_plain_text_names_a_channel_first_post_owns_it_then_moves(reg, rs, named
     run(configops.apply_async(reg, ConfigOp(op="run_board_post", target=ev.key, value=f"<#{BOARD}>"), "Kara", False, bot=bot, via="chat"))
     ev = rs.events[ev.key]
     assert ev.board_channel_id == BOARD and old in bot.rooms[ALT_BOARD].deleted
+
+
+def test_plain_text_review_says_a_move_moves(reg, rs, named):
+    from oibot_gm.board_post import BOARD_MOVE
+
+    bot = BoardBot(reg, rs)
+    named(bot)
+    ev, ms_ = one_raid(reg, rs, bot)
+    run(bot.post_board(reg, rs, ev, by="Kara"))
+    d = configops.describe(reg, ConfigOp(op="run_board_post", target=ev.key, value=f"<#{ALT_BOARD}>"), strict=True)
+    assert d.startswith(f"{BOARD_MOVE} for ") and d.endswith(" to #alt-board."), d
+    same = configops.describe(reg, ConfigOp(op="run_board_post", target=ev.key, value=f"<#{BOARD}>"), strict=True)
+    assert same.startswith(f"{BOARD_UPDATE} for ") and same.endswith(" in #board."), same
 
 
 def test_plain_text_remove_and_its_refusals(reg, rs, named):
