@@ -1524,6 +1524,7 @@ class OibotGM(ListenMixin, FeedMixin, LootSurfaceMixin, LootMixin, LootLogMixin,
         self.attach_pool_listeners()
         self.attach_loot_listeners()  # a seat change on a run with a council → "now a candidate" (candidates are read live)
         self.attach_loot_log()  # every new award row → one line in the public loot log (LootLogMixin)
+        self.install_board_posts(self.loop)  # every run save → its event's board post redrawn, debounced (board_post)
         await self.start_feed()  # .env tokens + every guild's issued (hashed) tokens — FeedMixin.start_feed (design §5.50)
         from .web.app import serve as web_serve
 

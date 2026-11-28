@@ -10,6 +10,9 @@ existing topics `run:` (any run saved), `member` and `config` (a schedule edited
   (event_board.AutoFill.state; the page hears `run:<raid key>` when an auto-fill starts or ends)
 - POST /api/event/{key}/clear → More › Clear the board: every open raid's groups back to Not placed (pins stay), through
   consequences.clear_board_box (`preview` → {box}; `seen` → 409 with the fresh box; refused → 400 with the refusal box)
+- POST /api/event/{key}/board → Post board (design 2026-11-27-post-board): `preview` → {box} (consequences.board_post_box:
+  the title, one select, Back · Post — no sentences); `seen` + `channel` → BoardPostMixin.post_board (first post, update,
+  or move); POST /api/event/{key}/board/remove → More › Remove board post (BoardPostMixin.remove_board_post)
 - GET /api/event/{key}/lineup → event_view.lineup_edit_json (Edit lineup's start); POST it {lineup} →
   event_view.lineup_draft_json (its "What this makes" and Save box, nothing written — the Save is POST /api/run/{key}/lineup)
 - GET /api/event/coming/{sid}/{occurrence} → event_view.coming_json; 404 {error, key} when the night has an event now
@@ -34,7 +37,7 @@ from .. import ops as ops_mod
 from .. import raid_views as rv
 from .. import raidcycle as rc
 from ..constants import CONFIRM_WORDS
-from ..registry import RegistryError
+from ..registry import CHANNEL_WHEN, RegistryError
 from .api_setup import channel_names
 
 # a link to an event that isn't one any more: its record is gone, or (a raid taken out of a lineup) it is no event of its own
@@ -115,6 +118,53 @@ def install_events_api(app: FastAPI, bot, *, who, body, ev_json) -> None:
                 return JSONResponse({"error": CONFIRM_WORDS["changed"], "box": again}, status_code=409)
         await ops_mod.audited(bot.ops, v.reg, v.name, f"cleared the board of {rv.run_title(v.reg, first)}", via=v.via, by_id=v.uid)
         return {"message": cq.CLEARED}
+
+    def board_options(reg) -> list[dict]:
+        """The Post board box's channels: the server's text channels as the other channel pickers list them."""
+        return [{"value": str(cid), "label": f"#{name}"} for cid, name in channel_names(bot, reg).items()]
+
+    @app.post("/api/event/{key}/board")
+    async def event_board_post(request: Request, key: str):
+        """Post board (design 2026-11-27-post-board): `preview` → {box} (consequences.board_post_box — its title, the
+        one select, no sentences); `seen` = its fp (a post put up, moved or removed, or a raid ended meanwhile → 409 with
+        the fresh box) with `channel` (the pick, a channel id) → BoardPostMixin.post_board: the first post, an update in
+        place, or a move. A refusal (ended, no channel, the bot can't post there) → 400 with its one-sentence box."""
+        v, d = await body(request, officer=True)
+        rs = bot.raids.store(v.reg)
+        ev = rs.events.get(key)
+        if ev is None or ev.dropped:
+            return JSONResponse({"error": NO_EVENT}, status_code=404)
+        first = rc.first_part(rs, ev)
+        fresh = cq.board_post_box(v.reg, rs, first, board_options(v.reg), bot.board_where(v.reg, first))
+        if d.get("preview"):
+            return {"box": fresh} if fresh["verb"] else JSONResponse({"error": fresh["sentences"][0], "box": fresh}, status_code=400)
+        if fresh["verb"] is None:
+            return JSONResponse({"error": fresh["sentences"][0], "box": fresh}, status_code=400)
+        if d.get("seen") and str(d["seen"]) != fresh["fp"]:
+            return JSONResponse({"error": CONFIRM_WORDS["changed"], "box": fresh}, status_code=409)
+        raw = str(d.get("channel") or "").strip()
+        if raw and not raw.isdigit():
+            return _refused(CHANNEL_WHEN)
+        try:
+            line = await bot.post_board(v.reg, rs, first, channel=int(raw) if raw else None, by=v.name, by_id=v.uid, via=v.via)
+        except RegistryError as e:
+            return _refused(e)
+        return {"message": line}
+
+    @app.post("/api/event/{key}/board/remove")
+    async def event_board_remove(request: Request, key: str):
+        """More › Remove board post: BoardPostMixin.remove_board_post (every raid's message deleted, the updates stop).
+        No post → 400 with its one-sentence box."""
+        v, _d = await body(request, officer=True)
+        rs = bot.raids.store(v.reg)
+        ev = rs.events.get(key)
+        if ev is None or ev.dropped:
+            return JSONResponse({"error": NO_EVENT}, status_code=404)
+        try:
+            line = await bot.remove_board_post(v.reg, rs, ev, by=v.name, by_id=v.uid, via=v.via)
+        except RegistryError as e:
+            return _refused(e)
+        return {"message": line}
 
     @app.get("/api/event/{key}/lineup")
     async def event_lineup(request: Request, key: str):

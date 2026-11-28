@@ -1145,9 +1145,14 @@ def box_cases(reg, rs, runs, ms, dump):
     hy, ony = "hyjal_summit_forever", "onyxias_lair"
 
     def add(generator, case, b):
-        assert set(b) - {"choice"} == {"title", "sentences", "verb", "danger", "diff", "fp"}, generator
+        # the ONE box with a select and no sentences: Post board (the owner, 2026-11-27: "none of this text is needed" —
+        # its title, the select "Post to", Back · Post); its refusal still says its one sentence
+        own = {"channel"} if generator == "board_post_box" else set()
+        assert set(b) - {"choice"} - own == {"title", "sentences", "verb", "danger", "diff", "fp"}, generator
         assert "choice" not in b or (generator == "lock_box" and set(b["choice"]) == {"label", "value"}), generator
         assert b["verb"] is not None or len(b["sentences"]) == 1, f"{generator} · {case}: a refusal is one sentence"
+        if generator == "board_post_box" and b["verb"] is not None:  # owner, 2026-11-27: no sentences, nothing else exempt
+            assert b["sentences"] == [] and b["diff"] == [] and set(b["channel"]) == {"label", "value", "options"}, case
         title = b["title"] if b["title"][-1:] in ".?!" else b["title"] + "."  # a heading: linted for case, length and glue
         dump.add(f"{generator} title", case, [title])
         dump.add(generator, case, b["sentences"])
@@ -1156,6 +1161,11 @@ def box_cases(reg, rs, runs, ms, dump):
         add("lock_box", case, cq.lock_box(reg, ev, rs))
         add("lock_box", f"{case}, auto-fill ticked", cq.lock_box(reg, ev, rs, fill=True))
         add("cancel_box", case, cq.cancel_box(reg, ev, rs))
+        add("board_post_box", case, cq.board_post_box(reg, rs, ev, [{"value": "61001", "label": "#signups"}], 61001))
+    ev = runs["open recurring"]
+    ev.board_channel_id = 61001  # a post is up: Update board post
+    add("board_post_box", "a post is up", cq.board_post_box(reg, rs, ev, [], 61001))
+    ev.board_channel_id = None
     four = next(e for e in rs.events.values() if e.state == "open" and not rc.is_follow(e) and len(rc.event_parts(rs, e)) == 4)
     add("lock_box", "four raids", cq.lock_box(reg, four, rs))  # lineup_cases' four-raid event
     add("lock_box", "four raids, auto-fill ticked", cq.lock_box(reg, four, rs, fill=True))

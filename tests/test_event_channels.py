@@ -91,7 +91,7 @@ def test_an_event_and_a_schedule_from_before_have_no_channels_of_their_own(reg, 
 def test_a_one_offs_open_form_names_its_own_channels(reg, rs):
     start = (reg.now_local() + timedelta(days=4)).replace(hour=13, minute=15, second=0, microsecond=0)
     ev = rc.open_run(reg, rs, RID, start, by="t", channels={"sheet_channel": str(ALT_SHEET), "officers_channel": ""})
-    assert rc.own_channels(reg, ev) == {"sheet_channel": str(ALT_SHEET), "officers_channel": None, "loot_log_channel": None}
+    assert rc.own_channels(reg, ev) == {"sheet_channel": str(ALT_SHEET), "officers_channel": None, "loot_log_channel": None, "board_channel": None}
 
 
 # ---------------------------------------------------------------- the save-time rules
@@ -319,7 +319,8 @@ def test_the_site_edits_an_events_channels_with_a_box_and_a_stale_one_is_409(reg
     labels = {f["label"] for f in j["details"]}
     assert "Loot log" in labels and "Signup sheet" in labels  # the loot log differs from the guild's; the sheet row is the link's
     new = c.get("/api/event-new", headers=H()).json()["channels"]
-    assert all(f["value"] is None and "(the guild's)" in f["empty"] for f in new["fields"] if f["key"] != "loot_log_channel")
+    assert all(f["value"] is None and "(the guild's)" in f["empty"] for f in new["fields"] if f["key"] not in ("loot_log_channel", "board_channel"))
+    assert next(f for f in new["fields"] if f["key"] == "board_channel")["empty"] == "The signup sheet's channel"
 
 
 def test_the_site_opens_a_one_off_with_its_own_channels(reg, rs, web_bot):

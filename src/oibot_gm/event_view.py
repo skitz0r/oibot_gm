@@ -128,6 +128,8 @@ def channel_section(reg: Registry, values: dict, names: dict | None, *, back: di
             empty = PAGE_WORDS["channel_guilds"].format(channel=channel_label(names, g))
         elif f == "officers_channel" and reg.config.ops_channel_id:  # the officers' cards fall back to ops as today
             empty = PAGE_WORDS["channel_guilds"].format(channel=channel_label(names, reg.config.ops_channel_id))
+        elif f == "board_channel":  # no guild board posts channel: the event's signup sheet channel (rc.channel_of)
+            empty = PAGE_WORDS["channel_sheets"]
         else:
             empty = PAGE_WORDS["channel_guild_unset"]
         fields.append({"key": f, "label": F[f], "help": field_help(f, F[f]), "value": values.get(f) or None, "empty": empty})
@@ -421,6 +423,9 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
                         "lock": state == "open" and first.state == "open", "cancel": live, "open_now": False,
                         # More › Clear the board: while a raid of the event is still open (its box from POST /api/event/{key}/clear)
                         "clear": any(p.state == "open" for p in parts)},
+            # Post board (design 2026-11-27-post-board): the button under the board while the event is live — Post board,
+            # or Update board post while a post is up (its box: POST /api/event/{key}/board) — and More › Remove board post
+            "board_post": _board_post_words(first, live),
             "switches": rc.event_switches(reg, rs, first, viewer=viewer) if live else {"short": [], "rows": [], "revs": {}},
             "lineup": lineup, "start_iso": first.start.isoformat(), "timing": timing, "people": people, "sheet_url": url,
             # Reschedule's picker: the Day's lower bound is the GUILD's date; Locks offers the event's own lock among the choices
@@ -433,6 +438,17 @@ def event_json(reg: Registry, rs: "rc.RaidStore", ev: "rc.RaidEvent", viewer: in
             "locks": lock_choices(float(timing["lock_hours_before"])) if can_move and timing.get("lock_hours_before") is not None else [],
             # Edit event: every setting before the start; once started, its channels alone (until it ends or is cancelled)
             "edit": edit_options(reg, rs, first, timing, names=names, started=not can_move) if live and first.state not in CLOSED else None}
+
+
+def _board_post_words(first: "rc.RaidEvent", live: bool) -> dict | None:
+    """event_json's `board_post`: {button (Post board | Update board post), remove (Remove board post while a post is
+    up, else null)} on a live event; null once it has ended or is cancelled (a post up keeps its last state)."""
+    from .board_post import BOARD_POST, BOARD_REMOVE, BOARD_UPDATE
+
+    if not live:
+        return None
+    up = bool(first.board_channel_id)
+    return {"button": BOARD_UPDATE if up else BOARD_POST, "remove": BOARD_REMOVE if up else None}
 
 
 # what Edit event offers once the roster is locked (rc.AFTER_LOCK, in the settings' names): automatic asks and an ask's wait

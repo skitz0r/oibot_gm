@@ -367,7 +367,8 @@ class AbsencesMixin(PeopleMixin):
 
 CHANNEL_KINDS = {"ops": "ops_channel_id", "applications": "applications_channel_id", "signup": "signup_channel_id", "roster": "roster_channel_id",
                  "registration": "registration_channel_id", "analytics": "analytics_channel_id", "absences": "absences_channel_id", "news": "news_channel_id",
-                 "loot": "loot_channel_id"}  # loot: the public award log (one line per confirmed award; LootLogMixin)
+                 "loot": "loot_channel_id",  # loot: the public award log (one line per confirmed award; LootLogMixin)
+                 "board": "board_channel_id"}  # board: where Post board on the event page posts (board_post.BoardPostMixin)
 # what each channel is for — the channels hub, the Config page's Channels card (GET /api/admin/channels) and the Setup card read these
 CHANNEL_LABELS: dict[str, tuple[str, str]] = {
     "registration": ("Registration", "public, read-only: the registration card with its buttons"),
@@ -379,6 +380,7 @@ CHANNEL_LABELS: dict[str, tuple[str, str]] = {
     "ops": ("Ops (officers)", "one line per action the bot takes; plain-text config by @mention"),
     "news": ("News", "where the news webhook posts; the bot keeps the items about our game"),
     "loot": ("Loot log", "public: one line per confirmed award; empty = each event's updates thread"),
+    "board": ("Board posts", "each raid's groups an officer posts from the event page; empty = each event's signup channel"),
 }
 REQUIRED_KINDS = ("ops", "signup")  # without these the bot can't tell anyone anything / can't open a run (the Setup card's red rows)
 CARD_KINDS = ("registration", "absences", "analytics")  # a card the bot posts there (set_channel posts first, then drops the old one)
@@ -434,6 +436,8 @@ def channel_consequences(reg: Registry, kind: str, channel_id: int | None, bot=N
             out.append(f"News posts in {old} are no longer read.")
         elif kind == "loot":
             out.append("Award lines go to each event's updates thread instead.")
+        elif kind == "board":
+            out.append("New board posts go to each event's signup channel. Posts already up stay where they are.")
         return out
     new = channel_name(bot, cid)
     old = channel_name(bot, cur) if cur else None
@@ -455,6 +459,8 @@ def channel_consequences(reg: Registry, kind: str, channel_id: int | None, bot=N
         out.append(f"New application cards post in {new}. Cards already posted stay where they are.")
     elif kind == "roster":
         out.append(f"Officer cards and the loot council's thread post in {new}.")
+    elif kind == "board":
+        out.append(f"New board posts go to {new}." + (" Posts already up stay where they are." if old else ""))
     if bot is not None and getattr(bot, "get_channel", None):
         ch = bot.get_channel(cid)
         if ch is not None:

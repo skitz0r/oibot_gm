@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 import discord
 
 from . import guild_routing, ops as ops_mod, raidcycle as rc
+from .board_post import BoardPostMixin
 from .discord_registry import Guilds
 from .raid_buttons import FillButton, PlaceButton, RunButton, SignupButton, fill_view, place_view, sheet_view
 from .raid_commands import register_raid_commands
@@ -73,7 +74,7 @@ def _cq():
     return consequences
 
 
-class RaidMixin:
+class RaidMixin(BoardPostMixin):
     """Methods the bot needs; mixed into OibotGM."""
 
     async def may_answer_for(self, interaction: discord.Interaction, reg, uid: int) -> bool:
@@ -423,7 +424,7 @@ class RaidMixin:
                 log.warning("card refresh failed (%s %s): %s", ev.key, key, e)
 
     MOVE_WAIT_S = 10.0  # a channel move's route waits this long for its Discord edits; the rest go on behind it (finish_later)
-    PLACE_WORDS = {"sheet_channel": "signup sheet", "officers_channel": "officers' cards", "loot_log_channel": "loot log"}
+    PLACE_WORDS = {"sheet_channel": "signup sheet", "officers_channel": "officers' cards", "loot_log_channel": "loot log", "board_channel": "board post"}
 
     def move_finishing(self, reg, first) -> "asyncio.Task | None":
         """The channel move of `first`'s event still running (move_channels' task), or None — a lock waits for it."""
@@ -497,6 +498,8 @@ class RaidMixin:
                     out[f] = await self.move_sheet(reg, rs, first)
                 elif f == "officers_channel":
                     out[f] = await self.move_cards(reg, rs, first)
+                elif f == "board_channel":
+                    out[f] = await self.move_board(reg, rs, first)
                 else:
                     out[f] = None
             back = {f: before[f] for f, why in out.items() if why}
@@ -823,6 +826,7 @@ class RaidMixin:
                     n += 1
                 except Exception as e:  # noqa: BLE001
                     log.warning("sheet restore failed (%s %s): %s", reg.key, ev.key, e)
+            await self.boards_restore(reg)  # every board post too (an event that ended while the bot was down: its last edit)
         return n
 
     async def post_sheet(self, reg, rs, ev, channel, *, dm: bool = True) -> None:
@@ -1275,7 +1279,7 @@ class RaidMixin:
         if key in warned:
             return
         warned.add(key)
-        what = {"sheet_channel": "signup sheet", "officers_channel": "officers' cards", "loot_log_channel": "loot log"}[field]
+        what = self.PLACE_WORDS[field]
         where = run_title(reg, ev) if ev is not None and not isinstance(ev, str) else str(ev or "A schedule")
         text = (f"{where}: the channel picked for its {what} is gone or closed to the bot, so it posts in the guild's channel. "
                 "Pick another on Edit event or Edit schedule.")
@@ -2477,11 +2481,13 @@ class RaidMixin:
         lines, officers only)."""
         from .discord_pool import channel_name
 
-        what = {"sheet_channel": "signup sheet", "officers_channel": "officers' cards", "loot_log_channel": "loot log"}
+        what = self.PLACE_WORDS
         out = []
         for f, (_old, new) in moves.items():
             if new:
                 out.append(f"{what[f]} {channel_name(self, new)}")
+            elif f == "board_channel" and not reg.config.board_channel_id:
+                out.append(f"{what[f]} the signup sheet's channel")
             else:
                 g = rc.channel_of(reg, None, f)
                 out.append(f"{what[f]} the guild's " + (channel_name(self, g) if g else "channel"))

@@ -36,7 +36,7 @@ LOCK_SWITCHES = ("auto_lock", "auto_lock_fill")  # Auto Lock and, under it, its 
 PICKUP_HIDDEN = {"signup_lead_hours", "nudge_hours_before", "nudge", "open_dm"}  # a pickup reminds nobody (the site's)
 SHOWN = ("signup_lead_hours", "nudge", "nudge_hours_before", "lock_hours_before", "auto_lock", "auto_lock_fill", "confirm", "confirm_hours_before",
          "autofill", "fill_ask_hours", "open_dm", "weights", "split_policy")  # the hub's lines after Repeats and Lineup
-CHANNELS = ("sheet_channel", "officers_channel", "loot_log_channel")  # the Channels step (skippable: empty = the guild's)
+CHANNELS = ("sheet_channel", "officers_channel", "loot_log_channel", "board_channel")  # the Channels step (skippable: empty = the guild's)
 MAX_RUN_TIMES = 14
 NEW = "New schedule"
 CHANGE = "Change"

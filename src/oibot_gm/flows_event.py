@@ -25,7 +25,7 @@ PICK_AGAIN = "Pick another time"
 CHANGE = "Change a setting"
 HOURS = ("lock_hours_before", "nudge_hours_before", "confirm_hours_before", "fill_ask_hours")
 SWITCHES = ("nudge", "confirm", "autofill", "auto_lock", "auto_lock_fill")
-CHANNELS = ("sheet_channel", "officers_channel", "loot_log_channel")  # the Channels step: not timing, editable until it ends
+CHANNELS = ("sheet_channel", "officers_channel", "loot_log_channel", "board_channel")  # the Channels step: not timing, editable until it ends
 PICK_CHANNEL = "Pick the channel"
 
 
@@ -52,6 +52,8 @@ def channel_mention_words(reg: Registry, field: str, own, back: dict | None = No
     if back and back.get(field):
         return PAGE_WORDS["channel_schedules"].format(channel=f"<#{back[field]}>")
     g = getattr(reg.config, GUILD_CHANNEL_OF[field], None) or (reg.config.ops_channel_id if field == "officers_channel" else None)
+    if not g and field == "board_channel":  # no guild board posts channel: the signup sheet's
+        return PAGE_WORDS["channel_sheets"]
     return PAGE_WORDS["channel_guilds"].format(channel=f"<#{g}>") if g else PAGE_WORDS["channel_guild_unset"]
 
 

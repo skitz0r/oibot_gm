@@ -66,7 +66,7 @@ a new module also gets its name in the list below.
 - **`docs/layout/registry.md`** — Members, characters, GuildConfig, schedules as stored, migrations and the way back, the Discord command groups, guild routing and the identity check.
   `registry.py` · `discord_registry.py` · `guild_routing.py` · `discord_people.py`
 - **`docs/layout/events.md`** — Raids, events, schedules: the solver, the signup cycle, lock / fill, the Events / Schedules / Raids read models and their routes, the Discord raid cards and buttons.
-  `roster/` · `raidcycle.py` · `discord_raid.py` · `event_view.py` · `event_board.py` · `schedule_view.py` · `raid_page.py` · `raid_views.py` · `raid_buttons.py` · `raid_scheduler.py` · `raid_commands.py` · `web/api_me.py` · `web/api_events.py` · `web/api_schedules.py`
+  `roster/` · `raidcycle.py` · `discord_raid.py` · `board_post.py` · `event_view.py` · `event_board.py` · `schedule_view.py` · `raid_page.py` · `raid_views.py` · `raid_buttons.py` · `raid_scheduler.py` · `raid_commands.py` · `web/api_me.py` · `web/api_events.py` · `web/api_schedules.py`
 - **`docs/layout/loot.md`** — The loot council, appeals, the ledger context, the companion feed.
   `loot/` · `discord_loot.py` · `discord_loot_surface.py` · `flows_loot.py` · `appeals.py` · `flows_appeal.py` · `lootctx.py` · `loot_ops.py` · `feed.py` · `discord_feed.py` · `companion/` · `web/api_loot.py`
 - **`docs/layout/armory-prices.md`** — The armory link, professions, auction prices and the price watch.

@@ -1823,7 +1823,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         MCP's reschedule_run share it): {start?: aware ISO or guild wall time 'YYYY-MM-DD HH:MM' (the datetime-local
         picker; DST-safe, a skipped or doubled wall time refused), timing?: {setting: value} (rc.EVENT_TIMING: the sheet
         timing, confirm, first_come, weights {key: 0-6}, split_policy — a strategy for the raid `key` names, or {raid key:
-        strategy}; and the event's own channels sheet_channel / officers_channel / loot_log_channel, a channel id or empty,
+        strategy}; and the event's own channels sheet_channel / officers_channel / loot_log_channel / board_channel, a channel id or empty,
         which are not timing: they change until the event ends and move what is posted), edit? (the Events page's Edit event: the box is titled Change … with Save and its diff lines), preview?,
         seen?, rev?}. Officers, decided live by the verb. `preview` → {sentences (consequences.reschedule_consequence), rev
         (rc.event_rev), box}; nothing written. `seen` = the fp of the box pressed: a box built now with another fp → 409
@@ -2071,7 +2071,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
 
     def channel_args(d: dict) -> dict:
         """The one-off open form's own channels (design 2026-11-27-event-channels): `channels` {sheet_channel,
-        officers_channel, loot_log_channel}, a channel id (or empty: the guild's) → {field: id as text} for those that
+        officers_channel, loot_log_channel, board_channel}, a channel id (or empty: the guild's) → {field: id as text} for those that
         name one. A value that is no channel is refused in one sentence (registry.CHANNEL_WHEN)."""
         from ..registry import SCHEDULE_CHANNELS, channel_value
 
@@ -2128,7 +2128,7 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
         (from the preview; None for a one-off): the schedule's run Open is expected to make — refused (409) with a fresh
         preview when the time now resolves to another. `rosters` / `timing.lock_hours_before` / `timing.auto_lock` /
         `timing.auto_lock_fill` (the New event page): the first raid's rosters, the lock, Auto Lock and its auto-fill of a
-        ONE-OFF, and `channels` {sheet_channel, officers_channel, loot_log_channel} its own channels; a schedule's night
+        ONE-OFF, and `channels` {sheet_channel, officers_channel, loot_log_channel, board_channel} its own channels; a schedule's night
         keeps its schedule's own. A refusal answers with its
         box (400)."""
         v, d = await body(request, officer=True)

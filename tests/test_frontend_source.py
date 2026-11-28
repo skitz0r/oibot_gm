@@ -1684,7 +1684,7 @@ def test_each_sheet_timing_switch_carries_the_servers_help():
     assert f"with {F['autofill']} off" in help_["autofill"] and "with this off" not in help_["autofill"]
     assert f"no answer for as long as {F['fill_ask_hours']}, asks the next person" in help_["autofill"]
     assert set(help_) == {"nudge", "confirm", "autofill", "open_dm", "auto_lock", "auto_lock_fill",
-                          "sheet_channel", "officers_channel", "loot_log_channel"}  # the Channels section's (?)s
+                          "sheet_channel", "officers_channel", "loot_log_channel", "board_channel"}  # the Channels section's (?)s
     assert f"With {F['auto_lock']} off" in help_["auto_lock"] and f"With {F['auto_lock_fill']} off" in help_["auto_lock_fill"]
     for k, text in help_.items():
         sentences = [x for x in text.split(". ") if x]

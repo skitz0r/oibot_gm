@@ -174,7 +174,9 @@ PAGE_WORDS = {
                         # an event's own (Edit event, the owner's tweaks B): first to join or by priority
                         "first_come": "Seat order",
                         # a schedule's and an event's own channels (design 2026-11-27-event-channels): the Channels section
-                        "sheet_channel": "Signup sheet", "officers_channel": "Officers' cards", "loot_log_channel": "Loot log"},
+                        "sheet_channel": "Signup sheet", "officers_channel": "Officers' cards", "loot_log_channel": "Loot log",
+                        # the fourth (design 2026-11-27-post-board): where Post board on the event page posts
+                        "board_channel": "Board posts"},
     # the (?) beside each switch of Sheet timing (the schedule editor and Edit event): exactly who gets what, when and
     # where — read from discord_raid.post_health / dm_on_open / lock_run / confirm_one / run_fill, raidcycle.fill_batch
     # (FILL_OVERASK one more than the shortfall, FILL_MAX_OPEN asks out at once) and expire_confirmation_asks
@@ -207,12 +209,16 @@ PAGE_WORDS = {
                             "Pick a channel only officers can see.",
         "loot_log_channel": "During a loot council, one public line per confirmed award posts here. "
                             "Lines already posted stay where they are.",
+        "board_channel": "Post board on the event page posts each raid's groups here and keeps them current. "
+                         "Changing it on a live event moves the post.",
     },
     # the Channels section: its title, the empty option of each select (the channel it falls back to), and a Details
     # row's value when an event's or a schedule's own channel differs from the guild's (where it comes from)
     "channels": "Channels",
     "channel_guilds": "{channel} (the guild's)", "channel_schedules": "{channel} (the schedule's)",
     "channel_guild_unset": "The guild's, once one is set on the Config page",
+    # Board posts with no guild channel of its own: the event's signup sheet channel (raidcycle.channel_of)
+    "channel_sheets": "The signup sheet's channel",
     "channel_from_schedule": "{channel}, the schedule's", "channel_from_event": "{channel}, this event's own",
     "channel_gone": "a channel the bot can't see",
     # the (?)'s name for a screen reader: "What Signup Reminder does"

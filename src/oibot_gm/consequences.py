@@ -852,7 +852,7 @@ def reschedule_consequence(reg: Registry, rs, ev: rc.RaidEvent, start, timing: d
     return out
 
 
-CHANNEL_PLACES = {"sheet_channel": "signup sheet", "officers_channel": "officers' cards", "loot_log_channel": "loot log"}
+CHANNEL_PLACES = {"sheet_channel": "signup sheet", "officers_channel": "officers' cards", "loot_log_channel": "loot log", "board_channel": "board post"}
 
 
 def channel_words(reg: Registry, field: str, own) -> str:
@@ -863,6 +863,8 @@ def channel_words(reg: Registry, field: str, own) -> str:
 
     if own:
         return channel_name(perms.CLIENT, own)
+    if field == "board_channel" and not reg.config.board_channel_id:  # no guild board posts channel: the sheet's
+        return "the signup sheet's channel"
     g = rc.channel_of(reg, None, field)
     return f"the guild's {channel_name(perms.CLIENT, g)}" if g else "the guild's channel"
 
@@ -878,6 +880,8 @@ def channel_move_sentence(reg: Registry, first: rc.RaidEvent, moves: dict) -> st
         return f"The signup sheet moves to {where} with every answer." if first.message_id else f"The signup sheet posts in {where}."
     if f == "officers_channel":
         return f"The officers' cards move to {where} with a new updates thread."
+    if f == "board_channel":
+        return f"The board post moves to {where}." if first.board_channel_id else f"Board posts go to {where} from now on."
     return f"Loot log lines post in {where} from now on."
 
 
@@ -915,7 +919,7 @@ def reschedule_box(reg: Registry, rs, ev: rc.RaidEvent, start, timing: dict | No
 
 # the order Edit event's diff lines follow (the editor's sections: when, sheet timing, confirmation, open seats, priority)
 EDIT_LINE_ORDER = ("start", "lock_hours_before", "auto_lock", "auto_lock_fill", "nudge", "nudge_hours_before", "confirm", "confirm_hours_before",
-                   "autofill", "fill_ask_hours", "first_come", "weights", "split_policy", "sheet_channel", "officers_channel", "loot_log_channel")
+                   "autofill", "fill_ask_hours", "first_come", "weights", "split_policy", "sheet_channel", "officers_channel", "loot_log_channel", "board_channel")
 
 
 def event_value_words(setting: str, v) -> str:
@@ -2566,3 +2570,31 @@ __all__ = ["BOARD_VERBS", "CONFIRM_DM", "NAME_TOKEN", "NOBODY_DM", "NO_SHEET_CHA
            "flex_consequence", "forget_consequence", "main_consequence", "memory_off_consequence", "memory_shared_consequence", "move_consequence", "people_consequence", "profession_consequence", "profession_sync_consequence", "rank_consequence", "regular_remove", "reopen_sentence",
            "retire_consequence", "save_consequence", "series_words", "spec_consequence"]
 
+
+
+BOARD_POST_TO = "Post to"  # the Post board box's one select
+BOARD_POST_VERB = "Post"
+
+
+def board_post_box(reg: Registry, rs, ev: rc.RaidEvent, options: list[dict], where: int | None) -> dict:
+    """The Post board box (design 2026-11-27-post-board): its title (Post board, or Update board post while a post is
+    up), ONE select 'Post to' and Back · Post — no sentences (the owner, 2026-11-27: "none of this text is needed", an
+    exception to the Confirm rule registered in tests/test_confirm_readability.py). `channel` = {label, value (where the
+    post is now, else where the event's Board posts resolve: the box opens on it), options [{value, label}] (the server's
+    text channels; a value the list doesn't hold is added under PAGE_WORDS channel_gone)}. Refused (one sentence, Back
+    alone) once every raid has ended or is cancelled. Its fp carries whether a post is up, where, and each raid's state."""
+    from .board_post import BOARD_OVER, BOARD_POST, BOARD_UPDATE
+    from .constants import PAGE_WORDS
+
+    first = rc.first_part(rs, ev)
+    parts = rc.event_parts(rs, first)
+    title = BOARD_UPDATE if first.board_channel_id else BOARD_POST
+    if all(p.state in ("done", "cancelled") for p in parts):
+        return refusal_box(title, BOARD_OVER)
+    rev = ":".join([str(first.board_channel_id or ""), str(where or ""), *(p.state for p in parts)])
+    b = box(title, [], BOARD_POST_VERB, rev=rev)
+    opts = [dict(o) for o in options]
+    if where and all(str(o["value"]) != str(where) for o in opts):
+        opts.insert(0, {"value": str(where), "label": PAGE_WORDS["channel_gone"]})
+    b["channel"] = {"label": BOARD_POST_TO, "value": str(where) if where else None, "options": opts}
+    return b

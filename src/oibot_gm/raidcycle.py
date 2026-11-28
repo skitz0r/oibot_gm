@@ -241,6 +241,13 @@ class RaidEvent(BaseModel):
     split_strategy: Optional[str] = None  # balanced | first | rotation chosen for this run (default: the raid's split_policy)
     cards: dict[str, int] = Field(default_factory=dict)  # officer cards in the roster channel: "health" | "lock:<i>" -> message id
     cards_channel_id: Optional[int] = None
+    # the event's board post (design 2026-11-27-post-board, board_post.BoardPostMixin): this raid's message ids in the
+    # board posts channel, in order (a raid too long for one message continues in a second). On the FIRST raid only:
+    # `board_channel_id` = the channel the event's post is in (None = never posted, or removed) and `board_done` = the
+    # last edit after the whole event ended or was cancelled was made (no more edits). Older files have none
+    board_posts: list[int] = Field(default_factory=list)
+    board_channel_id: Optional[int] = None
+    board_done: bool = False
     # the event's updates thread under its officer card (RaidMixin.updates_thread): kept on the FIRST raid, which every
     # raid of the event posts into (updates_thread_of); a later raid's own id is from before that and is still read
     updates_thread_id: Optional[int] = None
@@ -406,7 +413,7 @@ def auto_lock_fill(reg: Registry, ev: "RaidEvent") -> bool:
 
 def event_channel(reg: Registry, ev: "RaidEvent | None", field: str) -> int | None:
     """An event's OWN channel for one place (registry.SCHEDULE_CHANNELS: sheet_channel · officers_channel ·
-    loot_log_channel), stamped on its run dict at open from its schedule (or the one-off's form) and changed by Edit
+    loot_log_channel · board_channel), stamped on its run dict at open from its schedule (or the one-off's form) and changed by Edit
     event (set_channels writes every raid's dict alike), else None. Never the guild's: channel_of adds that."""
     if ev is None:
         return None
@@ -416,12 +423,15 @@ def event_channel(reg: Registry, ev: "RaidEvent | None", field: str) -> int | No
 
 def channel_of(reg: Registry, ev: "RaidEvent | None", field: str) -> int | None:
     """THE channel id one place of `ev` posts in, as stored: the event's own (event_channel), else the guild's setting
-    (GUILD_CHANNEL_OF). None = neither is set. The Discord side checks the channel still exists (RaidMixin.sheet_channel,
+    (GUILD_CHANNEL_OF); Board posts with neither falls back to the event's sheet channel (design 2026-11-27-post-board).
+    None = neither is set. The Discord side checks the channel still exists (RaidMixin.sheet_channel,
     officer_channel, LootLogMixin.loot_log_target) and falls back to the guild's with one ops line when it is gone."""
     own = event_channel(reg, ev, field)
     if own:
         return own
     g = getattr(reg.config, GUILD_CHANNEL_OF[field], None)
+    if not g and field == "board_channel":  # no guild board posts channel: the event's signup sheet channel
+        return channel_of(reg, ev, "sheet_channel")
     return int(g) if g else None
 
 
@@ -1969,6 +1979,21 @@ def finish_moves(reg: Registry, rs: "RaidStore", ev: "RaidEvent", done: list[str
         else:
             t.pop("channels_pending", None)
     reg.save_config(f"event {first_part(rs, ev).key}: channel move finished" + (f", {', '.join(back)} put back" if back else ""), notify=False)
+
+
+def set_own_channel(reg: Registry, rs: "RaidStore", ev: "RaidEvent", field: str, value: str | None) -> None:
+    """Write one of the event's own channels on every raid's dict alike, with nothing to move (Post board's first post
+    to a channel picked in its box: the post goes up there, so the event remembers it — board_post.BoardPostMixin).
+    A move of something already posted goes through reschedule (channels_pending) instead. One config save."""
+    for p in event_parts(rs, first_part(rs, ev)):
+        t = reg.config.team(p.team)
+        if t is None:
+            continue
+        if value:
+            t[field] = str(value)
+        else:
+            t.pop(field, None)
+    reg.save_config(f"event {first_part(rs, ev).key}: its own {field}", notify=False)
 
 
 def channel_refusal(reg: Registry, rs: "RaidStore", ev: "RaidEvent", changes: dict) -> str | None:

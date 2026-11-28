@@ -315,17 +315,21 @@ understands; it answers in the words below.
   working after a bot restart).
 - **Loot channel (the public loot log)** — one line per recorded award (item → character · boss), with an **Add to my
   wishlist** button; never a reason or a score (§9). Not set: the lines go to each event's updates thread.
-- **A schedule's or an event's own channels.** A schedule, and each event, can name its own channel for three places:
+- **Board posts channel** — where **Post board** on an event's page posts each raid's groups and keeps them current
+  (§4 *The Events page*). Not set: each event's signup sheet channel. It may be any text channel, the signup channel
+  too. Changing it moves no post already up; Edit event moves one.
+- **A schedule's or an event's own channels.** A schedule, and each event, can name its own channel for four places:
   **Signup sheet** (the sheet and its thread with the lock and cancel lines), **Officers' cards** (the health card, the
-  lock cards, the event's updates thread and a loot council's thread) and **Loot log** (one public line per confirmed
-  award, while a loot council is held). Empty means the guild's channel above; an event opened from a schedule takes the
+  lock cards, the event's updates thread and a loot council's thread), **Loot log** (one public line per confirmed
+  award, while a loot council is held) and **Board posts** (where **Post board** posts; with no channel of its own and none
+  on the guild, the event's signup sheet channel — *The signup sheet's channel* in the select). Empty means the guild's channel above; an event opened from a schedule takes the
   schedule's channels when it opens (every raid of it alike), so a later change to the schedule never moves an event
   already open. They are set in a folded **Channels** section under the timing on New schedule, Edit schedule, New event
   (a one-off) and Edit event, each select's empty choice naming where it falls back to (*#raid-signups (the guild's)*, or
   *(the schedule's)* on an event from a schedule that names one); in Discord a **Channels** step in `/gm schedule` and
   `/raid edit` and the one-off of `/raid open` with Discord's own channel picker (a channel the bot can't post in is
-  named at once, as on the Config page); in plain text and MCP as `sheet_channel`, `officers_channel` and
-  `loot_log_channel` on the schedule and event settings and on a one-off's open (*"open Barrow Deeps Friday 8 PM with
+  named at once, as on the Config page); in plain text and MCP as `sheet_channel`, `officers_channel`,
+  `loot_log_channel` and `board_channel` on the schedule and event settings and on a one-off's open (*"open Barrow Deeps Friday 8 PM with
   its sheet in #alt-signups"*). A schedule's own sheet channel lets it open even when the guild
   has no signup channel. The officers' cards can never share the sheet's channel (*"The officers' cards can't go in the
   channel where the signup sheet is posted. Pick another channel."*), and a channel is checked as the Config page checks
@@ -334,7 +338,8 @@ understands; it answers in the words below.
   is posted in the new channel with every answer and the old one is deleted (on a locked event the *is locked* line is
   written again in the new sheet's thread); the officers' cards of every raid move and a new updates thread starts there,
   the old thread getting one last line (*"Updates for this event continue in #alt-officers."*) before it is archived;
-  later loot log lines go to the new channel and lines already posted stay. A loot council already open keeps its thread
+  later loot log lines go to the new channel and lines already posted stay; a board post up is posted in the new
+  channel and its old messages deleted. A loot council already open keeps its thread
   where it is; the next council opens in the new channel. The new posts go up first: when the bot can't post in the new
   channel nothing old is touched, the event's channel for that place goes back to what it was, the reply says it did not
   move and why, and the ops feed says so once. A move a restart cut off finishes by itself when the bot is back (or
@@ -1284,6 +1289,24 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    *another split like this*) and **Place the rest** — **Auto-fill groups** is the lock's own placement, and **Clear the
    board** is in the event's More menu; plain text, MCP (`propose_split`, `set_layout`, `autofill`) and a test event's card
    on the Test bench keep the older tools.
+   **Post board** (under the board, open or locked events) posts the event's board to a Discord channel: a box with
+   only its title, one select **Post to** — it opens on the event's *Board posts* channel (§2; with none set, the
+   signup sheet's channel) and lists the server's text channels — and **Back** · **Post**. Picking another channel
+   there posts to it and makes it the event's own *Board posts* channel. Every raid gets one message, in lineup order:
+   the raid and its start, each roster's groups (one member per line, the spec icon of what they play in that raid,
+   a per-raid switch included). Only the board: nobody unplaced, no Bench, no confirmation marks, no buttons, no
+   mentions; a raid with nobody placed says *Nobody is placed in a group yet.* (*Nobody is on the roster.* once
+   locked). From then on the bot keeps those same messages current, a few seconds after each change — a move,
+   Auto-fill groups, Clear, a per-raid switch, a lock, an unlock, an officer's edit after the lock, a new start — and
+   after the lock they show the locked roster. A raid added to the lineup gets its message; a removed raid's is
+   deleted. A message someone deleted by hand is posted again at the next change. While a post is up the button reads
+   **Update board post** (it redraws the post now, or moves it when you pick another channel: posted in the new
+   channel first, the old messages deleted after, the old kept when the bot can't post there); changing *Board posts*
+   in Edit event moves it the same way. When the event ends or is cancelled the post is edited once more (*Finished*
+   over the roster, or *Cancelled*) and stays, no longer updated. **More › Remove board post** deletes the messages
+   and stops the updates. Nobody gets a DM or a notice; the first post, a move and a removal write one line in the
+   event's log and the ops feed, the updates none. Not on an ended or cancelled event (*This event is over, so its
+   board can't be posted.*).
    **Edit lineup** (until the roster locks) opens the lineup builder on the event, `/events/<event>/lineup`: its first
    raid is fixed, every later raid has **Move earlier** / **Move later** / **Remove**, the palette adds a raid, and each
    step's **Starts** and **Rosters** change as on New event — a raid that stays keeps its start unless the change moves

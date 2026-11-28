@@ -441,6 +441,9 @@ class GuildConfig(BaseModel):
     absences_message_id: Optional[int] = None
     news_channel_id: Optional[int] = None  # officer/read-only: a webhook posts game news here; the bot keeps the relevant items (news.py)
     loot_channel_id: Optional[int] = None  # public loot log: one line per confirmed award (no channel: the run's updates thread)
+    # the board posts (design 2026-11-27-post-board): where an officer's Post board on the event page posts each raid's
+    # board and keeps it current; unset = each event's signup sheet channel
+    board_channel_id: Optional[int] = None
     loot_log: bool = True  # the public loot log is on (off: awards are recorded and shown on the site only)
     news_keywords: list[str] = Field(default_factory=list)  # extra words that make a news item relevant (over the profile's news.yaml)
     timezone: str = "America/Los_Angeles"  # guild time: every schedule, window and displayed clock uses it
@@ -912,10 +915,13 @@ SCHEDULE_CADENCE = ("signup_lead_hours", "nudge_hours_before", "lock_hours_befor
 # `weights`: a partial seat-order map {rank, main, sat_out, signup_order, regular} merged per key over the raid's (ad hoc: ADHOC_WEIGHTS)
 # a schedule's and an event's own Discord channels (design 2026-11-27-event-channels): where its signup sheet, its officers'
 # cards and its loot log lines post. Unset = the guild's (GUILD_CHANNEL_OF); a schedule's are stamped on each event it
-# opens (raidcycle.ensure_run), an event's are read by the one resolver per place (raidcycle.event_channel and its callers)
-SCHEDULE_CHANNELS = ("sheet_channel", "officers_channel", "loot_log_channel")
-GUILD_CHANNEL_OF = {"sheet_channel": "signup_channel_id", "officers_channel": "roster_channel_id", "loot_log_channel": "loot_channel_id"}
-CHANNEL_KIND_OF = {"sheet_channel": "signup", "officers_channel": "roster", "loot_log_channel": "loot"}  # perms / set_channel's kinds
+# opens (raidcycle.ensure_run), an event's are read by the one resolver per place (raidcycle.event_channel and its callers).
+# The fourth, board_channel (design 2026-11-27-post-board): where Post board posts the event's board; with no guild
+# setting it falls back to the event's signup sheet channel (raidcycle.channel_of); any text channel, the sheet's too
+SCHEDULE_CHANNELS = ("sheet_channel", "officers_channel", "loot_log_channel", "board_channel")
+GUILD_CHANNEL_OF = {"sheet_channel": "signup_channel_id", "officers_channel": "roster_channel_id", "loot_log_channel": "loot_channel_id",
+                    "board_channel": "board_channel_id"}
+CHANNEL_KIND_OF = {"sheet_channel": "signup", "officers_channel": "roster", "loot_log_channel": "loot", "board_channel": "board"}  # perms / set_channel's kinds
 CHANNEL_WHEN = "Pick the channel from the list."
 OFFICERS_ON_SHEET = "The officers' cards can't go in the channel where the signup sheet is posted. Pick another channel."
 SCHEDULE_FIELDS = ("name", "kind", "active", "slots", "days", "time", "rosters", "weights", "follow", "lineup") + SCHEDULE_CADENCE + SCHEDULE_CHANNELS

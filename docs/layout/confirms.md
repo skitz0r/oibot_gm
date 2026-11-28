@@ -5,6 +5,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
 
 ```
   consequences.py      consequence(verb, reg, ev) for lock / cancel / clear / release, the board's move / roster / swap / substitute ({name} / {other} /
+                       Post board (2026-11-27): board_post_box(reg, rs, ev, options, where) = the ONE box with no sentences (the owner's exception
+                       to the Confirm rule, registered narrowly in tests/test_confirm_readability.py): title Post board | Update board post, `channel`
+                       {label "Post to", value, options}, verb Post; refusal BOARD_OVER. channel_move_sentence names a board post's move too.
                        Channels (2026-11-27): channel_words (THE '#alt-signups' / "the guild's #raid-signups"), channel_move_sentence, channel_change_consequence (what moves · Nobody gets a DM. · You can change it back until the event ends.); reschedule_consequence answers a channels-only edit with it; mixed with timing it folds the move into the first sentence when that stays ≤ 20 words, else the box's diff line carries it — the timing box's three sentences (locks within a minute, seating, undo) always stand; event_edit_lines prints 'Signup sheet: #a → #b' (EDIT_LINE_ORDER ends with the three).
                        {to} tokens the board fills — shared.fillNames), remind and end (Reopen's window from rc.REOPEN_GRACE_HOURS; LootMixin.end_consequence
                        puts the council's part in front), regular_remove(reg, m, key): the ONE confirm sentence from code (design §5.33, §5.56 phase 3);

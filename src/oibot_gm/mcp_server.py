@@ -474,15 +474,16 @@ def open_run(raid: str, when: str | None = None, schedule: str | None = None, fo
     signup, starting when the first ends. `lineup` ([{raid, rosters, starts?}], up to three): the raids after the first
     one instead of `follow` — each starts when the one before it ends unless `starts` (minutes after the first raid's
     start) says otherwise. `channels` (a one-off only; a schedule's night takes its schedule's): {sheet_channel,
-    officers_channel, loot_log_channel} → a channel id each — where this event's signup sheet, officers' cards and loot
-    log lines post instead of the guild's channels (the officers' cards never in the sheet's channel). Posts the sheet
+    officers_channel, loot_log_channel, board_channel} → a channel id each — where this event's signup sheet, officers'
+    cards, loot log lines and board post (Post board on the site) go instead of the guild's channels (the officers' cards
+    never in the sheet's channel). Posts the sheet
     in its signup channel (and DMs members if the schedule says so)."""
     rid = get_raid(raid, guild)["id"]
     payload: dict[str, Any] = {"when": when or "", "schedule": schedule or "", "follow": follow or ""}
     if lineup:
         payload["lineup"] = lineup
     if channels:
-        payload["channels"] = {k: str(v) for k, v in channels.items() if k in ("sheet_channel", "officers_channel", "loot_log_channel")}
+        payload["channels"] = {k: str(v) for k, v in channels.items() if k in ("sheet_channel", "officers_channel", "loot_log_channel", "board_channel")}
     return msg(api(guild).post(f"/api/raid/{rid}/open", payload))
 
 
@@ -499,9 +500,9 @@ def reschedule_run(run: str, when: str | None = None, timing: dict | None = None
     sat_out, signup_order: 0-6}, the ones to change) | split_policy (balanced | first | rotation for the raid `run`
     names, or {run key: strategy}) — before the lock only — and fill_ask_hours (hours) | autofill (on/off), which still
     change after the lock; its schedule keeps its own. The event's own channels sheet_channel | officers_channel |
-    loot_log_channel (a channel id; empty = its schedule's, else the guild's) change until the event ends, after the lock
-    and the start too: the sheet moves with every answer, the officers' cards of every raid move with a new updates
-    thread, later loot log lines go there; nobody is DMed. ALWAYS preview first (preview=true: `sentences` = the confirm,
+    loot_log_channel | board_channel (a channel id; empty = its schedule's, else the guild's) change until the event ends,
+    after the lock and the start too: the sheet moves with every answer, the officers' cards of every raid move with a new
+    updates thread, later loot log lines go there, a board post moves; nobody is DMed. ALWAYS preview first (preview=true: `sentences` = the confirm,
     read them to the person, and `rev`), then call again without preview and with that `rev`: a run someone changed
     meanwhile is refused instead of overwritten. Answers stand; nobody is DMed; a new start or lock time gives everyone
     who answered a notice on their Me page; the sheet and open cards are edited in place."""
@@ -776,8 +777,8 @@ def schedule_set(schedule: str, field: str | None = None, value: Any = None, fie
     | signup_lead_hours | nudge_hours_before | lock_hours_before | confirm_hours_before | fill_ask_hours | nudge |
     autofill | open_dm | confirm | auto_lock (Auto Lock: the bot locks each event at its lock time) | auto_lock_fill
     (Auto-fill on Auto Lock: that lock fills the open seats) (bools) — the schedule's own sheet timing | sheet_channel |
-    officers_channel | loot_log_channel (a channel id, null = the guild's: where the events it opens post their signup
-    sheet, officers' cards and loot log lines — events already open keep theirs) | split_policy | weights (the schedule's own
+    officers_channel | loot_log_channel | board_channel (a channel id, null = the guild's: where the events it opens post
+    their signup sheet, officers' cards, loot log lines and board post — events already open keep theirs) | split_policy | weights (the schedule's own
     seat weights {rank, main, sat_out, signup_order, regular}; a key set to null follows the raid) | follow ('<raid id>
     x<N>' or null: a second raid the same night from the same signup, starting when the first ends). A sheet-timing field
     set to null goes back to the game's suggestion; split_policy null goes back to the raid's. Runs already open keep
@@ -960,7 +961,8 @@ def set_regular(raid: str, member: str, on: bool = True, schedule: str | None = 
 @mcp.tool()
 def set_channel(kind: str, channel: str | None = None, clear: bool = False, preview: bool = False, guild: Guild = None) -> str | dict:
     """Point a bot channel at a server channel (owner): kind = ops | applications | signup | roster | registration |
-    analytics | absences | news | loot (the public award log); `channel` = a channel name (#general) or an id, OR
+    analytics | absences | news | loot (the public award log) | board (where Post board on the event page posts; unset =
+    each event's signup channel); `channel` = a channel name (#general) or an id, OR
     `clear=True` to stop using a channel for it (one of the two). The bot refuses a channel it can't post in ("I can't
     post in #x: missing …"); cards are posted first, then the old one is removed. `preview=True`: current → new and what
     it does (posted, pinned, forgotten, falls back), nothing saved — say that to the person before applying."""

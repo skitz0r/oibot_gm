@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field, PrivateAttr
 from .llm.provider import Provider
 from .constants import OLD_WORDS_PROMPT, PAGE_WORDS, ROLES, schedule_line_label, switch_words
 from .loot_ops import SCHEMA as LOOT_SCHEMA
-from .registry import PLAIN_GROUPS, PLAIN_WEB, RANKS, PlainPolicy, Registry, RegistryError, join_words, readable_config, schedule_class
+from .registry import PLAIN_GROUPS, PLAIN_WEB, RANKS, SCHEDULE_CHANNELS, PlainPolicy, Registry, RegistryError, join_words, readable_config, schedule_class
 
 log = logging.getLogger(__name__)
 
@@ -75,7 +75,8 @@ Guild (owner only, op=set): timezone (IANA name; field=keep when they say to cha
   already open stay at their real moment —, field=move when they want the open runs moved with the clock too), signup_channel (channel mention), ops_channel, applications_channel,
   roster_channel (officer channel for health cards and roster proposals), registration_channel (public card with the
   Register / Add an alt / My status buttons), analytics_channel (bank + per-raid readiness cards), absences_channel
-  (the "I'll be away" card), news_channel (where the news webhook posts; the bot keeps the relevant items) — a channel
+  (the "I'll be away" card), news_channel (where the news webhook posts; the bot keeps the relevant items), board_channel
+  (where Post board on the event page posts each raid's groups; unset = each event's signup sheet channel) — a channel
   path with value "none" clears it ("stop posting absences anywhere"); news_keywords
   (comma list of extra words that make a news item relevant; empty clears), officer_role add/remove (role_add/role_remove: value = the role mention <@&id>, id or name; stored by id),
   ask_audience (officers|confirmed|registered|everyone: who may ask the bot free-form questions; others get the static guide), about (public blurb),
@@ -143,7 +144,8 @@ Schedules (officer): WHEN a raid runs and its sheet timing. Each schedule has an
   | auto_lock (true|false: "Auto Lock" — the bot locks each event at its lock time; false = an officer locks it)
   | auto_lock_fill (true|false: "Auto-fill on Auto Lock" — that lock fills the open seats; false = it rosters the board as it stands)
   | split_policy | sheet_channel (a #channel: where each event's signup sheet posts) | officers_channel (a #channel only officers
-  see: the health and lock cards, the updates thread) | loot_log_channel (a #channel: the public loot log lines) — a channel
+  see: the health and lock cards, the updates thread) | loot_log_channel (a #channel: the public loot log lines) |
+  board_channel (a #channel: where Post board on the event page posts each raid's groups) — a channel
   given value "none" goes back to the guild's; an event opened later takes the schedule's channels
   — a timing setting given value "inherit" goes back to the game's suggestion; split_policy "inherit" goes back to the raid's.
   Several schedule_set ops on one schedule in a row are saved together (so "open 48h before and lock 36h before" can't fail half way).
@@ -160,8 +162,8 @@ Runs (officer; target = the event key like bd-k7m2qx from the live-events list, 
     its next run, or with a time its settings (a pickup template needs the time)>, text=<optional later raids "<raid id> x<N>, <raid id>"
     — up to three more raids the same night from the same signup, each starting when the one before it ends ("10 man barrow deeps
     splits afterwards" = "barrow_deeps x2")>
-    , path=<optional, a one-off only: its own channels "sheet_channel <#id>, officers_channel <#id>, loot_log_channel <#id>"
-    — where its sheet, its officers' cards and its loot log lines post instead of the guild's>
+    , path=<optional, a one-off only: its own channels "sheet_channel <#id>, officers_channel <#id>, loot_log_channel <#id>,
+    board_channel <#id>" — where its sheet, its officers' cards, its loot log lines and its board post go instead of the guild's>
     — opens the sheet now and posts it in the signup channel.
   run_reschedule: target, field=start with value=<"YYYY-MM-DD HH:MM" in guild time: the run's new start> — moves the whole run
     (every raid of it keeps its offset), answers stand, everyone who answered sees a notice, nobody is DMed; or field=<one of this
@@ -172,8 +174,8 @@ Runs (officer; target = the event key like bd-k7m2qx from the live-events list, 
     priority) | weight_regular|weight_rank|weight_main|weight_sat_out|weight_signup_order (value 0-6) | split_policy
     (balanced|first|rotation: the target raid's split); and before or after the lock: fill_ask_hours (hours a fill ask waits) |
     autofill (on|off: the bot asks people for open seats); and until the event ends, after the lock and the start too:
-    sheet_channel | officers_channel | loot_log_channel (value = a #channel, or none = its schedule's, else the guild's) — the
-    sheet and the officers' cards move there, nobody is DMed>, value. Its schedule keeps its own. Several run_reschedule ops on one
+    sheet_channel | officers_channel | loot_log_channel | board_channel (value = a #channel, or none = its schedule's, else
+    the guild's) — the sheet, the officers' cards and a board post move there, nobody is DMed>, value. Its schedule keeps its own. Several run_reschedule ops on one
     run in a row are saved together ("move it to 9 PM and lock 12 h before").
   run_lineup: target, value=<the raids after the first one, in order: "<raid id> x<N>, <raid id>" ("barrow_deeps x2, onyxias_lair");
     "none" = the first raid alone> — before lock only: adds, removes or reorders the raids that follow the first one the same
@@ -279,7 +281,7 @@ class ConfigOp(BaseModel):
     op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, confirm_for, run_remind, run_pause, run_withdraw, run_reopen, run_unlock, run_start, run_reschedule, run_lineup, character, absence_clear, dm, regular, test, recruit, application, proposal, job, policy, plain, loot, wishlist, tier, loot_weights")
     member: Optional[str] = Field(default=None, description="member display name, mention <@id>, or one of their character names; empty = the requester; application: the applicant")
     character: Optional[str] = Field(default=None, description="a character name: the one to act on (character, rank, confirm, set_main) or the one they'd play (run_answer); empty on character add = a planned character")
-    path: Optional[str] = Field(default=None, description="run_open: the one-off's own channels 'sheet_channel <#id>, officers_channel <#id>, loot_log_channel <#id>'; op=set: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|loot_channel|loot_log|public|news_keywords|ask_audience|about|error_dms")
+    path: Optional[str] = Field(default=None, description="run_open: the one-off's own channels 'sheet_channel <#id>, officers_channel <#id>, loot_log_channel <#id>, board_channel <#id>'; op=set: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|loot_channel|board_channel|loot_log|public|news_keywords|ask_audience|about|error_dms")
     target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, run_open, regular, comp_target*, comp_groups), schedule id alone (schedule_set, schedule_remove), event key (run_*, pin, comp_groups, loot), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default | listen <#channel> | remember <#channel> (plain), item name or id (tier)")
     field: Optional[str] = Field(default=None, description="set timezone: keep|move (the events already open); raid_set/aura_set/family_set/schedule_set: the setting name from the schema (schedule_set: raid = a new schedule's first raid); run_open / regular: a schedule id; run_reschedule: start or a timing setting; run_answer: the spec they play (optional); comp_target*: the slot (role, Class or Class:Spec); character: REQUIRED on every character op, one of add|spec|offspec|name|rank|main|retire|delete|flex (naming the character alone is not a change); recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use; loot: open|tick|distribute|award|confirm|discard|reason|correct|end|retire; wishlist: add|remove; tier: the spec key Class:Spec | Class:* | role:<role>; loot_weights: the weight's path (tier_weight.S, attendance.weight, wishlist.rank_bonus.1 …)")
     value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: the minimum as a whole number; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; run_reschedule start: 'YYYY-MM-DD HH:MM'; run_lineup: 'barrow_deeps x2, onyxias_lair'|'none'; run_move: g<N>|<roster>.<group>|bench|a member to swap with; run_propose: a strategy or empty; dm: on|off; test: `seed N`|`run <raid> [quick|standard|slow] [dm]`|`answer join N bench N out N`|`clear`; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply; plain: who list or act|self|answer|ignore|clear, listen: watch|reply|off, remember: shared|channel|off; set <channel>: a mention or none; loot_weights: a number or default)")
@@ -530,7 +532,8 @@ OWNER_OPS = {"set", "recruit", "role_add", "role_remove", "aura_set", "family_se
 # widen their own rights, and the local jobs run Claude on the host
 HARD_OWNER_OPS = {"plain": "Only the owner can change the plain-text permissions.", "job": "Only the owner can start the bot's local jobs."}
 INVITE_NOT_CREATED = "Invite not created:"  # R-06: the one refusal prefix of a Create invite at Save (the web says "Saved. Invite not created: …")
-CHANNEL_PATHS = ("signup_channel", "ops_channel", "applications_channel", "roster_channel", "registration_channel", "analytics_channel", "absences_channel", "news_channel", "loot_channel")
+CHANNEL_PATHS = ("signup_channel", "ops_channel", "applications_channel", "roster_channel", "registration_channel", "analytics_channel", "absences_channel", "news_channel", "loot_channel",
+                 "board_channel")
 
 
 RAID_SWITCH_NEEDS_SPEC = "A switch for one raid needs the spec they play there."
@@ -918,7 +921,7 @@ def _open_time(reg: Registry, rid: str, value: str | None, schedule: str | None 
     return start, sid
 
 
-_OPEN_CHANNEL_RE = re.compile(r"(sheet_channel|officers_channel|loot_log_channel)\s*[=:]?\s*(<#\d+>|\d+)")
+_OPEN_CHANNEL_RE = re.compile(r"(sheet_channel|officers_channel|loot_log_channel|board_channel)\s*[=:]?\s*(<#\d+>|\d+)")
 
 
 def _open_channels(text: str | None) -> dict[str, str]:
@@ -1172,7 +1175,7 @@ def _schedule_words(reg: Registry, rid: str, fields: dict, sid: str | None = Non
         elif f == "follow":  # the text 'barrow_deeps x2' or the site's {raid, rosters}
             fw = schedule_value(f, v)
             out.append(f"then {reg.follow_words(fw)}" if fw else "no later raid")
-        elif f in ("sheet_channel", "officers_channel", "loot_log_channel"):  # a schedule's own channel, or the guild's
+        elif f in SCHEDULE_CHANNELS:  # a schedule's own channel, or the guild's
             from .consequences import channel_words
             from .registry import channel_value
 
@@ -2940,7 +2943,7 @@ def _describe_schedule(reg: Registry, op: ConfigOp) -> str:
         return f"{name}: new schedule {sid} — {new}{after}"
     own = reg.schedule_def(rid, sid)["schedule"]["own"]
     now = {f: (own.get(f) if f in own else "inherit") if f not in ("kind", "slots", "days", "time", "rosters", "active", "name", "follow",
-                                                                   "sheet_channel", "officers_channel", "loot_log_channel") else cur.get(f) for f in fields}
+                                                                   *SCHEDULE_CHANNELS) else cur.get(f) for f in fields}
     if "lineup" in fields:  # an edit's whole lineup: the one it has now (its raid, its follow-on, the raids after it)
         from .registry import row_lineup
 
@@ -4323,7 +4326,8 @@ RAID_FORM_FIELDS = ("lockout_days", "duration_hours", "notes", "split_policy")
 AURA_VALUE_WORDS = {"all": "Everyone", "physical": "Physical damage", "spell": "Spell damage", "mana": "Mana users", "melee": "Melee",
                     "ranged": "Ranged", "healer": "Healers", "tank": "Tanks"}
 SETTING_WORDS = {"timezone": "Timezone", "ask_audience": "Who may ask questions", "about": "About", "news_keywords": "News keywords",
-                 "loot_log": "Public loot log", "public": "Listed on the homepage", "error_dms": "Error alerts", **{p: p.removesuffix("_channel").capitalize() + " channel" for p in CHANNEL_PATHS}}
+                 "loot_log": "Public loot log", "public": "Listed on the homepage", "error_dms": "Error alerts", **{p: p.removesuffix("_channel").capitalize() + " channel" for p in CHANNEL_PATHS},
+                 "board_channel": "Board posts channel"}
 BUFF_FIELD_WORDS = {"scope": "Scope", "family": "Stacking family", "strength": "Strength", "status": "Status", "note": "Note"}
 FAMILY_FIELD_WORDS = {"name": "Name", "status": "Status", "note": "Note", "value": "Who benefits"}
 
@@ -5656,7 +5660,7 @@ async def apply_ops(reg: Registry, ops: list[ConfigOp], *, by: str, by_id: int |
         if op.op == "recruit" and not isinstance(op, MergedOp) and (op.field or "").strip().lower() == "invite_create":
             return False
         if op.op == "schedule_set" and bot is not None and getattr(bot, "channel_setting_refusal", None) is not None \
-                and any(f in _schedule_write_fields(op)[1] for f in ("sheet_channel", "officers_channel", "loot_log_channel")):
+                and any(f in _schedule_write_fields(op)[1] for f in SCHEDULE_CHANNELS):
             return False  # a schedule's own channel: the bot checks it can post there first (_apply_async), as the guild's setting
         return True
 

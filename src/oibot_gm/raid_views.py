@@ -212,14 +212,7 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
         e.description = (f"<t:{unix}:F> · <t:{unix}:R>\n" + (f"**{len(ev.seated())}** rostered" + (f" in {len(rosters)} rosters" if len(rosters) > 1 else "") + (f"\u2003{tally}" if confirms else "") if rosters else "-# Building the roster…")
                          + (f"\n✓ confirm by <t:{int(confirm.timestamp())}:f>" if confirms else ""))
     icons = sum(len(ico("spec", f"{p.cls}:{p.spec}")) + len(p.character or p.signup_name) + 4 for p in ev.seated()) < EMBED_TOTAL_MAX - 600
-    for i, r in enumerate(rosters):
-        if len(rosters) > 1:
-            e.add_field(name=f"Roster {i + 1}", value=_role_counts(ico, r.selected) or "\u200b", inline=False)
-        by = {p.signup_name: p for p in r.selected}
-        for gi, g in enumerate(r.groups):
-            ps = [by[n] for n in g if n in by]
-            if ps:
-                e.add_field(name=f"Group {gi + 1}", value=_column([member(p.character or p.signup_name, p.cls, p.spec, marks.get(p.signup_name), icons) for p in ps]), inline=True)
+    roster_fields(e, ico, rosters, lambda p: member(p.character or p.signup_name, p.cls, p.spec, marks.get(p.signup_name), icons))
     if rosters:
         joined = {sg.display_name for sg in ins}
         left_off = [p.signup_name for p in rosters[0].benched if p.signup_name in joined]  # joiners the solver left off
@@ -233,6 +226,82 @@ def sheet_message(reg: Registry, ev: rc.RaidEvent, team: dict, ico) -> tuple[dis
     v = discord.ui.View(timeout=None)
     v.add_item(SignupButton(reg.key, ev.key, "cant"))
     return e, v
+
+
+def roster_fields(e, ico, rosters: list, line) -> None:
+    """THE roster columns of an embed, shared by the locked sheet and the board post (board_post_embeds): with several
+    rosters a 'Roster N' head carrying its role counts (icon + number), then a column per group that holds anyone, one
+    member per line — `line(player)` writes the line (spec icon + character, the sheet adds its confirmation mark)."""
+    for i, r in enumerate(rosters):
+        if len(rosters) > 1:
+            e.add_field(name=f"Roster {i + 1}", value=_role_counts(ico, r.selected) or "\u200b", inline=False)
+        by = {p.signup_name: p for p in r.selected}
+        for gi, g in enumerate(r.groups):
+            ps = [by[n] for n in g if n in by]
+            if ps:
+                e.add_field(name=f"Group {gi + 1}", value=_column([line(p) for p in ps]), inline=True)
+
+
+# a board post's raid with nobody in a group (before the lock: the board; after it: an empty roster)
+BOARD_NOBODY = "Nobody is placed in a group yet."
+BOARD_NOBODY_LOCKED = "Nobody is on the roster."
+EMBED_FIELDS_MAX = 25  # Discord: fields per embed
+
+
+class _Fields:
+    """roster_fields' target for the board post: the fields kept in order, packed into embeds afterwards."""
+
+    def __init__(self):
+        self.rows: list[tuple[str, str, bool]] = []
+
+    def add_field(self, *, name: str, value: str, inline: bool) -> None:
+        self.rows.append((name, value, inline))
+
+
+def board_post_embeds(reg: Registry, ev: rc.RaidEvent, ico) -> list[discord.Embed]:
+    """One raid's board post (design 2026-11-27-post-board): the raid's name as the title, its start as a native
+    timestamp, then its rosters and groups as the locked sheet draws them (roster_fields), one member per line with the
+    spec icon of what they play in THIS raid — before the lock the officers' board (rc.board_rosters reads plays_in:
+    the per-raid switch), after it the locked roster. Only the board: no Not placed, no Bench, no marks, no buttons, no
+    mention. Nobody placed: one line. A raid that can't fit one embed continues in a second (a second message). Ended:
+    'Finished · …' over the roster; cancelled: 'Cancelled · …' alone."""
+    state = sheet_state(ev)
+    unix = int(ev.start.timestamp())
+    name = raid_name(reg, ev)
+    test = rc.is_test_run(reg, ev)
+    tag = "🧪 " if test else ""
+    colour = 0x8C97A8 if test else 0x98A3B5 if state in ("done", "cancelled") else TEAL
+    title = {"open": f"{tag}{name}", "locked": f"{tag}🔒 {name}", "done": f"{tag}{rc.RUN_STATE_WORDS['done'].capitalize()} · {name}",
+             "cancelled": f"{tag}{rc.RUN_STATE_WORDS['cancelled'].capitalize()} · {name}"}[state]
+    desc = f"<t:{unix}:F>"
+    if state == "cancelled":
+        return [discord.Embed(title=title, description=desc, colour=colour)]
+    rosters = (rc.board_rosters(reg, ev, rc.board_layout(reg, ev), rc.run_size(reg, ev)) if state == "open" else list(ev.all_rosters))
+    placed = [p for r in rosters for p in r.selected]
+    rows = _Fields()
+    if not placed:
+        rows.add_field(name="\u200b", value=f"-# {BOARD_NOBODY if state == 'open' else BOARD_NOBODY_LOCKED}", inline=False)
+    else:
+        if len(rosters) == 1:  # one roster: its role counts under the time (several: each roster's head carries its own)
+            desc += "\n" + _role_counts(ico, placed)
+        icons = sum(len(ico("spec", f"{p.cls}:{p.spec}")) + len(p.character or p.signup_name) + 4 for p in placed) < EMBED_TOTAL_MAX - 600
+        roster_fields(rows, ico, rosters, lambda p: ((ico("spec", f"{p.cls}:{p.spec}") + " ") if icons else "") + (p.character or p.signup_name))
+    out: list[discord.Embed] = []
+    e = discord.Embed(title=title, description=desc, colour=colour)
+    thumb = raid_thumb_url(reg, ev.instance)
+    if thumb:
+        e.set_thumbnail(url=thumb)
+    e.url = event_url(reg, ev)
+    used = len(title) + len(desc)
+    for fname, value, inline in rows.rows:
+        if len(e.fields) >= EMBED_FIELDS_MAX or used + len(fname) + len(value) > EMBED_TOTAL_MAX:  # continues in a second message
+            out.append(e)
+            e = discord.Embed(colour=colour)
+            used = 0
+        e.add_field(name=fname, value=value, inline=inline)
+        used += len(fname) + len(value)
+    out.append(e)
+    return out
 
 
 def raid_thumb_sig(key: str, rid: str) -> str | None:
