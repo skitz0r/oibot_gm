@@ -123,6 +123,9 @@ class Callout(BaseModel):
     hours_before: float
     note: Optional[str] = None
     late: bool  # after hard cutoff
+    # where the member said it (the Bot activity tab lists only "dm": the sheet's buttons on a DM card), recorded from
+    # 2026-11-28 on: dm | sheet | me_page | raid_out | officer | plain_text | mcp | web; None = an older callout
+    source: Optional[str] = None
 
 
 class FillAsk(BaseModel):
@@ -155,6 +158,12 @@ class FillAsk(BaseModel):
     # on to see the Me page in time): the discord_id of that primary ask. Both stay open, the first yes takes the seat and
     # the other closes (`released`); while the primary is in play this twin counts for nothing (parallel_shadowed)
     parallel_of: Optional[int] = None
+    # the Bot activity tab (design 2026-11-28-event-activity-tab): the DM could not be delivered (the ask waits on the
+    # site), and why a `released` ask closed (release_ask: lock | partner_no | partner_expired | partner_withdrawn |
+    # partner_out | partner | callout | no_thanks | away | out | taken | changed, "held_" before it when a yes held for the
+    # tied half was let go). None on an ask closed before these were kept
+    dm_failed: bool = False
+    closed_why: Optional[str] = None
 
     @field_validator("kind", mode="before")
     @classmethod
@@ -288,11 +297,11 @@ class RaidEvent(BaseModel):
     reminded_at: Optional[str] = None  # the last "Remind the unconfirmed" (once per hour per run)
     reminded_by: Optional[str] = None
     # the bot's DMs about this event that no other record holds (design 2026-11-28-event-activity-tab §4), for the Bot
-    # activity tab (event_activity.py): the sheet's opening DMs ("open"), the signup reminders ("reminder"), an officer's
-    # Remind ("remind") — and every ask or Confirm DM that could not be delivered ("ask" / "confirm", `at` = that ask's
-    # asked_at). One entry per send, {kind, at, sent [ids], failed [ids], by}; record_dms is the one writer, the newest
-    # DMS_KEPT stay. `dms_whole`: recorded since the event opened (open_event sets it; an older file reads False and the tab
-    # says its earlier DMs were not recorded)
+    # activity tab (event_activity.py): the sheet's opening DMs ("open"), the signup reminders ("reminder") and an
+    # officer's Remind ("remind"); an ask or Confirm DM that could not be delivered is marked on the ask itself
+    # (FillAsk.dm_failed, the placement ask's "dm_failed"). One entry per send, {kind, at, sent [ids], failed [ids], by};
+    # record_dms is the one writer, the newest DMS_KEPT stay. `dms_whole`: recorded since the event opened and nothing
+    # dropped since (open_event sets it; an older file reads False and the tab says its earlier DMs were not recorded)
     dms: list[dict] = Field(default_factory=list)
     dms_whole: bool = False
     closed_at: Optional[str] = None  # when it became done / cancelled (cleanup_ephemeral's grace, reopen's window)
@@ -2736,21 +2745,24 @@ def stamp_log(ev: RaidEvent) -> None:
 # ---------------------------------------------------------------- building an event
 
 DMS_KEPT = 60  # RaidEvent.dms entries kept per event (the newest)
-DM_KINDS = ("open", "reminder", "remind", "ask", "confirm")
+DM_KINDS = ("open", "reminder", "remind")  # a failed ask / Confirm is marked on the ask itself (FillAsk.dm_failed, the placement ask's "dm_failed")
 
 
 def record_dms(ev: RaidEvent, kind: str, sent=(), failed=(), *, at: str | None = None, by: str | None = None) -> dict | None:
     """THE writer of RaidEvent.dms (the Bot activity tab's record): one send of `kind` — who got the DM (`sent`) and
-    whom it could not reach (`failed`), member ids — stamped `at` (default now; an ask's own asked_at for "ask" /
-    "confirm"), `by` the officer whose press sent it. Nothing reached nobody = nothing recorded (None). The caller saves
-    the event. Never sends anything."""
+    whom it could not reach (`failed`), member ids — stamped `at` (default now), `by` the officer whose press sent it.
+    Nothing reached nobody = nothing recorded (None). An entry dropped past DMS_KEPT turns `dms_whole` off, so the tab
+    says earlier DMs were not recorded. The caller saves the event. Never sends anything."""
     if kind not in DM_KINDS:
         raise ValueError(f"unknown DM kind {kind}")
     sent, failed = [int(u) for u in sent], [int(u) for u in failed]
     if not sent and not failed:
         return None
     entry = {"kind": kind, "at": at or now(), "sent": sent, "failed": failed, "by": by}
-    ev.dms = (list(ev.dms) + [entry])[-DMS_KEPT:]
+    kept = list(ev.dms) + [entry]
+    if len(kept) > DMS_KEPT:
+        ev.dms_whole = False
+    ev.dms = kept[-DMS_KEPT:]
     return entry
 
 
@@ -3498,14 +3510,16 @@ def absence_effects(reg: Registry, rs: RaidStore, m: Member | None, start: str, 
     return out
 
 
-def callout(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, team: dict, note: str | None) -> Callout:
+def callout(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, team: dict, note: str | None, *, source: str | None = None) -> Callout:
+    """A callout on `ev`; `source` = where the member said it (Callout.source: the Bot activity tab lists "dm" only)."""
     if ev.follows:  # a follow-on: leaving after the lead (design §5.62); the lead's answer stands
-        return leave_follow(reg, rs, ev, m, note)
+        return leave_follow(reg, rs, ev, m, note, source=source)
     s = ev.signups.get(str(m.discord_id))
     c = s.character if s else (m.main.name if m.main else "?")
     hours = (ev.start - datetime.now(ev.start.tzinfo)).total_seconds() / 3600
     late = hours < team_setting(team, "cutoff_hard_hours")
-    co = Callout(discord_id=m.discord_id, display_name=m.display_name, character=c, at=now(), hours_before=round(hours, 1), note=note, late=late)
+    co = Callout(discord_id=m.discord_id, display_name=m.display_name, character=c, at=now(), hours_before=round(hours, 1), note=note, late=late,
+                 source=source)
     ev.callouts.append(co)
     if s:
         s.status, s.source, s.note, s.updated_at = "out", "callout", note, now()
@@ -3517,14 +3531,14 @@ def callout(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, team: dict, 
     return co
 
 
-def leave_follow(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, note: str | None = None) -> Callout:
+def leave_follow(reg: Registry, rs: RaidStore, ev: RaidEvent, m: Member, note: str | None = None, *, source: str | None = None) -> Callout:
     """Leaving after the lead: out of the follow-on alone (design §5.62). Records the callout on the
     follow-on, adds them to `leaving`, re-materialises their row as out; the caller frees a held seat
     (RaidMixin.call_out → drop_seated)."""
     s = ev.signups.get(str(m.discord_id))
     hours = (ev.start - datetime.now(ev.start.tzinfo)).total_seconds() / 3600
     co = Callout(discord_id=m.discord_id, display_name=m.display_name, character=s.character if s else (m.main.name if m.main else "?"),
-                 at=now(), hours_before=round(hours, 1), note=note, late=ev.state != "open")
+                 at=now(), hours_before=round(hours, 1), note=note, late=ev.state != "open", source=source)
     ev.callouts.append(co)
     if m.discord_id not in ev.leaving:
         ev.leaving.append(m.discord_id)
@@ -4431,12 +4445,25 @@ def partner_of(ev: RaidEvent, ask: FillAsk) -> Optional[FillAsk]:
     return other if other and other.pending else None
 
 
+# why a released ask closed (FillAsk.closed_why), from the call site that closes it: release_member_asks' `why`
+CLOSE_WHY_OF = {"called out": "callout", "answered Can't make it": "callout", "answered No thanks": "no_thanks", "away that day": "away"}
+PARTNER_WHY = {"no": "partner_no", "expired": "partner_expired", "withdrawn": "partner_withdrawn", "released": "partner_out"}
+
+
+def release_ask(a: FillAsk, why: str) -> None:
+    """THE close of an ask as `released`, with why (FillAsk.closed_why; "held_" first when it was a yes held for its tied
+    half). The caller logs and saves."""
+    held = a.held and a.answer == "yes"
+    a.answer, a.answered_at, a.held = "released", now(), False
+    a.closed_why = ("held_" if held else "") + why
+
+
 def release_partner(reg: Registry, rs: RaidStore, ev: RaidEvent, ask: FillAsk, because: str | None = None) -> Optional[FillAsk]:
     """A no (or silence) on one half of a tied pair withdraws the other half — unanswered, or a yes that was held
     waiting for this one (nothing had changed for it). Returns the released ask."""
     other = partner_of(ev, ask)
     if other:
-        other.answer, other.answered_at, other.held = "released", now(), False
+        release_ask(other, PARTNER_WHY.get(ask.answer or "", "partner"))
         ev.log.append(f"fill: {other.display_name}'s ask withdrawn ({because or ask.display_name + ' said no'})")
         rs.save(ev, f"fill {other.display_name} released")
     return other
@@ -4465,7 +4492,7 @@ def release_member_asks(reg: Registry, rs: RaidStore, ev: RaidEvent, uid: int, w
         return []
     partners = []
     for a in mine:
-        a.answer, a.answered_at, a.held = "released", now(), False
+        release_ask(a, CLOSE_WHY_OF.get(why, "out"))
         ev.log.append(f"{'suggestion' if a.phase == 'prelock' else 'fill'}: {a.display_name}'s ask closed ({why})")
         other = release_partner(reg, rs, ev, a, because=f"{a.display_name}: {why}")
         if other:
@@ -4584,7 +4611,7 @@ def release_prelock_asks(ev: RaidEvent) -> list[FillAsk]:
     tied partner who never answered (nothing had changed for it). The caller saves."""
     gone = [a for a in ev.fill_asks if a.pending and a.phase == "prelock"]
     for a in gone:
-        a.answer, a.answered_at, a.held = "released", now(), False
+        release_ask(a, "lock")
     if gone:
         ev.log.append(f"pre-lock asks closed at lock: {', '.join(a.display_name for a in gone)}")
     return gone
@@ -7585,7 +7612,8 @@ def close_parallel(reg: Registry, rs: "RaidStore", ev: RaidEvent, ask: FillAsk) 
     the caller's to edit (RaidMixin.after_fill_answer); an ask that waited on the site gets a notice. Saves when any closed."""
     gone = [a for a in parallel_linked(ev, ask) if a.pending and not a.held]
     for a in gone:
-        a.answer, a.answered_at, a.answered_by = "released", now(), None
+        release_ask(a, "taken")
+        a.answered_by = None
         ev.log.append(f"fill: {a.display_name}'s ask withdrawn ({ask.display_name} said yes first)")
         if a.channel == "web":
             reg.notify(a.discord_id, "ask_closed", f"Never mind the seat question for {run_words(reg, ev)} — someone else took the seat first.", run=ev.key)

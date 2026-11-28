@@ -4046,7 +4046,8 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
             # a member's own Join / Bench after lock is refused here exactly as authorize and the sheet refuse it
             raise RegistryError(rc.LOCKED_JOIN)
         if want == "out" and (note or own):  # a callout (/raid out's verb): anyone's with a reason, and every "I can't make it" of one's own
-            return await bot.call_out(reg, rs, ev, m, note or None, by, by_id=by_id)
+            return await bot.call_out(reg, rs, ev, m, note or None, by, by_id=by_id,
+                                      source=("mcp" if via == "mcp" else "plain_text") if own else "officer")  # Callout.source
         try:
             spec = (op.field or "").strip() if want != "out" else ""
             if (op.text or "").strip() and want != "out":  # a switch for ONE raid of the event (issue 15): RaidMixin.set_raid_switch

@@ -177,6 +177,8 @@ export interface PageWords {
   /** the empty lists, hints and lines the pages wrote themselves until the final review */
   events_empty: string; schedules_empty: string; raids_empty: string; raid_missing: string; new_event_no_lineup: string;
   new_event_no_time: string; schedule_no_lineup: string; activity_empty: string; repost_sheet: string; nothing_applies: string;
+  /** the event page's tabs and the Bot activity filters' names */
+  tab_event: string; tab_bot_activity: string; filter_kind: string; filter_person: string;
   weight_same: string;
   /** Edit event (the owner's tweaks, B): the seating choice beside first_to_join, and the editor's one-line states */
   by_priority: string; edit_locked: string; edit_over: string; edit_started: string;
@@ -304,13 +306,13 @@ export interface PartView {
   /** the split strategy this raid uses now (rc.run_strategy); null once locked — More › Split strategy… */
   strategy: string | null;
 }
-export interface EventPerson { uid: string; display_name: string; character: string; cls: string; spec: string }
+export interface EventPerson { uid: string; display_name: string; character: string; cls: string; spec: string; icon_title?: string }
 /** One row of the Bot activity tab (event_activity.activity_json): every word is the server's. */
 export interface BotActivityRow {
   id: string; kind: string; kind_label: string; where: string | null; person: EventPerson | null;
   people: EventPerson[]; failed_people: EventPerson[]; summary: string | null; failed_summary: string | null;
   times: { label: string; when: string; rel: string }[]; outcome: string | null; tone: "yes" | "no" | "waiting" | "closed";
-  detail: string | null; delivery: string | null; withdraw: { path: string; uid: string; label: string } | null; uids: string[];
+  detail: string | null; delivery: string | null; withdraw: { path: string; uid: string; asked_at: string; label: string } | null; uids: string[];
 }
 /** GET /api/event/{key}/activity — the event page's Bot activity tab. */
 export interface BotActivity {

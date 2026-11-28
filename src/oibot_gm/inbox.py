@@ -252,7 +252,9 @@ async def do_member_action(bot, reg: Registry, rs, ev, m: Member, key: str, *, c
         line = await bot.set_answer(reg, rs, ev, m, status, character or None, by, by_id=by_id, as_officer=True,
                                     **({"spec": spec, "via": via} if spec and status != "out" else {}))
     elif key == "callout":
-        line = await bot.call_out(reg, rs, ev, m, (note or "").strip()[:300] or None, by, by_id=by_id)
+        own = by_id is not None and int(by_id) == m.discord_id
+        line = await bot.call_out(reg, rs, ev, m, (note or "").strip()[:300] or None, by, by_id=by_id,
+                                  source=("me_page" if via == "web" else via) if own else "officer")  # Callout.source
     elif key in ("confirm_yes", "confirm_no"):
         line = await bot.answer_placement_for(reg, m.discord_id, ev.team, key == "confirm_yes", by, by_id=by_id)
     elif key in ("fill_yes", "fill_no"):

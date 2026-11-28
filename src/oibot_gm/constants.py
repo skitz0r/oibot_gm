@@ -160,6 +160,8 @@ PAGE_WORDS = {
     "activity_empty": "Nothing has happened on this event yet. A line appears here each time someone answers or an officer acts.",
     "repost_sheet": "The live sheet moves to this channel. Its buttons and later updates follow it, and the old message says where it went.",
     "nothing_applies": "Nothing can be done for them on this event.",
+    # the event page's two top tabs and the Bot activity tab's two filters (design 2026-11-28-event-activity-tab)
+    "tab_event": "Event", "tab_bot_activity": "Bot activity", "filter_kind": "Show one kind of DM", "filter_person": "Show one person's DMs",
     "weight_same": "Same as the raid ({n})",
     # a schedule's settings by name: the Schedules page's editor labels AND the Save box's "label: old → new" lines
     # (configops._schedule_part) — one word per setting, so the two never drift

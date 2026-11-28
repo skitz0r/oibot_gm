@@ -797,7 +797,7 @@ async def open_raid_out(interaction: discord.Interaction, reg: Registry, **_seed
             # the shared verb (the site, MCP and plain text call it too): callout, seat freed after lock, the note for
             # the officers only (the run's updates thread and the ops feed, never the public signup channel)
             try:
-                line = await si.client.call_out(reg, rs, cur, m, v.get("note") or None, by=m.display_name, by_id=m.discord_id)
+                line = await si.client.call_out(reg, rs, cur, m, v.get("note") or None, by=m.display_name, by_id=m.discord_id, source="raid_out")
             except ValueError as e:
                 line = f"❌ {e}"
             await wiz.finish(si, line)

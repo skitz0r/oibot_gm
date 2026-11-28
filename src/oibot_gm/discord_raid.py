@@ -638,7 +638,8 @@ class RaidMixin(BoardPostMixin):
             await interaction.response.defer(ephemeral=True, thinking=True)
         try:
             open_before = sheet_state(ev) == "open"
-            line = await self.set_answer(reg, rs, ev, m, status, character, by=m.display_name, by_id=m.discord_id)
+            line = await self.set_answer(reg, rs, ev, m, status, character, by=m.display_name, by_id=m.discord_id,
+                                         said_from="dm" if getattr(interaction, "guild_id", 0) is None else "sheet")  # a DM card's buttons, or the sheet's
             if open_before and sheet_state(ev) == "open":  # the receipt renders state (design §2.7): what they are now, as which character
                 line = "✅ " + rc.answer_receipt(reg, ev, m)
         except ValueError as e:
@@ -654,7 +655,7 @@ class RaidMixin(BoardPostMixin):
         await interaction.followup.send(line, ephemeral=True)
 
     async def set_answer(self, reg, rs, ev, m, status: str, character: str | None, by: str, by_id: int | None = None, *,
-                         spec: str | None = None, via: str = "discord", as_officer: bool = False) -> str:
+                         spec: str | None = None, via: str = "discord", as_officer: bool = False, said_from: str | None = None) -> str:
         """The one path for setting someone's answer on a sheet — the member themself or an officer. `by` is a display
         name people read; `by_id` is the Discord id of whoever acts and DECIDES whose answer it is: the member's own when
         `by_id == m.discord_id` (never a name compare — nicks change, design §2.2). No `by_id` = an officer acting.
@@ -696,7 +697,7 @@ class RaidMixin(BoardPostMixin):
                 await self.quiet_drop(reg, rs, ev, m, by)
                 line = f"✅ {who}No thanks for {label}, and their seat is open"
             elif ev.seat_of(m):  # the sheet's Can't make it after lock is a (late) callout: recorded like /raid out's
-                rc.callout(reg, rs, ev, m, team, None)
+                rc.callout(reg, rs, ev, m, team, None, source=said_from)  # Callout.source: where the member pressed it
                 await self.drop_seated(reg, rs, ev, team, m, "callout", None)
                 line = f"✅ {who or 'you are '}off the {label} roster — seat freed" + ("; the bot is looking for a replacement" if rc.team_setting(team, "autofill") else "")
             else:
@@ -1017,13 +1018,12 @@ class RaidMixin(BoardPostMixin):
                     await self.edit_ask_card(reg, a.dm_channel_id, a.dm_message_id, self._ask_closed_text(reg, ev, a))
                     continue
             else:
-                a.channel = "web"
+                a.channel, a.dm_failed = "web", True  # the Bot activity tab marks it not delivered
                 failed.append(a)
             out.append(a)
         if failed:
             names = ", ".join(a.display_name for a in failed)
             ev.log.append(f"DM failed — waits on the site: {names}")
-            rc.record_dms(ev, "ask", failed=[a.discord_id for a in failed], at=stamp)  # each ask's asked_at: the tab marks it not delivered
             await self.ops.emit(reg.config, "warn", f"{run_title(reg, ev)}: DM failed — waits on the site: {names}")
         return out
 
@@ -1031,7 +1031,10 @@ class RaidMixin(BoardPostMixin):
     def _close_unsent(ev, a) -> None:
         """An ask the fan-out did not (or could no longer) leave open: `cancelled` on a cancelled run, else `released`."""
         if a.pending:
-            a.answer, a.answered_at, a.held = ("cancelled" if ev.state == "cancelled" else "released"), rc.now(), False
+            if ev.state == "cancelled":
+                a.answer, a.answered_at, a.held = "cancelled", rc.now(), False
+            else:
+                rc.release_ask(a, "lock" if a.phase == "prelock" else "changed")
 
     @staticmethod
     def _ask_closed_text(reg, ev, a) -> str:
@@ -1090,14 +1093,21 @@ class RaidMixin(BoardPostMixin):
         await self.ops.emit(reg.config, "info", f"{by} sent {len(sent)} {'pre-lock ' if prelock else ''}ask(s) on {run_title(reg, ev)}")
         return sent, plan
 
-    async def withdraw_sent_ask(self, reg, rs, ev, uid: int, *, by: str, by_id: int | None = None, via: str = "discord") -> str:
+    async def withdraw_sent_ask(self, reg, rs, ev, uid: int, *, by: str, by_id: int | None = None, via: str = "discord",
+                                asked_at: str | None = None) -> str:
         """An officer closes a sent ask early (design B2 "Withdraw this ask", D15; the Suggest… screen, the site's Detail):
         under plan_lock, the member's ask still in play is `withdrawn`, its tied half released, both DM cards edited to
         "Never mind" (no new DM), a thread line, the cards redrawn. The seat it was holding counts as open again (the
         planner suggests someone else; after lock the fill engine asks on its next pass unless paused). RegistryError
-        when nothing is out for them."""
+        when nothing is out for them. `asked_at` (the Bot activity tab's row): THAT ask of theirs, not the first one out — an
+        ask that closed meanwhile is refused in one sentence."""
         async with self.plan_lock(reg, ev.key):
-            ask = next((a for a in ev.fill_asks if a.discord_id == int(uid) and a.pending), None)
+            if asked_at:
+                row = next((a for a in ev.fill_asks if a.discord_id == int(uid) and a.asked_at == asked_at), None)
+                if row is None or not row.pending:
+                    who = row.display_name if row is not None else (reg.members[int(uid)].display_name if int(uid) in reg.members else "them")
+                    raise RegistryError(f"The ask to {who} is no longer out, so nothing was withdrawn.")
+            ask = next((a for a in ev.fill_asks if a.discord_id == int(uid) and a.pending and (not asked_at or a.asked_at == asked_at)), None)
             if ask is None:
                 m = reg.members.get(int(uid))
                 raise RegistryError(f"No ask is out for {m.display_name if m else 'them'} on {run_title(reg, ev)}.")
@@ -1661,8 +1671,7 @@ class RaidMixin(BoardPostMixin):
                                          else f"Your seat on {run_label(reg, ev)} was released. If that's wrong, tell an officer."
                                          if ask.get("answer") == "released" else f"You already answered for {run_label(reg, ev)}.")
         elif not ok:  # a failed DM is a channel change, never an answer: the ask waits on the site, same deadline
-            ask["channel"] = "web"
-            rc.record_dms(ev, "confirm", failed=[m.discord_id], at=ask["asked_at"])  # the Bot activity tab marks it not delivered
+            ask["channel"], ask["dm_failed"] = "web", True  # the Bot activity tab marks it not delivered
             reg.save(m, f"{m.display_name}'s confirmation for {ev.team} waits on the site (DM failed)")
             ev.log.append(f"DM failed — waits on the site: {m.display_name}'s confirmation")
         return ok
@@ -1907,7 +1916,7 @@ class RaidMixin(BoardPostMixin):
             return await self._write_board(reg, rs, ev, groups, by, via=via)
 
     # ---- a member's "can't make it" with a note, and fill answers from anywhere but the DM button
-    async def call_out(self, reg, rs, ev, m, note: str | None, by: str, by_id: int | None = None) -> str:
+    async def call_out(self, reg, rs, ev, m, note: str | None, by: str, by_id: int | None = None, *, source: str | None = None) -> str:
         """Someone can't make a run, with an optional note for the officers (/raid out, the site's No thanks with a
         note, MCP set_answer(note), plain text): recorded as a callout (hours before, late after the lock cutoff); a
         rostered seat after lock is freed (drop_seated: DM, thread line, fill); otherwise the sheet is refreshed and
@@ -1916,7 +1925,7 @@ class RaidMixin(BoardPostMixin):
         t = rc.run_team(reg, ev)
         if t.get("test") and not getattr(m, "test", False) and str(m.discord_id) != str(t.get("test_by") or ""):
             raise RegistryError(f"{run_title(reg, ev)} is a test event: only test members and the officer running it can answer it")
-        co = rc.callout(reg, rs, ev, m, t, note)
+        co = rc.callout(reg, rs, ev, m, t, note, source=source)  # where it was said (Callout.source)
         released = await self.release_asks_of(reg, rs, ev, m, "called out")
         when = f"{co.hours_before:.0f}h before{', after lock' if co.late else ''}"
         mine = by_id is not None and int(by_id) == int(m.discord_id)
@@ -2029,12 +2038,12 @@ class RaidMixin(BoardPostMixin):
                 await old_msg.edit(embed=stale, view=None)
         return f"Re-posted the sheet for {run_title(reg, ev)} in {where} — the old one now points there."
 
-    async def record_placement(self, reg, uid: int, roster: str, yes: bool, by: str) -> str:
+    async def record_placement(self, reg, uid: int, roster: str, yes: bool, by: str, *, officer: str | None = None) -> str:
         """THE check-and-set for a Confirm / Can't make it answer (design B2 "atomic check-and-set"): Registry.claim_placement
         runs ON THE LOOP — where PlaceButton and the scheduler's expire_confirmations also run — so two writers can never
         both read "unanswered"; only the git commit goes to a worker thread. A second answer is refused from one place:
         "Already answered (yes, by Kestrel at 5:12 PM)". Returns the line."""
-        m, _ask, line = reg.claim_placement(uid, roster, yes, by)
+        m, _ask, line = reg.claim_placement(uid, roster, yes, by, officer=officer)
         await asyncio.to_thread(reg.save, m, line)
         return line
 
@@ -2044,10 +2053,10 @@ class RaidMixin(BoardPostMixin):
         then `after_placement_answer` (seat freed on a no, run thread line, sheet and cards). The member's DM card is
         edited to the outcome (no new DM). `by_id` = the actor's Discord id: it alone decides "their own answer" (the
         card's wording), never a name compare. Raises RegistryError when there is nothing to answer."""
-        line = await self.record_placement(reg, uid, roster, yes, by)
+        mine = by_id is not None and int(by_id) == int(uid)
+        line = await self.record_placement(reg, uid, roster, yes, by, officer=None if mine else by)
         m = reg.members.get(uid)
         ask = next((a for a in reversed(m.placement_asks) if a["roster"] == roster), None) if m else None
-        mine = by_id is not None and int(by_id) == int(uid)
         if ask and ask.get("dm"):
             await self.edit_ask_card(reg, ask["dm"][0], ask["dm"][1], f"→ {line}" + ("" if mine else f" (answered for you by {by})"))
         if not mine:  # B5: the member's notice (never a DM)

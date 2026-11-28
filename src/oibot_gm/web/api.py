@@ -1662,7 +1662,8 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
             return JSONResponse({"error": "a note goes with No thanks (status out): it is the reason they can't make it"}, status_code=400)
         try:  # set_answer / call_out refresh the sheet and cards and write the ops line themselves; the reply is Discord-flavoured
             if note or (status == "out" and d.get("callout")):  # a callout (/raid out's verb): with a reason (officers only), or MCP's No thanks
-                line = await bot.call_out(v.reg, rs, ev, m, note, v.name, by_id=v.uid)
+                line = await bot.call_out(v.reg, rs, ev, m, note, v.name, by_id=v.uid,
+                                          source=v.via if v.uid == m.discord_id else "officer")  # Callout.source
             elif d.get("raid"):  # a role switch for ONE raid of the event (issue 15; MCP set_answer's `raid`)
                 spec = str(d.get("spec") or "").strip()
                 if status == "out" or not spec:
@@ -1997,12 +1998,15 @@ def install_api(app: FastAPI, bot, *, viewer, privilege, guild_choices, live_off
     @app.post("/api/run/{key}/withdraw")
     async def run_withdraw(request: Request, key: str):
         """Withdraw a sent ask (D15; RaidMixin.withdraw_sent_ask): {member} — their ask still out closes, the tied half
-        is released, both DM cards say "Never mind". 400 when nothing is out for them."""
+        is released, both DM cards say "Never mind". `asked_at` (the Bot activity tab's row): THAT ask, not their first
+        one out. 400 when nothing is out for them, or that ask closed meanwhile (one sentence)."""
         v, d = await body(request, officer=True)
         rs, ev, t = live_event(v.reg, key)
         m = resolve_member(v.reg, member_ref(d))
+        row = str(d.get("asked_at") or "").strip() or None
         try:
-            line = await bot.withdraw_sent_ask(v.reg, rs, ev, m.discord_id, by=v.name, by_id=v.uid, via=v.via)
+            line = await bot.withdraw_sent_ask(v.reg, rs, ev, m.discord_id, by=v.name, by_id=v.uid, via=v.via,
+                                               **({"asked_at": row} if row else {}))
         except RegistryError as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return {"message": rc.site_words(v.reg, line)}

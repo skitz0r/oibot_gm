@@ -1303,18 +1303,27 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    (their character with its spec icon), the kind, the raid it is for and, on a raid of several rosters, the roster (only
    on an event of several raids or rosters), when it was sent and when it closes, each with how long ago or how long to
    go. While Automated Fill Requests are paused, one line above the list says so and who paused them. A waiting
-   *Open seat*, *Could you come?* or *Role switch* has **Withdraw**: the ask closes and the DM card says so, as before
-   (a *Confirm* has none; taking someone off the roster is the board's job). **Sent and answered** follows, newest
-   first: each ask with how it ended (*said yes*, *said no* / *can't make it*, *no answer in time*, *withdrawn by
-   Kara*, *closed when the event was cancelled*, *closed when the event locked again without them*), the sheet's
-   **Sheet Opening DM** and each **Signup Reminder** as one row with *Sent to 6 people.* (press it for the names),
-   each **Remind the unanswered** press likewise with who pressed it, and every *Can't make it* with its note. A DM
-   the bot could not deliver (the person's DMs are closed) says *Not delivered, so it waits on their Me page.*; a send to
-   many says *Not delivered to 1 person.* Two filters narrow the list: by kind and by person. With nothing to show it
-   says *The bot is not waiting on anyone for this event.* / *The bot has sent no DMs for this event yet.* The bot
-   records its opening DMs, reminders and failed DMs from 28 Nov 2026 on; an event opened earlier shows its asks and
-   answers and says the rest was not recorded. Board moves, settings, channels, the lock itself and loot are not here
-   (the event's **Activity** log has them). Nothing on this tab sends a DM.
+   *Open seat*, *Could you come?* or *Role switch* has **Withdraw**: that ask (not another one the same person holds)
+   closes and the DM card says so, as before; an ask that closed meanwhile is refused in one sentence (*The ask to
+   Kestrel is no longer out, so nothing was withdrawn.*). A *Confirm* has none; taking someone off the roster is the
+   board's job. **Sent and answered** follows, newest first: each ask with how it ended — *said yes*, *said no* /
+   *can't make it*, *confirmed for them by Kara* / *can't make it, answered for them by Kara* (an officer answered),
+   *no answer in time*, *withdrawn by Kara*, *closed by the lock* (an ask before the lock nobody answered), *closed
+   because the other half of the swap said no*, *closed because they called out*, *closed because someone else took the
+   seat first*, *closed when the event was cancelled*, *closed when the event locked again without them*; a yes that
+   was waiting for the other half of a swap reads *said yes, then closed because …*; an ask closed before these were
+   kept reads *closed without an answer*. Then the sheet's **Sheet opening DM** and each **Signup reminder** as one row
+   with *Sent to 6 people.* (press it for the names), each **Remind the unanswered** press likewise with who pressed it,
+   and every *Can't make it* a member pressed on a DM card, with its note and *after the lock* when it came after the
+   lock. A Can't make it from the sheet in the channel, the Me page, `/raid out`, plain text, MCP or an officer stays
+   on the Signups list and in the event's log, not here. Only one week's event shows its own Confirm asks, never an
+   earlier week's. A DM the bot could not deliver (the person's DMs are closed) says *Not delivered, so it waits on
+   their Me page.*; a send to many says *Not delivered to 1 person.* Two filters narrow the list: by kind and by person.
+   With nothing to show it says *The bot is not waiting on anyone for this event.* / *The bot has sent no DMs for this
+   event yet.* The bot records its opening DMs, reminders, failed DMs and where a Can't make it came from starting 28 Nov
+   2026; an event opened earlier shows its asks and answers and says the rest was not recorded. Board moves, settings,
+   channels, the lock itself and loot are not here (the event's **Activity** log has them). Nothing on this tab sends a
+   DM.
    **Post board** (under the board, open or locked events) posts the event's board to a Discord channel: a box with
    only its title, one select **Post to** — it opens on the event's *Board posts* channel (§2; with none set, the
    signup sheet's channel) and lists the server's text channels — and **Back** · **Post**. Picking another channel

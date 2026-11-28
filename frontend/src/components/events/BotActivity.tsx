@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Badge, Box, Button, Group, Select, Stack, Tabs, Text, UnstyledButton } from "@mantine/core";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { api, type BotActivity, type BotActivityRow, type EventPerson, type EventView, type Meta } from "../../api";
@@ -12,32 +13,37 @@ const HASH = "#bot-activity";
 
 /** The event page's two top tabs (design 2026-11-28-event-activity-tab): **Event** — the page as it was — and **Bot
  *  activity** with the count of DMs still waiting for an answer when there are any. The tab is in the URL hash
- *  (#bot-activity), so a link opens it; switching it replaces the address (no history entry), as the Ops page's tabs do.
- *  The tab's rows come from GET /api/event/{key}/activity, read again whenever the event is (the page's live topics). */
+ *  (#bot-activity), so a link opens it. The tab is read from the router's location, so back / forward land on the tab
+ *  their address names; a switch goes through the router's own navigate (replace, its history state kept). The Event tab
+ *  stays mounted while hidden (the board is never rebuilt by a switch). The tab's rows come from GET
+ *  /api/event/{key}/activity, read again whenever the event is (the page's live topics); another event's rows are
+ *  cleared at once, never shown under this one. Every word is the server's (meta.page_words, the route). */
 export function EventTabs({ ev, meta, onChanged, children }: { ev: EventView; meta: Meta; onChanged: () => void; children: React.ReactNode }) {
-  const [tab, setTab] = useState<string | null>(window.location.hash === HASH ? "activity" : "event");
+  const loc = useLocation();
+  const navigate = useNavigate();
+  const tab = loc.hash === HASH ? "activity" : "event";
   const [data, setData] = useState<BotActivity | null>(null);
   const seq = useRef(0);
+  useEffect(() => { setData(null); }, [ev.key]);
   useEffect(() => {
     const n = ++seq.current;
     api.get<BotActivity>(`/api/event/${encodeURIComponent(ev.key)}/activity`).then((d) => { if (n === seq.current) setData(d); }).catch(fail);
   }, [ev]);
   const pick = (v: string | null) => {
-    setTab(v);
-    window.history.replaceState(null, "", v === "activity" ? HASH : window.location.pathname + window.location.search);
+    navigate({ pathname: loc.pathname, search: loc.search, hash: v === "activity" ? HASH : "" }, { replace: true, state: loc.state });
   };
-  const n = data?.pending_count || 0;
+  const n = data && data.key === ev.key ? data.pending_count : 0;
   return (
-    <Tabs value={tab} onChange={pick} keepMounted={false}>
+    <Tabs value={tab} onChange={pick}>
       <Box px={20} pt={6}>
         <Tabs.List>
-          <Tabs.Tab value="event">Event</Tabs.Tab>
-          <Tabs.Tab value="activity" rightSection={n ? <Badge size="sm" variant="filled" color="teal" circle>{n}</Badge> : undefined}>Bot activity</Tabs.Tab>
+          <Tabs.Tab value="event">{meta.page_words.tab_event}</Tabs.Tab>
+          <Tabs.Tab value="activity" rightSection={n ? <Badge size="sm" variant="filled" color="teal" circle>{n}</Badge> : undefined}>{meta.page_words.tab_bot_activity}</Tabs.Tab>
         </Tabs.List>
       </Box>
       <Tabs.Panel value="event">{children}</Tabs.Panel>
       <Tabs.Panel value="activity">
-        {data ? <BotActivityPanel data={data} meta={meta} onChanged={onChanged} /> : <div className={css.sect}><Text c="dimmed">Loading…</Text></div>}
+        {data && data.key === ev.key ? <BotActivityPanel data={data} meta={meta} onChanged={onChanged} /> : <div className={css.sect}><Text c="dimmed">Loading…</Text></div>}
       </Tabs.Panel>
     </Tabs>
   );
@@ -58,7 +64,7 @@ function BotActivityPanel({ data, meta, onChanged }: { data: BotActivity; meta: 
   async function withdraw(r: BotActivityRow) {
     if (!r.withdraw || busy) return;
     setBusy(r.id);
-    try { const res = await api.post<{ message: string }>(r.withdraw.path, { uid: r.withdraw.uid }); if (res.message) ok(res.message); onChanged(); }
+    try { const res = await api.post<{ message: string }>(r.withdraw.path, { uid: r.withdraw.uid, asked_at: r.withdraw.asked_at }); if (res.message) ok(res.message); onChanged(); }
     catch (e) { fail(e); } finally { setBusy(null); }
   }
   return (
@@ -66,9 +72,9 @@ function BotActivityPanel({ data, meta, onChanged }: { data: BotActivity; meta: 
       {any && (
         <div className={css.sect}>
           <Group gap="sm" wrap="wrap">
-            <Select size="xs" w={190} aria-label="Kind" value={kind ?? ""} onChange={(v) => setKind(v || null)} allowDeselect={false}
+            <Select size="xs" w={190} aria-label={meta.page_words.filter_kind} value={kind ?? ""} onChange={(v) => setKind(v || null)} allowDeselect={false}
               data={[{ value: "", label: data.filters.all_kinds }, ...data.filters.kinds]} comboboxProps={{ withinPortal: true }} />
-            <Select size="xs" w={190} aria-label="Person" value={who ?? ""} onChange={(v) => setWho(v || null)} allowDeselect={false} searchable
+            <Select size="xs" w={190} aria-label={meta.page_words.filter_person} value={who ?? ""} onChange={(v) => setWho(v || null)} allowDeselect={false} searchable
               data={[{ value: "", label: data.filters.everyone }, ...data.filters.people]} comboboxProps={{ withinPortal: true }} />
           </Group>
         </div>
@@ -95,7 +101,7 @@ const TONE: Record<BotActivityRow["tone"], string | undefined> = { yes: "teal", 
 function Who({ p, meta }: { p: EventPerson; meta: Meta }) {
   return (
     <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
-      {p.cls && <GameIcon meta={meta} kind="spec" id={`${p.cls}:${p.spec}`} size={18} title={`${p.spec} ${p.cls}`} />}
+      {p.cls && <GameIcon meta={meta} kind="spec" id={`${p.cls}:${p.spec}`} size={18} title={p.icon_title} />}
       <Text size="sm" fw={600} c={classColour(meta, p.cls)} truncate>{p.character}</Text>
     </Group>
   );

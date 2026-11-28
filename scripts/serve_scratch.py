@@ -258,14 +258,14 @@ def seed(reg, rs) -> None:
         if i:
             a.answer, a.answered_at, a.answered_by = "withdrawn", rc.now(), "Officer"
         else:
-            a.channel = "web"
-            rc.record_dms(lk, "ask", failed=[m.discord_id], at=a.asked_at)
+            a.channel, a.dm_failed = "web", True
         lk.fill_asks.append(a)
     rc.record_dms(lk, "open", [m.discord_id for m in mains[18:27]], [mains[27].discord_id])
     rc.record_dms(lk, "remind", [m.discord_id for m in rostered[4:6]], by="Officer")
+    rc.callout(reg, rs, lk, mains[32], rc.run_team(reg, lk), "work ran late", source="dm") if len(mains) > 32 else None
     lk.dms_whole = True
     rs.save(lk, "locked (scratch board)")
-    past =(now - timedelta(days=4)).replace(hour=20, minute=0, second=0, microsecond=0)  # History: its board as it was locked
+    past = (now - timedelta(days=4)).replace(hour=20, minute=0, second=0, microsecond=0)  # History: its board as it was locked
     done = rc.open_run(reg, rs, barrow, past, by="scratch")
     for m in mains[8:18]:
         rc.set_signup(reg, rs, done, m, None, "in", source="officer")

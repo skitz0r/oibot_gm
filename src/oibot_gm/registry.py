@@ -7158,7 +7158,7 @@ class Registry:
         at = self.local12(ask["answered_at"], "%I:%M %p") if ask.get("answered_at") else None
         return f"Already answered ({what}" + (f", by {who}" if who else "") + (f" at {at}" if at else "") + ")."
 
-    def claim_placement(self, discord_id: int, roster: str, yes: bool, by: str) -> tuple[Member, dict, str]:
+    def claim_placement(self, discord_id: int, roster: str, yes: bool, by: str, *, officer: str | None = None) -> tuple[Member, dict, str]:
         """The check-and-set half of answer_placement, IN MEMORY only (design B2): the caller runs it on the event loop —
         where the DM button and the scheduler's expiry run too — then saves (RaidMixin.record_placement pushes only the
         commit to a thread). A second answer is refused with what the first was (already_answered). Returns (member,
@@ -7169,6 +7169,8 @@ class Registry:
             last = next((a for a in reversed(m.placement_asks) if a["roster"] == roster), None)
             raise RegistryError(self.already_answered(last) if last and last.get("answer") else "Nothing to answer for that roster.")
         ask["answer"], ask["answered_at"], ask["answered_by"] = ("yes" if yes else "no"), now(), by
+        if officer:  # an officer answered for them (RaidMixin.answer_placement_for): the Bot activity tab says so
+            ask["officer"] = officer
         run = (self.config.roster(roster) or {}).get("name") or "the event"  # the run as people read it (raid + 12-hour start), never its key
         line = f"{m.display_name} confirmed {ask['character']} on {run}" if yes else f"{m.display_name} can't make {run} — seat re-opened"
         return m, ask, line

@@ -38,7 +38,7 @@ def _opened(reg):
 def real(reg, n: int):
     cls, spec = SPECS[n % len(SPECS)]
     uid = REAL + n
-    reg.add_character(uid, f"Player{n}", NAMES[n % len(NAMES)] + "abcdefghij"[n // len(NAMES)], cls, spec, None, True)
+    reg.add_character(uid, f"Player{n}", NAMES[n % len(NAMES)] + "abcdefghijklmnop"[n // len(NAMES)], cls, spec, None, True)
     return reg.members[uid]
 
 
@@ -113,7 +113,8 @@ def test_fill_asks_pending_answered_expired_and_withdrawn_with_who(reg, rs):
     j = ea.activity_json(reg, rs, ev)
     (row,) = [r for r in j["pending"] if r["kind"] == "fill"]
     assert row["kind_label"] == "Open seat" and row["detail"] == "short 1 healer"
-    assert row["withdraw"] == {"path": f"/api/run/{ev.key}/withdraw", "uid": str(extra[0].discord_id), "label": "Withdraw"}
+    assert row["withdraw"] == {"path": f"/api/run/{ev.key}/withdraw", "uid": str(extra[0].discord_id), "asked_at": ev.fill_asks[-5].asked_at,
+                               "label": "Withdraw"}
     assert [t["label"] for t in row["times"]] == ["Sent", "Closes"]
     done = by_person(rows_of(j, "fill"))
     assert [done[m.display_name]["outcome"] for m in extra[1:]] == ["said yes", "said no", "no answer in time", "withdrawn by Kara"]
@@ -159,11 +160,11 @@ def test_the_opening_dm_and_the_reminder_are_one_row_each_with_counts_and_names(
     j = ea.activity_json(reg, rs, ev)
     assert j["unrecorded"] is None, "a new event is recorded from its opening"
     (opening,) = rows_of(j, "open")
-    assert opening["kind_label"] == "Sheet Opening DM" and opening["summary"] == "Sent to 3 people."
+    assert opening["kind_label"] == "Sheet opening DM" and opening["summary"] == "Sent to 3 people."
     assert sorted(p["display_name"] for p in opening["people"]) == sorted(m.display_name for m in ms[:3])
     assert opening["failed_summary"] == "Not delivered to 1 person." and [p["display_name"] for p in opening["failed_people"]] == [ms[3].display_name]
     (reminder,) = rows_of(j, "reminder")
-    assert reminder["kind_label"] == "Signup Reminder" and reminder["summary"] == "Sent to 2 people."
+    assert reminder["kind_label"] == "Signup reminder" and reminder["summary"] == "Sent to 2 people."
     assert sorted(p["display_name"] for p in reminder["people"]) == sorted(m.display_name for m in ms[1:3])
     assert reminder["failed_summary"] == "Not delivered to 1 person."
     assert all(t["label"] == "Sent" for r in (opening, reminder) for t in r["times"])
@@ -184,7 +185,8 @@ def test_an_undeliverable_ask_and_confirm_are_marked_not_delivered(reg, rs):
     rows = by_person(j["pending"])
     assert rows[outsider.display_name]["delivery"] == "Not delivered, so it waits on their Me page."
     assert rows[ms[0].display_name]["kind"] == "confirm" and rows[ms[0].display_name]["delivery"] == "Not delivered, so it waits on their Me page."
-    assert {d["kind"] for d in ev.dms} == {"ask", "confirm"}
+    assert ev.dms == [], "a failed ask or Confirm is marked on the ask itself, never an entry that could push the opening DM out"
+    assert ev.fill_asks[-1].dm_failed is True and rc._event_asks(ms[0], ev)[-1]["dm_failed"] is True
 
 
 def test_an_officers_remind_is_one_row_with_who_pressed_it(reg, rs):
@@ -202,11 +204,11 @@ def test_an_officers_remind_is_one_row_with_who_pressed_it(reg, rs):
 
 def test_a_callout_from_a_dm_card_is_a_history_row_with_its_note(reg, rs):
     ev, ms = locked(reg, rs, 6)
-    rc.callout(reg, rs, ev, ms[2], rc.run_team(reg, ev), "car broke down")
+    rc.callout(reg, rs, ev, ms[2], rc.run_team(reg, ev), "car broke down", source="dm")
     j = ea.activity_json(reg, rs, ev)
     (row,) = rows_of(j, "callout")
     assert row["kind_label"] == "Can't make it" and row["detail"] == "car broke down" and row["person"]["display_name"] == ms[2].display_name
-    assert row["outcome"].endswith("h before the start, after the lock") or row["outcome"].endswith("h before the start")
+    assert row["outcome"].endswith("h before the start, after the lock"), "the event is locked: this one came after the lock"
     assert row["times"][0]["label"] == "Said"
 
 
@@ -381,8 +383,12 @@ def test_the_event_page_has_two_tabs_with_the_count_in_the_url_hash():
     page = (FRONT / "pages" / "Events.tsx").read_text()
     tabs = (FRONT / "components" / "events" / "BotActivity.tsx").read_text()
     assert "EventTabs" in page
-    assert ">Event<" in tabs and "Bot activity" in tabs and "#bot-activity" in tabs and "pending_count" in tabs
-    assert "/activity" in tabs and "replaceState" in tabs
+    assert "#bot-activity" in tabs and "pending_count" in tabs
+    assert "/activity" in tabs and "replaceState" not in tabs, "the router's own navigate keeps its history state (M5)"
+    assert "useNavigate" in tabs and "useLocation" in tabs and "state: loc.state" in tabs and "replace: true" in tabs
+    assert "keepMounted={false}" not in tabs, "switching tabs never remounts the board"
+    assert "setData(null)" in tabs, "another event's rows never show while this one loads"
+    assert "page_words.tab_event" in tabs and "page_words.tab_bot_activity" in tabs and ">Event<" not in tabs and ">Bot activity<" not in tabs
 
 
 def test_asks_and_callouts_is_gone_from_the_events_more_menu():
@@ -392,9 +398,230 @@ def test_asks_and_callouts_is_gone_from_the_events_more_menu():
 
 def test_the_tab_prints_only_the_servers_words():
     tabs = (FRONT / "components" / "events" / "BotActivity.tsx").read_text()
-    for w in ("said yes", "said no", "no answer in time", "Not delivered", "Sent to", "Open seat", "Could you come?", "Role switch",
+    for w in ('aria-label="Kind"', 'aria-label="Person"', "said yes", "said no", "no answer in time", "Not delivered", "Sent to", "Open seat", "Could you come?", "Role switch",
               "The bot is not waiting", "The bot has sent no DMs", "were not recorded", "withdrawn by", "Every kind", "Everyone"):
         assert w not in tabs, w
     for k in ("kind_label", "outcome", "delivery", "summary", "failed_summary", "empty_pending", "empty_history", "unrecorded",
-              "all_kinds", "everyone", "withdraw.label"):
+              "all_kinds", "everyone", "withdraw.label", "icon_title", "page_words.filter_kind", "page_words.filter_person"):
         assert k in tabs, k
+
+
+# ---------------------------------------------------------------- fix round 1
+
+def _two_weeks(reg, rs):
+    """Two weekly occurrences of an older run that share one roster key (`team`): last week's finished, this week's live."""
+    old, ms = locked(reg, rs, 4)
+    start = old.start + timedelta(days=7)
+    new = rc.open_run(reg, rs, RID, start, by="t")
+    join(reg, rs, new, ms)
+    lock_with_board(reg, rs, new, [m.display_name for m in ms])
+    new.team = old.team
+    base = datetime.now().astimezone() - timedelta(days=10)
+    stamp = lambda d: (base + timedelta(days=d)).isoformat(timespec="seconds")  # noqa: E731
+    old.created_at, new.created_at = stamp(0), stamp(7)
+    for m in ms:
+        a = reg.add_placement_ask(m.discord_id, old.team, m.main.label, "lock")
+        a["asked_at"] = stamp(1)
+    reg.close_placement_ask(ms[0].discord_id, old.team, "yes")  # last week: one yes, the rest left unanswered
+    old.state, old.closed_at = "done", stamp(2)
+    for m in ms[:2]:
+        a = reg.add_placement_ask(m.discord_id, new.team, m.main.label, "lock")
+        a["asked_at"] = stamp(8)
+    reg.close_placement_ask(ms[1].discord_id, new.team, "no")
+    rs.save(old, "t")
+    rs.save(new, "t")
+    return old, new, ms
+
+
+def test_confirm_rows_belong_to_this_occurrence_only(reg, rs):
+    old, new, ms = _two_weeks(reg, rs)
+    jo, jn = ea.activity_json(reg, rs, old), ea.activity_json(reg, rs, new)
+    old_rows = [r for r in rows_of(jo, "confirm")]
+    # ms[1]'s open ask of last week was replaced by this week's (Registry.add_placement_ask keeps one open ask per key)
+    assert sorted(r["person"]["display_name"] for r in old_rows) == sorted(m.display_name for m in (ms[0], ms[2], ms[3])), \
+        "last week's asks only, never this week's"
+    assert {r["outcome"] for r in old_rows} == {"said yes", "closed when the event ended"}
+    new_rows = rows_of(jn, "confirm")
+    assert sorted((r["person"]["display_name"], r["outcome"]) for r in new_rows) == sorted([(ms[0].display_name, None), (ms[1].display_name, "can't make it")])
+    assert jn["pending_count"] == 1, "last week's unanswered asks are not this week's, and the count follows"
+
+
+def _release_case(reg, rs, ev, ms):
+    out = {}
+    pre = ask(ms[0], phase="prelock")
+    ev.fill_asks.append(pre)
+    rc.release_prelock_asks(ev)
+    out["lock"] = pre
+    a, b = ask(ms[1], kind="offspec"), ask(ms[2])
+    a.pair, b.pair = ms[2].discord_id, ms[1].discord_id
+    ev.fill_asks += [a, b]
+    b.answer = "no"
+    rc.release_partner(reg, rs, ev, b)
+    out["partner"] = a
+    c = ask(ms[3])
+    ev.fill_asks.append(c)
+    rc.release_member_asks(reg, rs, ev, ms[3].discord_id, "called out")
+    out["callout"] = c
+    first, twin = ask(ms[4]), ask(ms[5])
+    twin.parallel_of = ms[4].discord_id
+    ev.fill_asks += [first, twin]
+    first.answer = "yes"
+    rc.close_parallel(reg, rs, ev, first)
+    out["taken"] = twin
+    h1, h2 = ask(ms[6], kind="offspec"), ask(ms[7])
+    h1.pair, h2.pair = ms[7].discord_id, ms[6].discord_id
+    h1.answer, h1.held = "yes", True
+    ev.fill_asks += [h1, h2]
+    h2.answer = "no"
+    rc.release_partner(reg, rs, ev, h2)
+    out["held"] = h1
+    legacy = ask(real(reg, 99), answer="released")
+    ev.fill_asks.append(legacy)
+    out["legacy"] = legacy
+    return out
+
+
+def test_each_way_an_ask_closes_has_its_own_words(reg, rs):
+    ev, _ = scheduled(reg, rs, 0)
+    ms = [real(reg, 110 + i) for i in range(8)]
+    cases = _release_case(reg, rs, ev, ms)
+    rs.save(ev, "t")
+    j = ea.activity_json(reg, rs, ev)
+    said = {r["person"]["display_name"]: r["outcome"] for r in j["history"] if r["person"]}
+    assert said[cases["lock"].display_name] == "closed by the lock"
+    assert said[cases["partner"].display_name] == "closed because the other half of the swap said no"
+    assert said[cases["callout"].display_name] == "closed because they called out"
+    assert said[cases["taken"].display_name] == "closed because someone else took the seat first"
+    assert said[cases["held"].display_name] == "said yes, then closed because the other half of the swap said no"
+    assert said[cases["legacy"].display_name] == "closed without an answer"
+    assert "closed by the bot" not in said.values()
+
+
+def test_a_callout_records_where_it_came_from_and_the_tab_lists_only_dm_cards(reg, rs):
+    ev, ms = locked(reg, rs, 8)
+    team = rc.run_team(reg, ev)
+    for m, src in zip(ms, ("dm", "sheet", "me_page", "raid_out", "officer", "plain_text", "mcp", None)):
+        rc.callout(reg, rs, ev, m, team, None, source=src)
+    assert [c.source for c in ev.callouts] == ["dm", "sheet", "me_page", "raid_out", "officer", "plain_text", "mcp", None]
+    rows = rows_of(ea.activity_json(reg, rs, ev), "callout")
+    assert [r["person"]["display_name"] for r in rows] == [ms[0].display_name]
+    stored = rc.RaidEvent.model_validate(ev.model_dump())
+    assert stored.callouts[0].source == "dm"
+
+
+def test_the_sheet_buttons_can_t_make_it_in_a_dm_is_a_dm_card_callout(reg, rs):
+    ev, ms = locked(reg, rs, 6)
+    bot = NightBot(reg, rs)
+    run(bot.set_answer(reg, rs, ev, ms[0], "out", None, by=ms[0].display_name, by_id=ms[0].discord_id, said_from="dm"))
+    run(bot.set_answer(reg, rs, ev, ms[1], "out", None, by=ms[1].display_name, by_id=ms[1].discord_id, said_from="sheet"))
+    run(bot.call_out(reg, rs, ev, ms[2], "late shift", "Kara", by_id=1, source="officer"))
+    assert [c.source for c in ev.callouts] == ["dm", "sheet", "officer"]
+    assert [r["person"]["display_name"] for r in rows_of(ea.activity_json(reg, rs, ev), "callout")] == [ms[0].display_name]
+
+
+def test_every_call_out_site_names_its_source():
+    root = Path(ea.__file__).resolve().parent
+    sites = {"flows_raid.py": '"raid_out"', "inbox.py": "source=", "configops.py": "source=", "web/api.py": "source=", "web/api_me.py": '"me_page"'}
+    for f, needle in sites.items():
+        text = (root / f).read_text()
+        calls = re.findall(r"call_out\((?:[^()]|\([^()]*\))*\)", text, re.S)
+        assert calls and all("source=" in c for c in calls), (f, calls)
+        assert needle in text, f
+    raid = (root / "discord_raid.py").read_text()
+    assert 'said_from="dm" if getattr(interaction, "guild_id", 0) is None else "sheet"' in raid
+
+
+def test_a_failed_send_marks_the_ask_and_an_overflow_says_not_recorded(reg, rs):
+    ev, ms = scheduled(reg, rs, 2)
+    with pytest.raises(ValueError):
+        rc.record_dms(ev, "ask", failed=[ms[0].discord_id])
+    for _ in range(rc.DMS_KEPT):
+        rc.record_dms(ev, "reminder", [ms[0].discord_id])
+    assert ev.dms_whole is True
+    rc.record_dms(ev, "reminder", [ms[0].discord_id])
+    assert ev.dms_whole is False and ea.activity_json(reg, rs, ev)["unrecorded"] == ea.WORDS["unrecorded"]
+
+
+def test_after_the_lock_only_when_it_came_after_the_lock(reg, rs):
+    ev, ms = scheduled(reg, rs, 2)
+    team = rc.run_team(reg, ev)
+    rc.callout(reg, rs, ev, ms[0], team, None, source="dm")
+    ev.callouts[0].late = True  # inside the cutoff, but the event was never locked
+    (row,) = rows_of(ea.activity_json(reg, rs, ev), "callout")
+    assert "after the lock" not in row["outcome"]
+
+
+def test_a_guild_only_raid_reads_by_its_name(reg, rs, monkeypatch):
+    ms = [real(reg, 120 + i) for i in range(2)]
+    start = (reg.now_local() + timedelta(days=3)).replace(hour=18, minute=30, second=0, microsecond=0)
+    ev = rc.open_run(reg, rs, HYJAL, start, by="t", lineup=[{"raid": RID, "rosters": 1}])
+    rc.event_parts(rs, ev)[0].fill_asks.append(ask(ms[0], phase="prelock"))
+    real_def = reg.raid_def
+    monkeypatch.setattr(reg, "raid_def", lambda i: {**real_def(i), "name": "Our Own Raid"} if i == HYJAL else real_def(i))
+    monkeypatch.delitem(reg.profile.raids, HYJAL)
+    (row,) = ea.activity_json(reg, rs, ev)["pending"]
+    assert row["where"] == "Our Own Raid"
+
+
+def test_an_officers_confirm_for_them_reads_as_that(reg, rs):
+    ev, ms = locked(reg, rs, 4)
+    bot = NightBot(reg, rs)
+    for m in ms[:3]:
+        reg.add_placement_ask(m.discord_id, ev.team, m.main.label, "lock")
+    run(bot.answer_placement_for(reg, ms[0].discord_id, ev.team, True, "Kara", by_id=1))
+    run(bot.answer_placement_for(reg, ms[1].discord_id, ev.team, False, "Kara", by_id=1))
+    run(bot.answer_placement_for(reg, ms[2].discord_id, ev.team, True, ms[2].display_name, by_id=ms[2].discord_id))
+    said = {r["person"]["display_name"]: r["outcome"] for r in rows_of(ea.activity_json(reg, rs, ev), "confirm")}
+    assert said[ms[0].display_name] == "confirmed for them by Kara"
+    assert said[ms[1].display_name] == "can't make it, answered for them by Kara"
+    assert said[ms[2].display_name] == "said yes"
+
+
+def test_withdraw_acts_on_the_rows_ask(web_bot, reg, rs):
+    ev, ms = scheduled(reg, rs, 2)
+    one, two = ask(ms[0], phase="prelock", hours=2), ask(ms[0], kind="offspec", phase="prelock", hours=5)
+    two.asked_at = "2026-01-01T10:00:00+00:00"
+    ev.fill_asks += [one, two]
+    rs.save(ev, "t")
+    rows = web_bot.c.get(f"/api/event/{ev.key}/activity", headers=H()).json()["pending"]
+    row = next(r for r in rows if r["kind"] == "swap")
+    assert row["withdraw"]["asked_at"] == two.asked_at
+    r = web_bot.c.post(row["withdraw"]["path"], json={"uid": row["withdraw"]["uid"], "asked_at": row["withdraw"]["asked_at"]}, headers=H())
+    assert r.status_code == 200, r.text
+    assert two.answer == "withdrawn" and one.pending, "the row's ask, not the member's first"
+    stale = web_bot.c.post(row["withdraw"]["path"], json={"uid": row["withdraw"]["uid"], "asked_at": row["withdraw"]["asked_at"]}, headers=H())
+    assert stale.status_code == 400 and stale.json()["error"].endswith(".") and "no longer out" in stale.json()["error"]
+    legacy = web_bot.c.post(row["withdraw"]["path"], json={"uid": row["withdraw"]["uid"]}, headers=H())
+    assert legacy.status_code == 200 and not one.pending, "the old {uid} form still works (the Test bench)"
+
+
+def test_kind_words_and_icon_titles_are_the_servers(reg, rs):
+    ev, ms = locked(reg, rs, 3)
+    ev.fill_asks.append(ask(ms[0]))
+    (row,) = ea.activity_json(reg, rs, ev)["pending"]
+    assert row["person"]["icon_title"] == f"{ms[0].main.spec} {ms[0].main.cls}"
+    assert ea.KIND_WORDS["open"] == "Sheet opening DM" and ea.KIND_WORDS["reminder"] == "Signup reminder"
+    from oibot_gm.constants import PAGE_WORDS
+    assert PAGE_WORDS["tab_event"] == "Event" and PAGE_WORDS["tab_bot_activity"] == "Bot activity"
+    assert PAGE_WORDS["filter_kind"] and PAGE_WORDS["filter_person"]
+
+
+def test_the_seed_has_no_whitespace_typo():
+    text = (Path(__file__).resolve().parents[1] / "scripts" / "serve_scratch.py").read_text()
+    assert " =(" not in text
+
+
+def test_a_press_on_a_dm_card_records_dm_and_one_on_the_sheet_records_sheet(reg, rs):
+    from types import SimpleNamespace
+
+    ev, ms = locked(reg, rs, 6)
+    bot = NightBot(reg, rs)
+
+    def press(guild_id):
+        async def noop(*a, **k):
+            return None
+        return SimpleNamespace(guild_id=guild_id, response=SimpleNamespace(is_done=lambda: True, defer=noop),
+                               followup=SimpleNamespace(send=noop))
+    run(bot.apply_signup(press(None), reg, rs, ev, ms[0], None, "out"))  # the sheet's buttons on a DM card: no server
+    run(bot.apply_signup(press(1), reg, rs, ev, ms[1], None, "out"))  # the signup channel's sheet
+    assert [(c.display_name, c.source) for c in ev.callouts] == [(ms[0].display_name, "dm"), (ms[1].display_name, "sheet")]

@@ -114,9 +114,14 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        open_when/which_run/open_preview (THE open-time resolver, DST-safe); spec_switches / regulars_not_rostered / fill_state_text /
                        asks_on_site / log_rows (RaidEvent.log_at stamped by RaidStore.save) for ev_json; upcoming_rows (each active schedule's next three runs whatever the horizon, can_open + open_row_refusal's why) / short_why (a run card's short clause) — §5.56; FillAsk.channel dm|web (a failed DM = web)
                        record_dms(ev, kind, sent, failed, at=, by=) = THE writer of RaidEvent.dms (design 2026-11-28-event-activity-tab §4): the
-                       DMs no other record holds — "open" (dm_on_open), "reminder" (post_health's nudge), "remind" (RaidMixin.remind) — and every
-                       undeliverable "ask" (_send_asks) / "confirm" (confirm_one), `at` = that ask's asked_at; DMS_KEPT 60, nobody = nothing
-                       written; open_event sets dms_whole (an older file reads False). Read by event_activity.py only.
+                       DMs no other record holds — "open" (dm_on_open), "reminder" (post_health's nudge), "remind" (RaidMixin.remind); DMS_KEPT
+                       60 (an entry dropped turns dms_whole off), nobody = nothing written; open_event sets dms_whole (an older file reads
+                       False). An undeliverable ask / Confirm is marked on the ask (FillAsk.dm_failed; the placement ask's "dm_failed").
+                       release_ask(a, why) = THE close of a fill ask as `released` with FillAsk.closed_why (lock, partner_* by the tied
+                       half's answer — PARTNER_WHY —, callout / no_thanks / away / out from release_member_asks' why — CLOSE_WHY_OF —,
+                       taken, changed; "held_" first for a held yes). Callout.source (callout(source=), leave_follow): where the member said
+                       it — dm (the sheet's buttons on a DM card: RaidMixin.apply_signup's interaction has no guild), sheet, me_page,
+                       raid_out, officer, plain_text, mcp, web; None before 2026-11-28. Read by event_activity.py.
                        Identity (§5.67 phase 3): a run's key is new_run_key(reg, rs, raid) = '<abbr>-<6 of KEY_ALPHABET>' (no 0/1/i/l/o/r), the run
                        dict's key and the run file's key the same string; NOTHING reads a raid, a date, a time or a schedule out of a key or builds one
                        from a time (run_key, event_key, schedule_kw, RunKeyClash and TEST_SCHEDULE are gone; tests/test_event_identity.py pins it).
@@ -295,7 +300,9 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        audited ops line ("back to their answer" for the way back), every raid's officer card of the event; `status`
                        (in | sub) records that answer first when theirs differs (the status is one per event, the spec per raid).
                        Phase 2 (§5.39): send_member_card + edit_ask_card (an outcome edits the ask's DM card — never an FYI DM; seat_released),
-                       every event DM site (dm_on_open, the nudge, _send_asks, confirm_one, remind) also calls rc.record_dms for the Bot activity tab,
+                       dm_on_open, the nudge and remind call rc.record_dms for the Bot activity tab; _send_asks / confirm_one mark a failed DM on
+                       the ask; call_out(source=) and set_answer(said_from=) carry Callout.source; record_placement / Registry.claim_placement(
+                       officer=) mark an officer's answer for them; withdraw_sent_ask(asked_at=) withdraws that ask,
                        record_placement (check-and-set on the loop), lock_run resumable (lock_seats + confirmations_sent_at; recover_lock in the scheduler),
                        lock_preview, cancel_run(notify) under board_lock (no DMs), reopen_run, remind (the older card goes dead), set_autofill_paused, withdraw_sent_ask;
                        sheets_restore = on_ready's first boot redraws every live sheet in place (refresh_sheet), so a look change reaches posted sheets;
@@ -408,11 +415,14 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
   event_activity.py    the event page's Bot activity tab (design 2026-11-28-event-activity-tab): activity_json(reg, rs, ev) = THE one builder of
                        the tab — pending rows (Confirm: each member's placement_asks on a raid's `team`, deadline confirm_by; Open seat / Could you
                        come? / Role switch: ev.fill_asks by phase and swap kind, deadline expires_at; soonest first) and history (each closed ask
-                       with its outcome in CONFIRM_OUTCOMES / ASK_OUTCOMES words, RaidEvent.dms' opening DM / Signup Reminder / Remind rows — one
-                       per send, people unfolded — and the callouts; newest first), KIND_WORDS, WORDS (titles, the two empty states, the
-                       `unrecorded` sentence while any part lacks dms_whole, "Not delivered…" from RaidEvent.dms' failed ids matched on asked_at),
+                       with its outcome in CONFIRM_OUTCOMES / FOR_THEM (an officer's answer: the placement ask's "officer") / ASK_OUTCOMES /
+                       RELEASED (FillAsk.closed_why) words, RaidEvent.dms' opening DM / Signup reminder / Remind rows — one per send, people
+                       unfolded — and the callouts with Callout.source "dm" only; newest first). Confirm asks: _occurrence_asks = rc._event_asks
+                       and, once closed, nothing asked after closed_at. KIND_WORDS, WORDS (titles, the two empty states, the `unrecorded`
+                       sentence while any part lacks dms_whole, "Not delivered…" from FillAsk.dm_failed / the placement ask's "dm_failed"),
                        filters (kinds and people present), paused lines, `where` (the raid on an event of several, the roster on a raid of
-                       several), withdraw {path /api/run/{part}/withdraw, uid, label} on a live pending ask only (never a Confirm). Times =
+                       several), withdraw {path /api/run/{part}/withdraw, uid, asked_at (that ask: RaidMixin.withdraw_sent_ask(asked_at=)),
+                       label} on a live pending ask only (never a Confirm); person.icon_title. Times =
                        Registry.local12 + relative(). Reads only: never sends, never saves (tests/test_event_activity.py pins it). Route: GET
                        /api/event/{key}/activity (web/api_events.py, officers).
   member_event_view.py the members' Events page read model (2026-11-25 §2), PURE: what the Discord signup sheet shows everyone and nothing

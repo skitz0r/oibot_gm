@@ -118,7 +118,7 @@ def install_me_api(app: FastAPI, bot, *, who, body, find_live, resolve_member) -
         if ev.state == "locked":
             return JSONResponse({"error": rc.LOCKED_JOIN}, status_code=400)
         try:
-            line = await bot.set_answer(v.reg, rs, ev, m, status, (d.get("character") or None), m.display_name, by_id=v.uid)
+            line = await bot.set_answer(v.reg, rs, ev, m, status, (d.get("character") or None), m.display_name, by_id=v.uid, said_from="me_page")
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return receipt(v, ev, m, line)
@@ -132,7 +132,7 @@ def install_me_api(app: FastAPI, bot, *, who, body, find_live, resolve_member) -
         rs, ev = run_of(v, key)
         note = str(d.get("note") or "").strip()[:300] or None
         try:
-            line = await bot.call_out(v.reg, rs, ev, m, note, m.display_name, by_id=v.uid)
+            line = await bot.call_out(v.reg, rs, ev, m, note, m.display_name, by_id=v.uid, source="me_page")
         except (RegistryError, ValueError) as e:
             return JSONResponse({"error": str(e)}, status_code=400)
         return receipt(v, ev, m, line)
