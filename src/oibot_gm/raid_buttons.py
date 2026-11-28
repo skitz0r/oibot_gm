@@ -399,6 +399,66 @@ async def unlock_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=
     await wiz.decide_box(interaction, box(), do=do, refresh=box)
 
 
+async def board_post_decide(interaction: discord.Interaction, bot, reg, rs, ev, wiz=None) -> None:
+    """THE Post board screen in Discord — /raid board (issue 16; design 2026-11-27-post-board): the site's box
+    (consequences.board_post_box — its title, Post · Back, no sentences: the owner's exception) through
+    Wizard.decide_box, with Discord's own channel select above it, open on where the post is or would go
+    (BoardPostMixin.board_where). A pick shows the screen again and writes nothing; Post presses
+    BoardPostMixin.post_board — the site's press — with the box's fp as `seen` and the pick: a first post, an update in
+    place, or a move. While a post is up Remove board post presses remove_board_post. A refusal is the box's one sentence,
+    Back alone; another officer's press first shows the box again under the changed line. Nobody is DMed."""
+    from .board_post import BOARD_POST, BOARD_REMOVE
+    from .consequences import BOARD_POST_TO, board_post_box
+    from .flows_config import _text_channel_select
+
+    key = rc.first_part(rs, ev).key
+    wiz = wiz or officer_wizard(bot, reg, interaction, BOARD_POST)
+    pick: dict[str, int] = {}
+
+    def first() -> rc.RaidEvent:
+        return rs.events.get(key) or ev
+
+    def box_of(f) -> dict:
+        return board_post_box(reg, rs, f, [], bot.board_where(reg, f))
+
+    def box() -> dict:
+        return box_of(first())
+
+    async def show(i: discord.Interaction, *, changed: bool = False) -> None:
+        b, f = box(), first()
+        where = pick.get("channel") or bot.board_where(reg, f)
+        above = [_text_channel_select(BOARD_POST_TO, picked, current=where)]
+        extra = [wiz.button(BOARD_REMOVE, remove)] if f.board_channel_id else []
+        await wiz.decide_box(i, b, do=post, refresh=box, above=above, extra=extra, changed=changed)
+
+    async def picked(i: discord.Interaction, chans: list) -> None:
+        if chans:
+            pick["channel"] = int(chans[0].id)
+        await show(i)
+
+    async def post(i: discord.Interaction, _values: dict) -> None:
+        seen = box()["fp"]  # decide_box has just checked it is the box on screen
+        try:
+            line = await bot.post_board(reg, rs, first(), channel=pick.get("channel"), by=i.user.display_name, by_id=i.user.id,
+                                        via="discord", seen=seen, fp=lambda f: box_of(f)["fp"])
+        except rc.BoardChanged:
+            await show(i, changed=True)
+            return
+        except RegistryError as e:
+            line = str(e)
+        await wiz.finish(i, line)
+
+    async def remove(i: discord.Interaction) -> None:
+        await wiz.working(i)
+        try:
+            line = await bot.remove_board_post(reg, rs, first(), by=i.user.display_name, by_id=i.user.id, via="discord")
+        except RegistryError as e:
+            line = str(e)
+        await wiz.finish(i, line)
+
+    await show(interaction)
+
+
 async def remind_decide(interaction: discord.Interaction, bot, reg, rs, ev) -> None:
     """Remind the unanswered (the lock card's button): the server's box (consequences.remind_box — how many get their
     Confirm / Can't DM again, how many wait on the site; the site's More › Remind prints the same) through

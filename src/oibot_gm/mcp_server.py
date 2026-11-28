@@ -746,6 +746,40 @@ def repost_sheet(run: str, channel: str | None = None, guild: Guild = None) -> s
     return msg(api(guild).post(f"/api/run/{run}/sheet", {"channel": channel or ""}))
 
 
+@mcp.tool()
+def post_board(run: str, channel: str | None = None, guild: Guild = None) -> str:
+    """Post an event's board in Discord (the event page's Post board): one message per raid, in lineup order, each
+    raid's groups and nothing else, and the bot keeps those messages current as the event changes until it ends.
+    `run` = the event's key (any raid's key of it). `channel` (a name like #raid-boards, or an id): post there, and it
+    becomes the event's own Board posts channel; omitted = where its Board posts go (the event's, its schedule's, the
+    guild's, else the signup sheet's channel). With a post up the same channel checks every message and posts again
+    any that is gone; another channel moves the post. Nobody is DMed or mentioned. Refused once the event has ended or
+    is cancelled. Look first (get_run)."""
+    a = api(guild)
+    url = f"/api/event/{run}/board"
+    box = a.post(url, {"preview": True})["box"]  # the site's box: its fp is the press's `seen`, its channels the names
+    pick = ""
+    if channel:
+        raw = str(channel).strip()
+        if raw.strip("<#>").isdigit():
+            pick = raw.strip("<#>")
+        else:
+            want = "#" + raw.lstrip("#").lower()
+            hits = [o["value"] for o in (box.get("channel") or {}).get("options", []) if str(o.get("label", "")).lower() == want]
+            if len(hits) != 1:
+                raise ToolError(f"no channel named {want}" if not hits else f"{want}: several channels match")
+            pick = hits[0]
+    return msg(a.post(url, {"seen": box["fp"], "channel": pick}))
+
+
+@mcp.tool()
+def remove_board_post(run: str, guild: Guild = None) -> str:
+    """Take an event's board post down (the event page's More › Remove board post): every raid's message is deleted
+    and the updates stop. `run` = the event's key. Nobody is DMed. Refused when the event has no post, and once it has
+    ended (the post stays as it ended)."""
+    return msg(api(guild).post(f"/api/event/{run}/board/remove"))
+
+
 # ---------------------------------------------------------------- writes: raids and schedules (officers), auras (owner)
 
 @mcp.tool()

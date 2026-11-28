@@ -463,6 +463,10 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        back what it posted. Ids: RaidEvent.board_posts per raid, board_channel_id / board_done on the first raid. Words: BOARD_POST /
                        BOARD_UPDATE / BOARD_REMOVE (the site's buttons), BOARD_OVER / BOARD_NONE / BOARD_NOWHERE (refusals), BOARD_POSTED / _CURRENT /
                        _REMOVED (answers). Nobody DMed or told; post / move / remove = one log + ops line, a redraw none.
+                       Issue 16 (the other surfaces, the SAME verbs): module board_where(reg, first) (the method calls it) = where the box opens;
+                       remove_refusal(rs, first) = Remove's one sentence (BOARD_NONE / BOARD_STAYS) — remove_board_post and plain text's review
+                       read it. Callers: POST /api/event/{key}/board[/remove], raid_buttons.board_post_decide (/raid board), configops
+                       run_board_post / run_board_remove, MCP post_board / remove_board_post (through the routes).
   raid_views.py        pure rendering: sheet_message (the signup sheet is an EMBED: inline fields are the only columns Discord has — a class per column open, a group per column locked, one member per line) / health_layout / lock_layout / confirm_layout / fill_layout / closed_layout (Discord layout components:
                        container/section/thumbnail/text/separators/buttons, real icons as app emojis via discord_bot.ensure_icon_emojis → ico()),
                        event_url(reg, ev) = THE address of an event on the site ({web}/app/events/<first raid's key>?g=<guild>, None off http(s)):
@@ -481,7 +485,11 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        RunButton (officer Lock/Fill/Loot/Cancel on the cards; the lock card's second row Remind/Pause/Start now/Unlock/End — Start
                        now greyed unless rc.start_now_refusal(reg, None, ev) is None, Start now and Unlock greyed exactly when rc.start_now_refusal / rc.unlock_refusal refuse the event (night_actions_row(reg, ev, rs): a later raid's card reads its first raid), Unlock also while boss_progress finds a loot council on that raid; the closed card's Reopen; lock_decide / cancel_decide / remind_decide /
                        unlock_decide (cq.unlock_box: Unlock · Back, or the refusal; then unlock_run) / start_decide (cq.start_now_box: Start now · Back,
-                       or the refusal; then start_now — end_decide's "hasn't started" refusal keeps a Start now button that opens it) / end_decide = THE lock, cancel, remind, unlock, start and end screens: the server's
+                       or the refusal; then start_now — end_decide's "hasn't started" refusal keeps a Start now button that opens it) / board_post_decide
+                       (issue 16: cq.board_post_box through decide_box with `above` = flows_config._text_channel_select(BOARD_POST_TO,
+                       current=board_where) — a pick shows the screen again, nothing written; Post → post_board(channel=pick, seen=box fp,
+                       fp=); Remove board post (BOARD_REMOVE) in `extra` while a post is up → remove_board_post; rc.BoardChanged → the box again
+                       under the changed line) / end_decide = THE lock, cancel, remind, unlock, start and end screens: the server's
                        box through Wizard.decide_box — cq.lock_box (a complete board: Lock · Preview lock; with the fill choice two verbs, RUN_WORDS
                        lock_as_is / lock_fill: Lock as it stands · Lock and auto-fill · Preview lock, Lock and auto-fill opening its own
                        screen with the fill box, an empty board's refusal with Lock and auto-fill + Back; the preview = the shown choice's roster as decide_box's embed),
@@ -502,9 +510,10 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        raid the game lacks ("… opens no events: … Change its raids on the Schedules page, or remove it there."); a later raid gets no
                        health card or lock of its own while a raid before it is open; an occurrence whose minute a live ONE-OFF holds
                        (rc.one_off_at) is skipped with one ops warn naming both (_warn_night_taken) — another schedule's run there never blocks it
-  raid_commands.py     register_raid_commands: /raid open|sheet|health|lock|unlock|start|loot|distribute|end|set|cancel|reschedule|edit|lineup|list|out|fill
+  raid_commands.py     register_raid_commands: /raid open|sheet|health|lock|unlock|start|board|loot|distribute|end|set|cancel|reschedule|edit|lineup|list|out|fill
                        (reschedule / edit → flows_event, no arguments; unlock → flows_raid's raid_unlock: the locked-event picker, first raids only,
-                       then unlock_decide; start → flows_raid's raid_start, the same picker, then start_decide)
+                       then unlock_decide; start → flows_raid's raid_start, the same picker, then start_decide; board → flows_raid's
+                       raid_board: the live-event picker, first raids only, then board_post_decide — no argument, the channel is picked inside)
   web/api_me.py        install_me_api (called from api.py): the inbox routes — asks/notices on GET /api/me (api.py), POST /api/me/run/{key}/answer|out,
                        /api/me/fill/{key}, /api/me/ask/{id}, /api/me/notices/read (a member's own answers through the RaidMixin verbs, by_id = me);
                        officers: GET /api/admin/inbox|actions, POST /api/admin/action (rev → 409; `spec`; §5.67 phase 4: `preview` → {box} =

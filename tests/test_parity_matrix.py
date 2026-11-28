@@ -57,6 +57,10 @@ SURFACES: dict[str, dict[str, str]] = {
     "run_unlock": {"discord": "flow:raid_unlock", "web": "POST /api/run/{key}/unlock", "mcp": "unlock_run"},
     # issue 14: a locked event starts this minute — the lock card's Start now, End's refusal and /raid start open the same screen
     "run_start": {"discord": "flow:raid_start", "web": "POST /api/run/{key}/start", "mcp": "start_now"},
+    # issue 16: Post board / Remove board post — the site's box and More menu, /raid board's one screen (Discord's channel
+    # select, Post, Remove board post while a post is up), MCP through the same routes; BoardPostMixin underneath
+    "run_board_post": {"discord": "flow:raid_board", "web": "POST /api/event/{key}/board", "mcp": "post_board"},
+    "run_board_remove": {"discord": "flow:raid_board", "web": "POST /api/event/{key}/board/remove", "mcp": "remove_board_post"},
     # move / re-time an event and change its raids: phase 3's routes and tools, phase 5's /raid reschedule | edit | lineup
     "run_reschedule": {"discord": "flow:raid_reschedule", "web": "POST /api/run/{key}/reschedule", "mcp": "reschedule_run"},
     "run_lineup": {"discord": "flow:raid_lineup", "web": "POST /api/run/{key}/lineup", "mcp": "edit_lineup"},

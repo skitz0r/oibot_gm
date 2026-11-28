@@ -63,6 +63,22 @@ def _closed(p) -> bool:
     return p.state in ("done", "cancelled")
 
 
+def board_where(reg, first) -> int | None:
+    """The channel id the box opens on: where the post is now, else where it would go (rc.channel_of). Discord's select
+    opens on it and plain text's review names it."""
+    return first.board_channel_id or rc.channel_of(reg, first, "board_channel")
+
+
+def remove_refusal(rs, first) -> str | None:
+    """Why Remove board post can't be done on `first`'s event (one sentence), else None: no post up (BOARD_NONE), or the
+    event is over and its post stays as it ended (BOARD_STAYS). remove_board_post and plain text's review read it."""
+    if not first.board_channel_id:
+        return BOARD_NONE
+    if all(_closed(p) for p in rc.event_parts(rs, first)):
+        return BOARD_STAYS
+    return None
+
+
 def _fp(embed: discord.Embed) -> str:
     return hashlib.sha1(json.dumps(embed.to_dict(), sort_keys=True, default=str).encode()).hexdigest()[:16]
 
@@ -87,8 +103,8 @@ class BoardPostMixin:
         return self.sheet_channel(reg, first)
 
     def board_where(self, reg, first) -> int | None:
-        """The channel id the box opens on: where the post is now, else where it would go (rc.channel_of)."""
-        return first.board_channel_id or rc.channel_of(reg, first, "board_channel")
+        """The channel id the box opens on (module board_where)."""
+        return board_where(reg, first)
 
     # ---- locks
     def _board_post_lock(self, reg, key: str) -> asyncio.Lock:
@@ -233,10 +249,8 @@ class BoardPostMixin:
         too) and the updates stop; nobody is told. Refused (RegistryError) when there is none, and once the event is over
         (nothing could post it again: its last state stays). → the answer."""
         first = rc.first_part(rs, ev)
-        if not first.board_channel_id:
-            raise RegistryError(BOARD_NONE)
-        if all(_closed(p) for p in rc.event_parts(rs, first)):
-            raise RegistryError(BOARD_STAYS)
+        if why := remove_refusal(rs, first):
+            raise RegistryError(why)
         from .discord_pool import channel_name
 
         async with self._board_post_lock(reg, first.key):

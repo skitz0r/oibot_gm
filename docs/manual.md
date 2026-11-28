@@ -1315,6 +1315,13 @@ Timeline for each event (per-raid settings; defaults in brackets, Barrow Deeps o
    an open or locked event; once it has ended the post stays as it ended) deletes the messages and stops the updates. Nobody gets a DM or a notice; the first post, a move and a removal write one line in the
    event's log and the ops feed, the updates none. Not on an ended or cancelled event (*This event is over, so its
    board can't be posted.*).
+   - **Where.** The button under the board and **More › Remove board post** on the Events page; in Discord
+     `/raid board` (officers; it asks which event when several are live), the same box: Discord's own channel picker,
+     open on the *Board posts* channel, then **Post** · **Back**, with **Remove board post** beside them while a post is
+     up — picking a channel only changes the picker, nothing is posted before **Post**; plain text *"post the board for
+     Tuesday"*, *"post the board for tonight in #raid-boards"*, *"update the board post"* or *"remove the board post for
+     Tuesday"* (always reviewed first: the review names the box's title, the event and the channel); MCP `post_board`
+     (an optional `channel`) and `remove_board_post`. Each is the same post, with the same refusals and the same one line.
    **Edit lineup** (until the roster locks) opens the lineup builder on the event, `/events/<event>/lineup`: its first
    raid is fixed, every later raid has **Move earlier** / **Move later** / **Remove**, the palette adds a raid, and each
    step's **Starts** and **Rosters** change as on New event — a raid that stays keeps its start unless the change moves

@@ -220,6 +220,11 @@ Runs (officer; target = the event key like bd-k7m2qx from the live-events list, 
   run_move: target, member, value=<g<N> (group N, counted across rosters) | <roster>.<group> e.g. "2.3" | bench | another member's name
     (they swap places)> — one person on the board (after lock: from the bench = asked to confirm, to the bench = seat freed).
   run_sheet: target — post a fresh copy of the sheet in the channel this was asked in (anyone registered may ask, like /raid sheet).
+  run_board_post: target, value=<optional #channel: post it there, and it becomes the event's Board posts channel; empty =
+    where its Board posts go> — post the event's board (its groups, one message per raid) in Discord and keep it current
+    ("post the board for Tuesday", "post the board for tonight in #raid-boards", "update the board post"); with a post up,
+    the same channel checks it and another channel moves it. Nobody is DMed.
+  run_board_remove: target — take the event's board post down, so it stops updating ("remove the board post for Tuesday").
   confirm_for: target, member, value=yes|no — on a LOCKED run, record someone's answer to their Confirm / Can't make it ask, or to a
     fill ask they were sent (they said so out of band: "Xanthe confirmed for tonight"; no = can't make it, the seat is freed and the fill
     engine looks for cover).
@@ -278,13 +283,13 @@ class ConfigOp(BaseModel):
     # with no field at all (2026-10-30: "remove enchanting from Jonster" → a bare character op), every time.
     # Keep this schema small (≤13 fields): the structured-output compiler rejects it as "too complex" past ~14 fields, and every
     # new schema shape costs a slow first compile. New ops reuse the generic fields (target/field/value/reason) rather than adding their own.
-    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, confirm_for, run_remind, run_pause, run_withdraw, run_reopen, run_unlock, run_start, run_reschedule, run_lineup, character, absence_clear, dm, regular, test, recruit, application, proposal, job, policy, plain, loot, wishlist, tier, loot_weights")
+    op: str = Field(description="one of: set, role_add, role_remove, rank, confirm, set_main, absence, pin, policy_append, comp_target, comp_target_clear, comp_groups, raid_set, raid_reset, aura_set, family_set, aura_reset, schedule_set, schedule_remove, run_open, run_answer, run_lock, run_cancel, run_fill, run_strategy, run_autofill, run_board, run_move, run_propose, run_sheet, run_board_post, run_board_remove, confirm_for, run_remind, run_pause, run_withdraw, run_reopen, run_unlock, run_start, run_reschedule, run_lineup, character, absence_clear, dm, regular, test, recruit, application, proposal, job, policy, plain, loot, wishlist, tier, loot_weights")
     member: Optional[str] = Field(default=None, description="member display name, mention <@id>, or one of their character names; empty = the requester; application: the applicant")
     character: Optional[str] = Field(default=None, description="a character name: the one to act on (character, rank, confirm, set_main) or the one they'd play (run_answer); empty on character add = a planned character")
     path: Optional[str] = Field(default=None, description="run_open: the one-off's own channels 'sheet_channel <#id>, officers_channel <#id>, loot_log_channel <#id>, board_channel <#id>'; op=set: timezone|signup_channel|ops_channel|applications_channel|roster_channel|registration_channel|analytics_channel|absences_channel|news_channel|loot_channel|board_channel|loot_log|public|news_keywords|ask_audience|about|error_dms")
     target: Optional[str] = Field(default=None, description="what the op acts on: raid id (raid_set, raid_reset, run_open, regular, comp_target*, comp_groups), schedule id alone (schedule_set, schedule_remove), event key (run_*, pin, comp_groups, loot), buff id (aura_set, aura_reset), family id (family_set, aura_reset), proposal id (proposal), question number or text (recruit question_edit/question_move), capability group | channel mention | dm | default | listen <#channel> | remember <#channel> (plain), item name or id (tier)")
     field: Optional[str] = Field(default=None, description="set timezone: keep|move (the events already open); raid_set/aura_set/family_set/schedule_set: the setting name from the schema (schedule_set: raid = a new schedule's first raid); run_open / regular: a schedule id; run_reschedule: start or a timing setting; run_answer: the spec they play (optional); comp_target*: the slot (role, Class or Class:Spec); character: REQUIRED on every character op, one of add|spec|offspec|name|rank|main|retire|delete|flex (naming the character alone is not a change); recruit: open|note|question_add|question_edit|question_move|question_remove|member_role_add|member_role_remove|invite|invite_create; policy: replace|remove|compile; run_propose: another|use; loot: open|tick|distribute|award|confirm|discard|reason|correct|end|retire; wishlist: add|remove; tier: the spec key Class:Spec | Class:* | role:<role>; loot_weights: the weight's path (tier_weight.S, attendance.weight, wishlist.rank_bonus.1 …)")
-    value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: the minimum as a whole number; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; run_reschedule start: 'YYYY-MM-DD HH:MM'; run_lineup: 'barrow_deeps x2, onyxias_lair'|'none'; run_move: g<N>|<roster>.<group>|bench|a member to swap with; run_propose: a strategy or empty; dm: on|off; test: `seed N`|`run <raid> [quick|standard|slow] [dm]`|`answer join N bench N out N`|`clear`; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply; plain: who list or act|self|answer|ignore|clear, listen: watch|reply|off, remember: shared|channel|off; set <channel>: a mention or none; loot_weights: a number or default)")
+    value: Optional[str] = Field(default=None, description="new value as text (channel mentions like <#id>, role mentions like <@&id> for role_add/role_remove, numbers as digits, booleans as true/false; comp_target: the minimum as a whole number; pin: in|out|clear; run_answer: join|bench|no thanks; confirm_for: yes|no; run_fill: preview|send; run_board: 'A, B | C, D'; run_reschedule start: 'YYYY-MM-DD HH:MM'; run_lineup: 'barrow_deeps x2, onyxias_lair'|'none'; run_move: g<N>|<roster>.<group>|bench|a member to swap with; run_board_post: a channel mention or empty; run_propose: a strategy or empty; dm: on|off; test: `seed N`|`run <raid> [quick|standard|slow] [dm]`|`answer join N bench N out N`|`clear`; character add: 'Class Spec [Offspec]', flex: 'tank, healer'|'none'; application: accept|decline; proposal: approve|dismiss; job: review|apply; plain: who list or act|self|answer|ignore|clear, listen: watch|reply|off, remember: shared|channel|off; set <channel>: a mention or none; loot_weights: a number or default)")
     rank: Optional[str] = Field(default=None, description="for op=rank: trial|raider|core|alt|social; wishlist: the position 1-10")
     start: Optional[str] = Field(default=None, description="YYYY-MM-DD: absence start (absence, absence_clear)")
     end: Optional[str] = None
@@ -538,7 +543,8 @@ CHANNEL_PATHS = ("signup_channel", "ops_channel", "applications_channel", "roste
 
 RAID_SWITCH_NEEDS_SPEC = "A switch for one raid needs the spec they play there."
 RUN_OPS = {"run_open", "run_answer", "run_lock", "run_cancel", "run_fill", "run_strategy", "run_autofill", "run_board", "run_move", "run_propose", "run_sheet", "confirm_for",
-           "run_remind", "run_pause", "run_withdraw", "run_reopen", "run_unlock", "run_start", "run_reschedule", "run_lineup"}
+           "run_remind", "run_pause", "run_withdraw", "run_reopen", "run_unlock", "run_start", "run_reschedule", "run_lineup",
+           "run_board_post", "run_board_remove"}
 # a run's start, timing and lineup (phase 3): Apply passes the run's rc.event_rev seen at preview (a changed run is refused)
 EVENT_OPS = {"run_reschedule", "run_lineup"}
 # the ops that write a run's board: Apply passes the board fingerprint seen at preview (a changed board is refused)
@@ -557,6 +563,7 @@ OP_GROUP = {
     "run_remind": "runs", "run_pause": "runs", "run_withdraw": "runs", "run_reopen": "runs",  # raid-night levers (phase 2 A, D15/D18/B6)
     "run_unlock": "runs",  # issue 14: a locked event back to open signup, its rosters on the board
     "run_start": "runs",  # issue 14: a locked event starts this minute
+    "run_board_post": "runs", "run_board_remove": "runs",  # issue 16: the event's board posted in Discord, kept current; taken down
     "run_reschedule": "runs", "run_lineup": "runs",  # move / re-time a run, change its raids (phase 3; officers live, C17)
     "pin": "runs",  # D16: a pin is a run decision (who the lock seats), not comp policy
     "comp_target": "comp", "comp_target_clear": "comp", "comp_groups": "comp", "policy_append": "comp",
@@ -1824,6 +1831,7 @@ ACTION_WORDS = {"run_open": "Open", "run_answer": "An answer on", "run_lock": "L
                 "run_strategy": "The split on", "run_autofill": "Auto-fill", "run_board": "The board of", "run_move": "A board move on",
                 "run_propose": "Proposed groups for", "run_sheet": "The sheet of", "confirm_for": "A confirmation on", "run_remind": "A reminder on",
                 "run_pause": "Automated Fill Requests on", "run_withdraw": "Withdrawing an ask on", "run_reopen": "Reopen", "run_unlock": "Unlock", "run_start": "Start now",
+                "run_board_post": "Post board for", "run_board_remove": "Remove board post for",
                 "run_reschedule": "Move", "run_lineup": "The raids of", "pin": "A pin on",
                 "character": "Characters", "absence_clear": "An absence", "dm": "DMs", "regular": "Regulars", "test": "Test bench",
                 "loot": "Loot council", "wishlist": "Wishlist", "tier": "Item tiers", "loot_weights": "Loot scoring",
@@ -1842,7 +1850,7 @@ def refused_line(reg: Registry, op: ConfigOp, e: Exception) -> str:
                 subject = reg.raid_def(op.target).get("name", "") if op.target in reg.profile.raids else ""
             elif op.op == "run_reopen":
                 subject = run_words(reg, _ended_event(reg, op.target)[1])
-            elif op.op in ("run_unlock", "run_start"):
+            elif op.op in ANY_EVENT_OPS:
                 subject = run_words(reg, _unlock_event(reg, op.target)[1])
             else:
                 subject = run_words(reg, _live_event(reg, op.target, cancel=op.op == "run_cancel")[1])
@@ -2040,7 +2048,7 @@ def op_run_key(reg: Registry, op: ConfigOp, raids=None) -> str | None:
     try:
         if op.op == "run_cancel":
             return _live_event(reg, op.target, raids, cancel=True)[1].key
-        return (_unlock_event if op.op in BOX_OPS else _live_event)(reg, op.target, raids)[1].key
+        return (_unlock_event if op.op in ANY_EVENT_OPS else _live_event)(reg, op.target, raids)[1].key
     except RegistryError:
         return None
 
@@ -2169,15 +2177,68 @@ def _ended_event(reg: Registry, target: str | None, raids=None):
 REOPEN_LOCKED = "{event} is locked, not ended, so unlock it to change its roster."
 UNLOCK_ENDED = "This event has ended, so reopen it within the hour after its end instead."
 BOX_REV = "box:"  # board_revs key prefix: the box (its fp) a reviewed run_unlock / run_start showed — Apply refuses a changed one
-BOX_OPS = {"run_unlock", "run_start"}
+BOX_OPS = {"run_unlock", "run_start", "run_board_post"}
+BOARD_POST_OPS = {"run_board_post", "run_board_remove"}  # issue 16: Post board / Remove board post (board_post.py's verbs)
+ANY_EVENT_OPS = BOX_OPS | BOARD_POST_OPS  # found by key whatever the event's state: an ended one answers with its own refusal
 
 
 def _box_of(reg: Registry, op: ConfigOp, rs, ev) -> dict:
-    """The site's box for a reviewed op of BOX_OPS (consequences.unlock_box / start_now_box): the review prints it, Apply
-    re-checks its fp (the site's `seen`)."""
+    """The site's box for a reviewed op of BOX_OPS (consequences.unlock_box / start_now_box / board_post_box): the
+    review prints it, Apply re-checks its fp (the site's `seen`)."""
     from . import consequences as cq
 
+    if op.op == "run_board_post":
+        from .board_post import board_where
+
+        first = _first_raid(ev, rs)
+        return cq.board_post_box(reg, rs, first, [], board_where(reg, first))
     return (cq.unlock_box if op.op == "run_unlock" else cq.start_now_box)(reg, ev, rs)
+
+
+def _first_raid(ev, rs):
+    """The first raid of `ev`'s event (raidcycle.first_part), imported where it is needed."""
+    from . import raidcycle as rc
+
+    return rc.first_part(rs, ev)
+
+
+def _board_pick(reg: Registry, op: ConfigOp) -> int | None:
+    """run_board_post's channel: a mention or an id; a name only when the running client lists the guild's channels."""
+    from . import perms
+
+    raw = (op.value or "").strip()
+    if not raw or raw.lower() == "none":
+        return None
+    if (cid := _channel_id(raw)) is not None:
+        return cid
+    try:
+        chans = perms.CLIENT.guild_channels(reg) if perms.CLIENT is not None and hasattr(perms.CLIENT, "guild_channels") else []
+    except Exception:  # noqa: BLE001 — no list: the name is refused below
+        chans = []
+    return _channel_ref(raw, chans)
+
+
+def _board_post_line(reg: Registry, op: ConfigOp, rs, ev) -> str:
+    """Post board / Remove board post as the review says it: the box's title (Post board, or Update board post while a
+    post is up), the event and the channel ("Post board for Barrow Deeps Wed 9 Dec 10 PM in #board."). A refusal is the
+    engine's one sentence (the box's, or board_post.remove_refusal)."""
+    from . import perms
+    from .board_post import BOARD_NOWHERE, BOARD_REMOVE, board_where, remove_refusal
+    from .discord_pool import channel_name
+
+    first = _first_raid(ev, rs)
+    name = run_words(reg, first)
+    if op.op == "run_board_remove":
+        if why := remove_refusal(rs, first):
+            raise RegistryError(why)
+        return f"{BOARD_REMOVE} for {name} from {channel_name(perms.CLIENT, first.board_channel_id)}."
+    b = _box_of(reg, op, rs, first)
+    if b["verb"] is None:
+        raise RegistryError(b["sentences"][0])
+    where = _board_pick(reg, op) or board_where(reg, first)
+    if not where:
+        raise RegistryError(BOARD_NOWHERE)
+    return f"{b['title']} for {name} in {channel_name(perms.CLIENT, where)}."
 
 
 def _box_refusal(reg: Registry, op: ConfigOp, rs, ev, b: dict) -> str:
@@ -2218,7 +2279,8 @@ def _lock_fill_value(op: ConfigOp) -> bool:
     return "fill" in v.replace(" ", "") or v.strip() in ("true", "yes", "on")
 
 
-RUN_VERBS_AUDITED = {"run_cancel", "run_remind", "run_pause", "run_withdraw", "run_reopen", "run_unlock", "run_start", "run_reschedule", "run_lineup"}  # the RaidMixin verb writes ops.audited itself
+RUN_VERBS_AUDITED = {"run_cancel", "run_remind", "run_pause", "run_withdraw", "run_reopen", "run_unlock", "run_start", "run_reschedule", "run_lineup",
+                     "run_board_post", "run_board_remove"}  # the RaidMixin verb writes ops.audited itself
 CANCEL_QUIET = {"quiet", "silent", "no line", "no notice", "no announcement", "none", "false", "off", "no"}
 
 
@@ -3082,6 +3144,9 @@ def _describe_action(reg: Registry, op: ConfigOp, channel=_UNSET, *, by_id: int 
             raise RegistryError(why)
         back = ev.prev_state or "locked"
         return f"reopen {label} — " + ("locked again, the roster as it was" if back == "locked" else "the sheet is open again") + "; the loot council stays archived"
+    if op.op in BOARD_POST_OPS:  # issue 16: the box's title and the channel (no sentences: the owner's exception), its refusal first
+        rs, ev = _unlock_event(reg, op.target)
+        return _board_post_line(reg, op, rs, ev)
     if op.op in BOX_OPS:  # the Unlock / Start now box's own sentences (consequences.unlock_box / start_now_box), its refusal first
         rs, ev = _unlock_event(reg, op.target)
         b = _box_of(reg, op, rs, ev)
@@ -3935,6 +4000,16 @@ async def _apply_with_bot(reg: Registry, op: ConfigOp, by: str, bot, by_id: int 
     if op.op == "run_reopen":  # RaidMixin.reopen_run: the closed card's Reopen, the site and MCP share it
         rs, ev = _ended_event(reg, op.target, rs)
         return await bot.reopen_run(reg, rs, ev, by=by, by_id=by_id, via=via)
+    if op.op in BOARD_POST_OPS:  # BoardPostMixin's verbs — the site's Post board and More › Remove board post, /raid board, MCP
+        rs, ev = _unlock_event(reg, op.target, rs)
+        first = rc.first_part(rs, ev)
+        if op.op == "run_board_remove":
+            return await bot.remove_board_post(reg, rs, first, by=by, by_id=by_id, via=via)
+        try:  # with the box the review showed (`rev`, its fp): another press first refuses, nothing posted
+            return await bot.post_board(reg, rs, first, channel=_board_pick(reg, op), by=by, by_id=by_id, via=via, seen=rev,
+                                        fp=(lambda f: _box_of(reg, op, rs, f)["fp"]) if rev else None)
+        except rc.BoardChanged:
+            raise RegistryError(rc.RUN_CHANGED) from None
     if op.op in BOX_OPS:  # RaidMixin.unlock_run / start_now (the lock card, /raid unlock | start, the site's route, MCP),
         rs, ev = _unlock_event(reg, op.target, rs)  # with the box the review showed: a changed one is refused (RUN_CHANGED)
         b = _box_of(reg, op, rs, ev)
@@ -4880,6 +4955,7 @@ WARN_OPS: dict[str, Callable[[Registry, ConfigOp], bool]] = {
     "run_answer": lambda reg, op: bool((op.field or "").strip()),  # a role switch (whole event or one raid, issue 15): reviewed
     "run_unlock": _always,  # issue 14: the roster goes back on the board and Auto Lock goes off
     "run_start": _always,  # issue 14: the start becomes this minute, never moved back
+    "run_board_post": _always, "run_board_remove": _always,  # issue 16: a message in a channel members read, kept current
     "run_reschedule": _always, "run_lineup": _always,  # everyone who answered sees a notice; a removed raid takes its board
     "test": lambda reg, op: (op.value or "").strip().lower().startswith("clear"),
     "loot_weights": _always,  # every future award's score (phase 4, §5.48): reviewed with the profile default beside each number

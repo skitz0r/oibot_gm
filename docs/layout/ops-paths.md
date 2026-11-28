@@ -52,6 +52,12 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        UNLOCK_ENDED = each refusal names the other verb (_box_refusal).
                        run_start (Task 6; the same registrations, found by _unlock_event): review "start <event> now. " + consequences.start_now_box's
                        sentences; apply = RaidMixin.start_now. SCHEMA_TEXT keeps it apart from run_open ("start a sheet") and loot field=open.
+                       Issue 16: run_board_post (target, value = an optional #channel: _board_pick — a mention / id, a name only from the running
+                       client's channel list) and run_board_remove (target) = BOARD_POST_OPS (RUN_OPS, group `runs`, RUN_VERBS_AUDITED, WARN_OPS
+                       always; found by _unlock_event through ANY_EVENT_OPS = BOX_OPS | BOARD_POST_OPS). run_board_post is in BOX_OPS: _box_of =
+                       consequences.board_post_box, so Apply's `seen` is that box's fp (post_board re-checks it under the post lock; rc.BoardChanged
+                       → rc.RUN_CHANGED). The review line (_board_post_line) = the box's title, the event and the channel ("Post board for <event>
+                       in #board."; Remove: "Remove board post for <event> from #board."), a refusal = the engine's one sentence.
                        Phase 4 (§5.67): op_box(reg, ops, diff, rs=) → Described.box (and each line's) for one schedule's or one raid's write (boxes
                        13–17 and 19); Described.asks_first (a box with a verb: the site's Save always previews) beside review, and Described.quiet (a
                        routine box's sentences never make the TIERED Save reviewed alone); Described.fingerprint covers the box's title, sentences and
@@ -64,7 +70,8 @@ Part of the agent guide (`CLAUDE.md` › Layout). Keep an entry true in the same
                        _character_rows refuses the four old fields (PROFESSION_FIELDS) with PROFESSIONS_NOT_HERE; the editors are /me professions and the
                        Me page, a linked character follows the armory. The listening gate (discord_bot.LISTEN_QUESTION / LISTEN_CRITERIA) treats "I have /
                        learned / can make X" as chat between people; scripts/listen_probe.py's NEWS set guards it (under 50 %)
-  mcp_server.py        `oibot-mcp` (stdio MCP server, FastMCP): tools named by intent (guild_overview, get_run, set_answer, lock_run, unlock_run, start_now, plain_change …)
+  mcp_server.py        `oibot-mcp` (stdio MCP server, FastMCP): tools named by intent (guild_overview, get_run, set_answer, lock_run, unlock_run, start_now, post_board, remove_board_post, plain_change …; post_board = POST /api/event/{key}/board preview for the box's fp and its
+                       channel names, then the press with `seen` — the site's own two steps)
                        that call the RUNNING bot's /api/* over HTTP as the OWNER OF THE CHOSEN GUILD (every tool's optional `guild` = key or name,
                        default OIBOT_MCP_GUILD / --guild, else the only guild; names → keys client side via GET /api/guilds; header X-Oibot-Guild;
                        list_guilds; the bot never reads OIBOT_MCP_GUILD) (`Authorization: Bearer $OIBOT_MCP_TOKEN` → web/app.py `mcp_authorized` + `mcp_guild` → `mcp_viewer`,

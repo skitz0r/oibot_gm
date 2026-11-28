@@ -381,7 +381,7 @@ class Wizard(discord.ui.View):
                          refresh: Callable[[], dict | Awaitable[dict]] | None = None, note: Sequence[Field] = (),
                          extra: Sequence[discord.ui.Item] = (), back: Callable[[discord.Interaction], Awaitable[None]] | None = None,
                          hint: str | None = None, changed: bool = False, embed: discord.Embed | None = None,
-                         refused: Sequence[discord.ui.Item] = ()) -> None:
+                         refused: Sequence[discord.ui.Item] = (), above: Sequence[discord.ui.Item] = ()) -> None:
         """The server's box (consequences.box) on one screen — the same box the site prints (§7b). The text is
         `box_text(box)` in place of the wizard's own title. Buttons: the box's verb (red iff `danger`), `<verb> with a
         note` when `note` (a Form of those Fields whose Submit is the write), `extra` (reads only), then Back (`back`, or
@@ -392,13 +392,15 @@ class Wizard(discord.ui.View):
         `do(interaction, values)` (`{}` for a plain press). `refresh` must not solve; a sync one runs inside Discord's 3
         seconds, an awaitable one (a thread) after `working` has answered the press. A verb ending in "…" is taken once without it.
         `embed`: shown under the box on this screen only (the lock's preview roster); a box shown again goes without it.
-        `refused`: buttons a refusal box keeps before Back (the lock's empty board keeps Lock and auto-fill)."""
+        `refused`: buttons a refusal box keeps before Back (the lock's empty board keeps Lock and auto-fill). `above`: the
+        box's own field, drawn above its buttons and only when it has a verb (Post board's channel select: a pick shows
+        the screen again, nothing written)."""
         verb = box.get("verb")
         if verb is not None and verb != button_label(verb):
             box = {**box, "verb": button_label(verb)}
             verb = box["verb"]
         note = list(note)
-        again = dict(do=do, refresh=refresh, note=note, extra=extra, back=back, hint=hint, refused=refused)
+        again = dict(do=do, refresh=refresh, note=note, extra=extra, back=back, hint=hint, refused=refused, above=above)
 
         async def go(i: discord.Interaction, values: dict[str, str]) -> None:
             worked = False
@@ -438,7 +440,7 @@ class Wizard(discord.ui.View):
         async def nothing(i: discord.Interaction) -> None:
             await self.finish(i, "Nothing was changed.")
 
-        items: list[discord.ui.Item] = []
+        items: list[discord.ui.Item] = list(above) if verb is not None else []
         if verb is not None:
             style = discord.ButtonStyle.danger if box.get("danger") else discord.ButtonStyle.success
             items.append(self.button(verb, plain, style))

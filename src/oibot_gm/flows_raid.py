@@ -688,6 +688,26 @@ async def open_raid_start(interaction: discord.Interaction, reg: Registry, **_se
                    prefer=lambda e: not rc.is_follow(e))
 
 
+@flow("raid_board")
+async def open_raid_board(interaction: discord.Interaction, reg: Registry, **_seed) -> None:
+    """/raid board (issue 16) — the event picker when several are live (an event once: its first raid), then THE Post
+    board screen (raid_buttons.board_post_decide: the site's box, a channel select, Post · Back, Remove board post while
+    a post is up). Nothing is asked that a parser must read: the channel is Discord's own picker."""
+    if not await officer_only(interaction, reg):
+        return
+
+    async def body(i: discord.Interaction, wiz: Wizard, rs, ev) -> None:
+        if not ev:
+            await wiz.finish(i, "No event is live, so there is no board to post.")
+            return
+        from .board_post import BOARD_POST
+        from .raid_buttons import board_post_decide
+
+        wiz.title = BOARD_POST
+        await board_post_decide(i, i.client, reg, rs, rc.first_part(rs, ev), wiz=wiz)
+    await with_run(interaction, reg, title="Post an event's board", then=body, officer=True, prefer=lambda e: not rc.is_follow(e))
+
+
 @flow("raid_loot")
 async def open_raid_loot(interaction: discord.Interaction, reg: Registry, *, key: str | None = None, **_seed) -> None:
     """/raid loot (the run picker when several are locked) or the lock card's Loot button (`key`: that card's run,

@@ -1609,9 +1609,12 @@ async def open_owner_transfer(interaction: discord.Interaction, reg: Registry, *
 
 # ---------------------------------------------------------------- channels and officer roles (design §3.4 X3, §3.5 O-12 / O-13; §5.46)
 
-def _text_channel_select(placeholder: str, on_pick) -> discord.ui.ChannelSelect:
-    """Discord's own channel picker, text channels only: searchable, no 25-option ceiling, nothing to spell."""
-    s = discord.ui.ChannelSelect(placeholder=placeholder[:150], channel_types=[discord.ChannelType.text], min_values=1, max_values=1)
+def _text_channel_select(placeholder: str, on_pick, *, current: int | None = None) -> discord.ui.ChannelSelect:
+    """Discord's own channel picker, text channels only: searchable, no 25-option ceiling, nothing to spell. `current`:
+    the channel it opens on (preselected)."""
+    defaults = [discord.SelectDefaultValue(id=int(current), type=discord.SelectDefaultValueType.channel)] if current else []
+    s = discord.ui.ChannelSelect(placeholder=placeholder[:150], channel_types=[discord.ChannelType.text], min_values=1, max_values=1,
+                                 default_values=defaults)
 
     async def cb(interaction: discord.Interaction) -> None:
         await on_pick(interaction, list(s.values))
